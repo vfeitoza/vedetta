@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Event - Watchpost</title>
+  <title>System - Watchpost</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
   <meta name="theme-color" content="#0a0e14">
@@ -17,45 +17,57 @@
     </a>
     <div class="topnav-links">
       <a href="/" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
-      <a href="/events.html" class="topnav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/events.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
       <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
-      <a href="/system.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
+      <a href="/system.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
     </div>
     <div class="topnav-spacer"></div>
   </nav>
 
   <main class="page">
-    <div class="breadcrumb">
-      <a href="/events.html">Events</a><span class="sep">/</span><span id="event-breadcrumb">Detail</span>
+    <div class="page-header">
+      <h1>System</h1>
     </div>
 
-    <div id="event-detail"
+    <div class="system-grid"
+         id="system-grid"
+         hx-get="/partials/system"
+         hx-trigger="load, every 10s"
          hx-swap="innerHTML">
-      <div class="loading-state">Loading event...</div>
+
+      <!-- Placeholder cards while loading -->
+      <div class="sys-card">
+        <div class="sys-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          System Info
+        </div>
+        <div class="sys-card-body">
+          <div class="loading-state">Loading...</div>
+        </div>
+      </div>
+
+      <div class="sys-card">
+        <div class="sys-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Storage
+        </div>
+        <div class="sys-card-body">
+          <div class="loading-state">Loading...</div>
+        </div>
+      </div>
     </div>
   </main>
 
   <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
     <div class="bottom-tabs-inner">
       <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
-      <a href="/events.html" class="bottom-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
       <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
-      <a href="/system.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
+      <a href="/system.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
     </div>
   </nav>
 
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
-  <script>
-    (function() {
-      const id = new URLSearchParams(location.search).get('id');
-      if (!id) { location.href = '/events.html'; return; }
-
-      const el = document.getElementById('event-detail');
-      el.setAttribute('hx-get', '/partials/event/' + encodeURIComponent(id));
-      el.setAttribute('hx-trigger', 'load');
-      htmx.process(el);
-    })();
-  </script>
 </body>
 </html>

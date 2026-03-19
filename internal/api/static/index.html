@@ -2,37 +2,106 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Watchpost</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <meta name="theme-color" content="#0a0e14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
-  <nav class="top-nav">
-    <a href="/" class="nav-brand">Watchpost</a>
-    <div class="nav-links">
-      <a href="/" class="nav-link active">Cameras</a>
-      <a href="/events.html" class="nav-link">Events</a>
+
+  <!-- Top Navigation -->
+  <nav class="topnav" role="navigation" aria-label="Main">
+    <a href="/" class="topnav-brand" aria-label="Watchpost home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+      <span>watchpost</span>
+    </a>
+
+    <div class="topnav-links">
+      <a href="/" class="topnav-link active" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Cameras
+      </a>
+      <a href="/events.html" class="topnav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+        Events
+      </a>
+      <a href="/recordings.html" class="topnav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        Recordings
+      </a>
+      <a href="/system.html" class="topnav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        System
+      </a>
     </div>
-    <div class="nav-status">
-      <span class="status-dot online"></span>
-      <span>System Online</span>
+
+    <div class="topnav-spacer"></div>
+
+    <div class="topnav-status" id="topnav-status"
+         hx-get="/partials/system-status"
+         hx-trigger="load, every 10s"
+         hx-swap="innerHTML">
     </div>
   </nav>
 
-  <main class="container">
-    <header class="page-header">
+  <!-- Main Content -->
+  <main class="page">
+    <!-- Stats Row -->
+    <div class="stats-row"
+         hx-get="/partials/dashboard-stats"
+         hx-trigger="load, every 5s"
+         hx-swap="innerHTML">
+      <div class="stat-card"><div class="stat-label">Cameras</div><div class="stat-value skeleton" style="width:2ch;height:1.25rem">&nbsp;</div></div>
+      <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value skeleton" style="width:2ch;height:1.25rem">&nbsp;</div></div>
+      <div class="stat-card"><div class="stat-label">Events Today</div><div class="stat-value skeleton" style="width:2ch;height:1.25rem">&nbsp;</div></div>
+      <div class="stat-card"><div class="stat-label">Storage</div><div class="stat-value skeleton" style="width:4ch;height:1.25rem">&nbsp;</div></div>
+    </div>
+
+    <!-- Camera Grid -->
+    <div class="page-header">
       <h1>Cameras</h1>
-    </header>
+    </div>
 
     <div class="camera-grid"
+         id="camera-grid"
          hx-get="/partials/camera-grid"
          hx-trigger="load, every 2s"
-         hx-swap="innerHTML">
-      <div class="loading">Loading cameras...</div>
+         hx-swap="innerHTML"
+         role="list"
+         aria-label="Camera feeds">
+      <div class="loading-state">Loading cameras...</div>
     </div>
   </main>
 
+  <!-- Mobile Bottom Tabs -->
+  <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
+    <div class="bottom-tabs-inner">
+      <a href="/" class="bottom-tab active" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Cameras
+      </a>
+      <a href="/events.html" class="bottom-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+        Events
+      </a>
+      <a href="/recordings.html" class="bottom-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        Recordings
+      </a>
+      <a href="/system.html" class="bottom-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        System
+      </a>
+    </div>
+  </nav>
+
+  <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
 </body>
 </html>

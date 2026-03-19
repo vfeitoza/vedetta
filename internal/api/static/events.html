@@ -2,75 +2,96 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Events - Watchpost</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <meta name="theme-color" content="#0a0e14">
 </head>
 <body>
-  <nav class="top-nav">
-    <a href="/" class="nav-brand">Watchpost</a>
-    <div class="nav-links">
-      <a href="/" class="nav-link">Cameras</a>
-      <a href="/events.html" class="nav-link active">Events</a>
+
+  <nav class="topnav" role="navigation" aria-label="Main">
+    <a href="/" class="topnav-brand" aria-label="Watchpost home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>watchpost</span>
+    </a>
+    <div class="topnav-links">
+      <a href="/" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/system.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
     </div>
-    <div class="nav-status">
-      <span class="status-dot online"></span>
-      <span>System Online</span>
-    </div>
+    <div class="topnav-spacer"></div>
   </nav>
 
-  <main class="container">
-    <header class="page-header">
+  <main class="page">
+    <div class="page-header">
       <h1>Events</h1>
-    </header>
-
-    <div class="filter-bar">
-      <label for="filter-camera">Camera</label>
-      <select id="filter-camera" name="camera"
-              hx-get="/partials/events"
-              hx-trigger="change"
-              hx-target="#event-list"
-              hx-include="#filter-camera, #filter-label">
-        <option value="">All Cameras</option>
-      </select>
-
-      <label for="filter-label">Label</label>
-      <select id="filter-label" name="label"
-              hx-get="/partials/events"
-              hx-trigger="change"
-              hx-target="#event-list"
-              hx-include="#filter-camera, #filter-label">
-        <option value="">All Labels</option>
-        <option value="person">Person</option>
-        <option value="car">Car</option>
-        <option value="dog">Dog</option>
-        <option value="cat">Cat</option>
-      </select>
     </div>
 
-    <div id="event-list" class="event-list"
-         hx-get="/partials/events"
+    <!-- Label Filter Chips -->
+    <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event filters">
+      <button class="chip active" data-filter="label" data-value="" onclick="toggleChip(this, 'label')">All</button>
+      <button class="chip" data-filter="label" data-value="person" onclick="toggleChip(this, 'label')">
+        <span class="chip-dot person"></span>Person
+      </button>
+      <button class="chip" data-filter="label" data-value="car" onclick="toggleChip(this, 'label')">
+        <span class="chip-dot car"></span>Car
+      </button>
+      <button class="chip" data-filter="label" data-value="dog" onclick="toggleChip(this, 'label')">
+        <span class="chip-dot dog"></span>Dog
+      </button>
+      <button class="chip" data-filter="label" data-value="cat" onclick="toggleChip(this, 'label')">
+        <span class="chip-dot cat"></span>Cat
+      </button>
+    </div>
+
+    <!-- Camera Filter Chips -->
+    <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Camera filters">
+      <button class="chip active" data-filter="camera" data-value="" onclick="toggleChip(this, 'camera')">All Cameras</button>
+    </div>
+
+    <!-- Event Gallery -->
+    <div class="event-gallery"
+         id="events-gallery"
+         hx-get="/partials/events-gallery"
          hx-trigger="load"
-         hx-swap="innerHTML">
-      <div class="loading">Loading events...</div>
+         hx-swap="innerHTML"
+         role="list"
+         aria-label="Detection events">
+      <div class="loading-state">Loading events...</div>
+    </div>
+
+    <!-- Load More -->
+    <div id="load-more" style="text-align:center; padding: 1.5rem 0;">
     </div>
   </main>
 
+  <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
+    <div class="bottom-tabs-inner">
+      <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/system.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
+    </div>
+  </nav>
+
+  <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
-    // Populate camera filter from API
-    fetch('/api/cameras')
-      .then(r => r.json())
-      .then(data => {
-        const select = document.getElementById('filter-camera');
-        (data.cameras || []).forEach(name => {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          select.appendChild(opt);
-        });
+    // Populate camera chips from API
+    fetch('/api/cameras').then(r => r.json()).then(data => {
+      const bar = document.getElementById('camera-chips');
+      (data.cameras || []).forEach(name => {
+        const btn = document.createElement('button');
+        btn.className = 'chip';
+        btn.dataset.filter = 'camera';
+        btn.dataset.value = name;
+        btn.textContent = name.replace(/_/g, ' ');
+        btn.onclick = function() { toggleChip(this, 'camera'); };
+        bar.appendChild(btn);
       });
+    });
   </script>
 </body>
 </html>

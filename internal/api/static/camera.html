@@ -2,81 +2,142 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Camera - Watchpost</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <meta name="theme-color" content="#0a0e14">
 </head>
 <body>
-  <nav class="top-nav">
-    <a href="/" class="nav-brand">Watchpost</a>
-    <div class="nav-links">
-      <a href="/" class="nav-link active">Cameras</a>
-      <a href="/events.html" class="nav-link">Events</a>
+
+  <nav class="topnav" role="navigation" aria-label="Main">
+    <a href="/" class="topnav-brand" aria-label="Watchpost home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>watchpost</span>
+    </a>
+    <div class="topnav-links">
+      <a href="/" class="topnav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/system.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
     </div>
-    <div class="nav-status">
-      <span class="status-dot online"></span>
-      <span>System Online</span>
-    </div>
+    <div class="topnav-spacer"></div>
   </nav>
 
-  <main class="container">
-    <header class="page-header">
-      <a href="/" class="back-link">Back to Cameras</a>
+  <main class="page">
+    <div class="breadcrumb">
+      <a href="/">Cameras</a><span class="sep">/</span><span id="cam-breadcrumb">...</span>
+    </div>
+    <div class="page-header">
       <h1 id="camera-title">Camera</h1>
-    </header>
+    </div>
 
-    <div class="camera-detail">
-      <div class="live-view-container">
-        <div class="live-view-controls">
-          <button id="btn-webrtc" class="btn btn-primary" onclick="startWebRTC()">WebRTC Live</button>
-          <button id="btn-mjpeg" class="btn btn-secondary" onclick="startMJPEG()">MJPEG Fallback</button>
-          <button id="btn-stop" class="btn btn-secondary" onclick="stopStream()" style="display:none">Stop</button>
+    <div class="camera-layout">
+      <!-- Live View -->
+      <div class="live-container">
+        <div class="live-toolbar">
+          <button id="btn-webrtc" class="btn btn-sm btn-primary" onclick="startWebRTC()" aria-label="Start WebRTC stream">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            WebRTC
+          </button>
+          <button id="btn-mjpeg" class="btn btn-sm" onclick="startMJPEG()" aria-label="Start MJPEG stream">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            MJPEG
+          </button>
+          <button id="btn-stop" class="btn btn-sm hidden" onclick="stopStream()" aria-label="Stop stream">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            Stop
+          </button>
+          <div class="spacer"></div>
+          <button id="btn-pip" class="btn btn-icon btn-sm" onclick="togglePiP()" aria-label="Picture in picture" title="Picture-in-Picture (P)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="12" y="9" width="8" height="6" rx="1"/></svg>
+          </button>
+          <button id="btn-fullscreen" class="btn btn-icon btn-sm" onclick="toggleFullscreen()" aria-label="Fullscreen" title="Fullscreen (F)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
         </div>
 
-        <div class="live-view">
-          <video id="live-video" autoplay playsinline muted style="display:none"></video>
-          <img id="live-mjpeg" style="display:none" alt="MJPEG stream">
-          <img id="live-snapshot" alt="Latest snapshot" class="snapshot-img">
+        <div class="live-viewport" id="live-viewport">
+          <video id="live-video" autoplay playsinline muted class="hidden"></video>
+          <img id="live-mjpeg" class="hidden" alt="MJPEG stream">
+          <img id="live-snapshot" alt="Latest snapshot">
         </div>
       </div>
 
-      <section class="camera-events">
-        <h2>Recent Events</h2>
-        <div id="camera-events-list"
-             class="event-list"
+      <!-- Timeline -->
+      <div class="timeline-container" id="timeline-container">
+        <div class="timeline-header">
+          <div class="timeline-date" id="timeline-date"></div>
+          <div class="timeline-nav">
+            <button class="btn btn-icon btn-sm" onclick="timelineNav(-1)" aria-label="Previous day">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="btn btn-sm" onclick="timelineToday()">Today</button>
+            <button class="btn btn-icon btn-sm" onclick="timelineNav(1)" aria-label="Next day">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="timeline-track" id="timeline-track" role="slider" aria-label="Recording timeline" tabindex="0">
+          <div class="timeline-playhead" id="timeline-playhead" style="left: 50%"></div>
+        </div>
+        <div class="timeline-labels">
+          <span>00:00</span><span>03:00</span><span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
+        </div>
+      </div>
+
+      <!-- Recent Events -->
+      <section>
+        <div class="page-header">
+          <h1 style="font-size: var(--text-md)">Recent Events</h1>
+        </div>
+        <div class="event-gallery"
+             id="camera-events"
              hx-swap="innerHTML">
-          <div class="loading">Loading events...</div>
+          <div class="loading-state">Loading events...</div>
         </div>
       </section>
     </div>
   </main>
 
+  <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
+    <div class="bottom-tabs-inner">
+      <a href="/" class="bottom-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/system.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
+    </div>
+  </nav>
+
+  <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const cameraName = params.get('name');
+    (function() {
+      const name = new URLSearchParams(location.search).get('name');
+      if (!name) { location.href = '/'; return; }
 
-    if (cameraName) {
-      document.getElementById('camera-title').textContent = cameraName;
-      document.title = cameraName + ' - Watchpost';
+      document.getElementById('camera-title').textContent = name.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      document.getElementById('cam-breadcrumb').textContent = name;
+      document.title = name + ' - Watchpost';
 
-      // Load snapshot
+      // Snapshot refresh
       const snap = document.getElementById('live-snapshot');
-      snap.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/snapshot';
-      // Refresh snapshot every 2s when not streaming
+      snap.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot';
       setInterval(function() {
-        if (snap.style.display !== 'none') {
-          snap.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/snapshot?t=' + Date.now();
+        if (!snap.classList.contains('hidden')) {
+          snap.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
         }
       }, 2000);
 
-      // Load recent events
-      const eventsList = document.getElementById('camera-events-list');
-      eventsList.setAttribute('hx-get', '/partials/events?camera=' + encodeURIComponent(cameraName) + '&limit=20');
-      eventsList.setAttribute('hx-trigger', 'load');
-      htmx.process(eventsList);
-    }
+      // Load events
+      const eventsEl = document.getElementById('camera-events');
+      eventsEl.setAttribute('hx-get', '/partials/events-gallery?camera=' + encodeURIComponent(name) + '&limit=12');
+      eventsEl.setAttribute('hx-trigger', 'load');
+      htmx.process(eventsEl);
+
+      // Timeline date
+      initTimeline();
+    })();
   </script>
 </body>
 </html>
