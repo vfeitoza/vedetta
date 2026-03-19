@@ -22,7 +22,7 @@ type Recorder struct {
 	cameraURLs map[string]string // camera name → record RTSP URL
 }
 
-func New(cfg config.RecordingConfig, db *storage.DB, hwaccel *camera.HWAccel) *Recorder {
+func New(cfg config.RecordingConfig, db *storage.DB) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -30,7 +30,7 @@ func New(cfg config.RecordingConfig, db *storage.DB, hwaccel *camera.HWAccel) *R
 	return &Recorder{
 		config:     cfg,
 		db:         db,
-		segments:   NewSegmentRecorder(cfg, hwaccel, db),
+		segments:   NewSegmentRecorder(cfg, db),
 		cameraURLs: make(map[string]string),
 	}
 }
@@ -86,8 +86,9 @@ func (r *Recorder) recordFromStream(ctx context.Context, rtspURL, outputPath str
 		"-rtsp_transport", "tcp",
 		"-i", rtspURL,
 		"-t", fmt.Sprintf("%.0f", duration.Seconds()),
-		"-c", "copy",
-		"-movflags", "+faststart",
+		"-c:v", "copy",
+		"-c:a", "aac",
+		"-movflags", "frag_keyframe+empty_moov",
 		"-y",
 		outputPath,
 	)

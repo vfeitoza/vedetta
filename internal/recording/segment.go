@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rvben/watchpost/internal/camera"
 	"github.com/rvben/watchpost/internal/config"
 	"github.com/rvben/watchpost/internal/storage"
 )
@@ -28,15 +27,17 @@ type Segment struct {
 type SegmentRecorder struct {
 	config  config.RecordingConfig
 	baseDir string
-	hwaccel *camera.HWAccel
 	db      *storage.DB
 }
 
-func NewSegmentRecorder(cfg config.RecordingConfig, hwaccel *camera.HWAccel, db *storage.DB) *SegmentRecorder {
+func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB) *SegmentRecorder {
+	baseDir := cfg.Path
+	if abs, err := filepath.Abs(baseDir); err == nil {
+		baseDir = abs
+	}
 	return &SegmentRecorder{
 		config:  cfg,
-		baseDir: cfg.Path,
-		hwaccel: hwaccel,
+		baseDir: baseDir,
 		db:      db,
 	}
 }
@@ -58,6 +59,11 @@ func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, 
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Ensure segment directory exists before each recording attempt
+		if err := os.MkdirAll(segDir, 0o755); err != nil {
+			slog.Error("failed to ensure segment directory", "dir", segDir, "error", err)
 		}
 
 		startTime := time.Now()
@@ -116,12 +122,14 @@ func (sr *SegmentRecorder) recordSegment(ctx context.Context, rtspURL, outputPat
 		"-rtsp_transport", "tcp",
 		"-use_wallclock_as_timestamps", "1",
 	}
-	args = append(args, sr.hwaccel.FFmpegArgs()...)
+	// Note: hwaccel args are intentionally omitted here.
+	// Segment recording uses -c copy (remuxing), so no decoding occurs.
 	args = append(args,
 		"-i", rtspURL,
 		"-t", fmt.Sprintf("%.0f", duration.Seconds()),
-		"-c", "copy",
-		"-movflags", "+faststart",
+		"-c:v", "copy",
+		"-c:a", "aac",
+		"-movflags", "frag_keyframe+empty_moov",
 		"-y",
 		outputPath,
 	)

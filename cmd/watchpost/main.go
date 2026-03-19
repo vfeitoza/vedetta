@@ -69,7 +69,7 @@ func main() {
 		slog.Info("no hardware acceleration available, using CPU decoding")
 	}
 
-	recorder := recording.New(cfg.Recording, db, hwaccel)
+	recorder := recording.New(cfg.Recording, db)
 
 	// Register cameras for recording
 	for _, cam := range cfg.Cameras {
