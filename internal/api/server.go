@@ -10,11 +10,14 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rvben/watchpost/internal/camera"
 	"github.com/rvben/watchpost/internal/config"
+	"github.com/rvben/watchpost/internal/recording"
 	"github.com/rvben/watchpost/internal/storage"
 	"github.com/rvben/watchpost/internal/stream"
 
@@ -24,22 +27,26 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+var startTime = time.Now()
+
 type Server struct {
 	config   config.APIConfig
 	db       *storage.DB
 	cameras  *camera.Manager
+	recorder *recording.Recorder
 	streams  *stream.StreamManager
 	mux      *http.ServeMux
 	funcMap  template.FuncMap
 }
 
-func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager) *Server {
+func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder *recording.Recorder) *Server {
 	s := &Server{
-		config:  cfg,
-		db:      db,
-		cameras: cameras,
-		streams: stream.NewStreamManager(),
-		mux:     http.NewServeMux(),
+		config:   cfg,
+		db:       db,
+		cameras:  cameras,
+		recorder: recorder,
+		streams:  stream.NewStreamManager(),
+		mux:      http.NewServeMux(),
 	}
 
 	s.funcMap = template.FuncMap{
@@ -62,6 +69,8 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager) *Server 
 		"formatTime": func(t time.Time) string {
 			return t.Format("2006-01-02 15:04:05")
 		},
+		"formatBytes": formatBytes,
+		"displayName": displayName,
 	}
 
 	// API endpoints
@@ -69,7 +78,10 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager) *Server 
 	s.mux.HandleFunc("GET /api/cameras/{name}/snapshot", s.handleSnapshot)
 	s.mux.HandleFunc("GET /api/events", s.handleListEvents)
 	s.mux.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
+	s.mux.HandleFunc("GET /api/events/{id}/snapshot", s.handleEventSnapshot)
+	s.mux.HandleFunc("GET /api/events/{id}/clip", s.handleEventClip)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/system", s.handleSystemAPI)
 
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
@@ -77,8 +89,12 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager) *Server 
 
 	// HTML partial endpoints for htmx
 	s.mux.HandleFunc("GET /partials/camera-grid", s.handleCameraGridPartial)
-	s.mux.HandleFunc("GET /partials/events", s.handleEventsPartial)
+	s.mux.HandleFunc("GET /partials/dashboard-stats", s.handleDashboardStatsPartial)
+	s.mux.HandleFunc("GET /partials/events-gallery", s.handleEventsGalleryPartial)
 	s.mux.HandleFunc("GET /partials/event/{id}", s.handleEventDetailPartial)
+	s.mux.HandleFunc("GET /partials/system-status", s.handleSystemStatusPartial)
+	s.mux.HandleFunc("GET /partials/system", s.handleSystemPartial)
+	s.mux.HandleFunc("GET /partials/recordings", s.handleRecordingsPartial)
 
 	// Serve static files at root
 	staticSub, err := fs.Sub(staticFiles, "static")
@@ -96,6 +112,59 @@ func (s *Server) Start() error {
 	slog.Info("API server listening", "addr", addr)
 	return http.ListenAndServe(addr, s.mux)
 }
+
+// --- Helper functions ---
+
+func formatBytes(bytes int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+		TB = GB * 1024
+	)
+	switch {
+	case bytes >= TB:
+		return fmt.Sprintf("%.1f TB", float64(bytes)/float64(TB))
+	case bytes >= GB:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(GB))
+	case bytes >= MB:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(MB))
+	case bytes >= KB:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+func displayName(name string) string {
+	parts := strings.Split(name, "_")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// cameraStatuses returns the status of all cameras.
+func (s *Server) cameraStatuses() []camera.CameraStatus {
+	names := s.cameras.ListCameras()
+	statuses := make([]camera.CameraStatus, 0, len(names))
+	for _, name := range names {
+		cam := s.cameras.GetCamera(name)
+		if cam == nil {
+			continue
+		}
+		online := cam.LastSnapshot() != nil
+		statuses = append(statuses, camera.CameraStatus{
+			Name:   name,
+			Online: online,
+		})
+	}
+	return statuses
+}
+
+// --- JSON API handlers ---
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -147,21 +216,74 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	events, err := s.db.QueryEvents("", "", 0)
+	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if event == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
+}
 
-	for _, e := range events {
-		if e.ID == id {
-			writeJSON(w, http.StatusOK, e)
-			return
+func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	event, err := s.db.GetEventByID(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if event == nil || event.SnapshotPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
+		return
+	}
+	http.ServeFile(w, r, event.SnapshotPath)
+}
+
+func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	event, err := s.db.GetEventByID(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if event == nil || event.ClipPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "clip not found"})
+		return
+	}
+	http.ServeFile(w, r, event.ClipPath)
+}
+
+func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
+	statuses := s.cameraStatuses()
+	onlineCount := 0
+	for _, st := range statuses {
+		if st.Online {
+			onlineCount++
 		}
 	}
 
-	writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+	hwaccelName := "none"
+	if hw := s.cameras.HWAccelBackend(); hw != nil {
+		hwaccelName = hw.Name
+	}
+
+	totalBytes, _ := s.db.TotalStorageBytes()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":      "0.1.0",
+		"uptime":       time.Since(startTime).String(),
+		"hwaccel":      hwaccelName,
+		"cameras":      len(statuses),
+		"online":       onlineCount,
+		"storage_bytes": totalBytes,
+		"storage":      formatBytes(totalBytes),
+	})
 }
+
+// --- Streaming handlers ---
 
 func (s *Server) handleWebRTCOffer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -204,40 +326,86 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 	handler.ServeHTTP(w, r)
 }
 
-// HTML partial handlers for htmx
+// --- HTML partial handlers for htmx ---
 
 func (s *Server) handleCameraGridPartial(w http.ResponseWriter, _ *http.Request) {
-	names := s.cameras.ListCameras()
+	statuses := s.cameraStatuses()
 
-	type cameraInfo struct {
-		Name   string
-		Online bool
+	type cameraCard struct {
+		Name        string
+		DisplayName string
+		Online      bool
+		HasMotion   bool
 	}
 
-	cameras := make([]cameraInfo, 0, len(names))
-	for _, name := range names {
-		cam := s.cameras.GetCamera(name)
-		online := cam != nil && cam.LastSnapshot() != nil
-		cameras = append(cameras, cameraInfo{Name: name, Online: online})
+	cards := make([]cameraCard, 0, len(statuses))
+	for _, st := range statuses {
+		cards = append(cards, cameraCard{
+			Name:        st.Name,
+			DisplayName: displayName(st.Name),
+			Online:      st.Online,
+			HasMotion:   st.HasMotion,
+		})
 	}
 
-	tmpl := template.Must(template.New("grid").Parse(`{{range .}}<div class="camera-card" onclick="location.href='/camera.html?name={{.Name}}'">
-  <div class="camera-preview">
-    <img src="/api/cameras/{{.Name}}/snapshot" alt="{{.Name}}" loading="lazy" onerror="this.style.display='none'">
+	tmpl := template.Must(template.New("grid").Parse(`{{range .}}<div class="cam-card" onclick="location.href='/camera.html?name={{.Name}}'" role="listitem">
+  <div class="cam-preview">
+    <img src="/api/cameras/{{.Name}}/snapshot" alt="{{.Name}}" loading="lazy">
+    <div class="cam-live-badge">
+      <span class="cam-live-dot {{if .HasMotion}}motion{{else if .Online}}{{else}}offline{{end}}"></span>
+      {{if .Online}}LIVE{{else}}OFFLINE{{end}}
+    </div>
   </div>
-  <div class="camera-info">
-    <span class="camera-name">{{.Name}}</span>
-    <span class="status-indicator {{if .Online}}online{{else}}offline{{end}}"></span>
+  <div class="cam-footer">
+    <span class="cam-name">{{.DisplayName}}</span>
   </div>
 </div>{{end}}`))
 
 	w.Header().Set("Content-Type", "text/html")
-	if err := tmpl.Execute(w, cameras); err != nil {
+	if err := tmpl.Execute(w, cards); err != nil {
 		slog.Error("template error", "error", err)
 	}
 }
 
-func (s *Server) handleEventsPartial(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Request) {
+	statuses := s.cameraStatuses()
+	onlineCount := 0
+	for _, st := range statuses {
+		if st.Online {
+			onlineCount++
+		}
+	}
+
+	eventsToday, _ := s.db.CountEventsToday()
+	totalBytes, _ := s.db.TotalStorageBytes()
+
+	type dashData struct {
+		CameraCount int
+		OnlineCount int
+		EventsToday int
+		Storage     string
+	}
+
+	data := dashData{
+		CameraCount: len(statuses),
+		OnlineCount: onlineCount,
+		EventsToday: eventsToday,
+		Storage:     formatBytes(totalBytes),
+	}
+
+	tmpl := template.Must(template.New("stats").Parse(
+		`<div class="stat-card"><div class="stat-label">Cameras</div><div class="stat-value">{{.CameraCount}}</div></div>` +
+			`<div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green">{{.OnlineCount}}</div></div>` +
+			`<div class="stat-card"><div class="stat-label">Events Today</div><div class="stat-value">{{.EventsToday}}</div></div>` +
+			`<div class="stat-card"><div class="stat-label">Storage</div><div class="stat-value">{{.Storage}}</div></div>`))
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("template error", "error", err)
+	}
+}
+
+func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Request) {
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
 	limit := 50
@@ -253,17 +421,19 @@ func (s *Server) handleEventsPartial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl := template.Must(template.New("events").Funcs(s.funcMap).Parse(`{{if not .}}<div class="empty-state"><p>No events recorded yet.</p></div>{{else}}{{range .}}<a class="event-row" href="/event.html?id={{.ID}}">
-  <div class="event-thumbnail">
-    {{if .SnapshotPath}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event" loading="lazy">{{else}}<div class="no-thumb"></div>{{end}}
-  </div>
-  <div class="event-details">
-    <span class="event-label">{{.Label}}</span>
-    <span class="event-score">{{scorePercent .Score}}</span>
-    <span class="event-camera">{{.CameraName}}</span>
-    <span class="event-time">{{timeAgo .Timestamp}}</span>
-  </div>
-</a>{{end}}{{end}}`))
+	tmpl := template.Must(template.New("gallery").Funcs(s.funcMap).Parse(
+		`{{if not .}}<div class="empty-state"><p>No events recorded yet.</p></div>{{else}}{{range .}}` +
+			`<a class="event-card" href="/event.html?id={{.ID}}" role="listitem">` +
+			`<div class="event-thumb">` +
+			`<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">` +
+			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
+			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
+			`</div>` +
+			`<div class="event-card-footer">` +
+			`<span class="event-camera-name">{{.CameraName}}</span>` +
+			`<span class="event-time">{{timeAgo .Timestamp}}</span>` +
+			`</div>` +
+			`</a>{{end}}{{end}}`))
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, events); err != nil {
@@ -273,18 +443,10 @@ func (s *Server) handleEventsPartial(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	events, err := s.db.QueryEvents("", "", 0)
+	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	var event *camera.Event
-	for _, e := range events {
-		if e.ID == id {
-			event = &e
-			break
-		}
 	}
 
 	if event == nil {
@@ -292,28 +454,263 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(`<div class="event-detail-content">
-  <div class="event-snapshot-container">
-    <img src="/api/cameras/{{.CameraName}}/snapshot" alt="event snapshot" class="event-snapshot-img">
-  </div>
-  {{if .ClipPath}}<div class="event-video-container">
-    <video controls class="event-video">
-      <source src="{{.ClipPath}}" type="video/mp4">
-    </video>
-  </div>{{end}}
-  <dl class="event-meta">
-    <dt>Camera</dt><dd>{{.CameraName}}</dd>
-    <dt>Label</dt><dd>{{.Label}}</dd>
-    <dt>Confidence</dt><dd>{{scorePercent .Score}}</dd>
-    <dt>Time</dt><dd>{{formatTime .Timestamp}}</dd>
-    <dt>Event ID</dt><dd class="mono">{{.ID}}</dd>
-  </dl>
-</div>`))
+	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
+		`<div class="page-header"><h1>{{.Label}} Detection</h1></div>` +
+			`<div class="event-detail-layout">` +
+			`<div class="event-media">` +
+			`{{if .ClipPath}}<video controls autoplay><source src="/api/events/{{.ID}}/clip" type="video/mp4"></video>` +
+			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
+			`</div>` +
+			`<div class="event-sidebar">` +
+			`<div class="meta-card">` +
+			`<div class="meta-card-header">Details</div>` +
+			`<div class="meta-row"><span class="key">Camera</span><span class="val">{{.CameraName}}</span></div>` +
+			`<div class="meta-row"><span class="key">Label</span><span class="val">{{.Label}}</span></div>` +
+			`<div class="meta-row"><span class="key">Confidence</span><span class="val">{{scorePercent .Score}}</span></div>` +
+			`<div class="meta-row"><span class="key">Time</span><span class="val">{{formatTime .Timestamp}}</span></div>` +
+			`<div class="meta-row"><span class="key">Event ID</span><span class="val mono">{{.ID}}</span></div>` +
+			`</div>` +
+			`</div>` +
+			`</div>`))
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, event); err != nil {
 		slog.Error("template error", "error", err)
 	}
+}
+
+func (s *Server) handleSystemStatusPartial(w http.ResponseWriter, _ *http.Request) {
+	statuses := s.cameraStatuses()
+	onlineCount := 0
+	for _, st := range statuses {
+		if st.Online {
+			onlineCount++
+		}
+	}
+
+	type topnavData struct {
+		Total  int
+		Online int
+	}
+
+	data := topnavData{Total: len(statuses), Online: onlineCount}
+
+	tmpl := template.Must(template.New("sysstatus").Parse(
+		`<span class="topnav-stat"><span class="value">{{.Total}}</span> cameras</span>` +
+			`<span class="topnav-stat"><span class="value green">{{.Online}}</span> online</span>`))
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("template error", "error", err)
+	}
+}
+
+func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
+	statuses := s.cameraStatuses()
+	onlineCount := 0
+	for _, st := range statuses {
+		if st.Online {
+			onlineCount++
+		}
+	}
+
+	hwaccelName := "none"
+	if hw := s.cameras.HWAccelBackend(); hw != nil {
+		hwaccelName = hw.Name
+	}
+
+	uptime := time.Since(startTime)
+	uptimeStr := formatDuration(uptime)
+
+	totalBytes, _ := s.db.TotalStorageBytes()
+	segCount, _ := s.db.CountSegments()
+	byCamera, _ := s.db.SegmentBytesByCamera()
+
+	type storageEntry struct {
+		Camera  string
+		Bytes   int64
+		Display string
+		Percent float64
+	}
+
+	storageEntries := make([]storageEntry, 0, len(byCamera))
+	for cam, bytes := range byCamera {
+		pct := float64(0)
+		if totalBytes > 0 {
+			pct = float64(bytes) / float64(totalBytes) * 100
+		}
+		storageEntries = append(storageEntries, storageEntry{
+			Camera:  cam,
+			Bytes:   bytes,
+			Display: formatBytes(bytes),
+			Percent: pct,
+		})
+	}
+
+	type sysData struct {
+		Version     string
+		Uptime      string
+		HWAccel     string
+		GoVersion   string
+		CameraCount int
+		OnlineCount int
+		Statuses    []camera.CameraStatus
+		TotalBytes  int64
+		TotalStr    string
+		SegCount    int
+		Storage     []storageEntry
+	}
+
+	data := sysData{
+		Version:     "0.1.0",
+		Uptime:      uptimeStr,
+		HWAccel:     hwaccelName,
+		GoVersion:   runtime.Version(),
+		CameraCount: len(statuses),
+		OnlineCount: onlineCount,
+		Statuses:    statuses,
+		TotalBytes:  totalBytes,
+		TotalStr:    formatBytes(totalBytes),
+		SegCount:    segCount,
+		Storage:     storageEntries,
+	}
+
+	tmpl := template.Must(template.New("system").Funcs(s.funcMap).Parse(systemPartialTemplate))
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("template error", "error", err)
+	}
+}
+
+const systemPartialTemplate = `<div class="sys-card">
+  <div class="sys-card-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+    System Info
+  </div>
+  <div class="sys-card-body">
+    <div class="sys-row"><span class="key">Version</span><span class="val">{{.Version}}</span></div>
+    <div class="sys-row"><span class="key">Uptime</span><span class="val">{{.Uptime}}</span></div>
+    <div class="sys-row"><span class="key">HW Accel</span><span class="val">{{.HWAccel}}</span></div>
+    <div class="sys-row"><span class="key">Go</span><span class="val">{{.GoVersion}}</span></div>
+    <div class="sys-row"><span class="key">Cameras</span><span class="val">{{.CameraCount}} ({{.OnlineCount}} online)</span></div>
+  </div>
+</div>
+<div class="sys-card">
+  <div class="sys-card-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    Camera Status
+  </div>
+  <div class="sys-card-body">
+    <table style="width:100%">
+      <thead><tr><th style="text-align:left">Camera</th><th style="text-align:left">Status</th></tr></thead>
+      <tbody>
+      {{range .Statuses}}<tr>
+        <td>{{displayName .Name}}</td>
+        <td>{{if .Online}}<span class="green">Online</span>{{else}}<span class="red">Offline</span>{{end}}</td>
+      </tr>{{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="sys-card">
+  <div class="sys-card-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+    Storage
+  </div>
+  <div class="sys-card-body">
+    <div class="sys-row"><span class="key">Total</span><span class="val">{{.TotalStr}}</span></div>
+    <div class="sys-row"><span class="key">Segments</span><span class="val">{{.SegCount}}</span></div>
+    {{range .Storage}}<div style="margin-top: 0.5rem">
+      <div class="sys-row"><span class="key">{{displayName .Camera}}</span><span class="val">{{.Display}}</span></div>
+      <div class="storage-bar"><div class="storage-bar-fill" style="width: {{printf "%.0f" .Percent}}%"></div></div>
+    </div>{{end}}
+  </div>
+</div>`
+
+func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request) {
+	cameraFilter := r.URL.Query().Get("camera")
+	dateStr := r.URL.Query().Get("date")
+
+	date := time.Now().UTC()
+	if dateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+			date = parsed
+		}
+	}
+
+	if cameraFilter == "" {
+		names := s.cameras.ListCameras()
+		if len(names) > 0 {
+			cameraFilter = names[0]
+		}
+	}
+
+	if cameraFilter == "" {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<div class="empty-state"><p>No cameras configured.</p></div>`)
+		return
+	}
+
+	segments, err := s.db.GetSegmentsForDate(cameraFilter, date)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(segments) == 0 {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<div class="empty-state"><p>No recordings for this date.</p></div>`)
+		return
+	}
+
+	tmpl := template.Must(template.New("recordings").Funcs(s.funcMap).Parse(
+		`{{range .}}<div class="segment-row">` +
+			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
+			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
+			`<span class="segment-size">{{formatBytes .SizeBytes}}</span>` +
+			`</div>{{end}}`))
+
+	tmpl.Funcs(template.FuncMap{
+		"segDuration": func(start, end time.Time) string {
+			return formatDuration(end.Sub(start))
+		},
+	})
+
+	// Re-parse with the extra function
+	tmpl = template.Must(template.New("recordings").Funcs(template.FuncMap{
+		"formatTime":  s.funcMap["formatTime"],
+		"formatBytes": formatBytes,
+		"segDuration": func(start, end time.Time) string {
+			return formatDuration(end.Sub(start))
+		},
+	}).Parse(
+		`{{range .}}<div class="segment-row">` +
+			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
+			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
+			`<span class="segment-size">{{formatBytes .SizeBytes}}</span>` +
+			`</div>{{end}}`))
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := tmpl.Execute(w, segments); err != nil {
+		slog.Error("template error", "error", err)
+	}
+}
+
+// formatDuration returns a human-readable duration string.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -323,3 +720,4 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 		slog.Error("failed to write JSON response", "error", err)
 	}
 }
+

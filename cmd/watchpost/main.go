@@ -117,7 +117,7 @@ func main() {
 		}
 	}()
 
-	server := api.New(cfg.API, db, manager)
+	server := api.New(cfg.API, db, manager, recorder)
 	go func() {
 		if err := server.Start(); err != nil {
 			slog.Error("API server failed", "error", err)
