@@ -130,7 +130,7 @@ func TestQueryEvents_NoFilters(t *testing.T) {
 		}
 	}
 
-	events, err := db.QueryEvents("", "", 0)
+	events, err := db.QueryEvents("", "", 0, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestQueryEvents_FilterByCamera(t *testing.T) {
 	db.SaveEvent(makeEvent("e2", "cam2", "person", 0.8, ts))
 	db.SaveEvent(makeEvent("e3", "cam1", "car", 0.7, ts))
 
-	events, err := db.QueryEvents("cam1", "", 0)
+	events, err := db.QueryEvents("cam1", "", 0, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestQueryEvents_FilterByLabel(t *testing.T) {
 	db.SaveEvent(makeEvent("e2", "cam1", "car", 0.8, ts))
 	db.SaveEvent(makeEvent("e3", "cam2", "person", 0.7, ts))
 
-	events, err := db.QueryEvents("", "person", 0)
+	events, err := db.QueryEvents("", "person", 0, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestQueryEvents_WithLimit(t *testing.T) {
 		db.SaveEvent(makeEvent("e"+string(rune('0'+i)), "cam1", "person", 0.9, ts.Add(time.Duration(i)*time.Minute)))
 	}
 
-	events, err := db.QueryEvents("", "", 2)
+	events, err := db.QueryEvents("", "", 2, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestQueryEvents_FilterByCameraAndLabel(t *testing.T) {
 	db.SaveEvent(makeEvent("e3", "cam2", "person", 0.7, ts))
 	db.SaveEvent(makeEvent("e4", "cam2", "car", 0.6, ts))
 
-	events, err := db.QueryEvents("cam1", "person", 0)
+	events, err := db.QueryEvents("cam1", "person", 0, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestQueryEvents_OrderByTimestampDesc(t *testing.T) {
 	db.SaveEvent(makeEvent("e2", "cam1", "person", 0.9, t3))
 	db.SaveEvent(makeEvent("e3", "cam1", "person", 0.9, t2))
 
-	events, err := db.QueryEvents("", "", 0)
+	events, err := db.QueryEvents("", "", 0, 0)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}

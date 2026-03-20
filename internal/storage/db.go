@@ -103,7 +103,7 @@ func (d *DB) UpdateEventSnapshotPath(eventID, snapshotPath string) error {
 }
 
 // QueryEvents returns events matching the given filters.
-func (d *DB) QueryEvents(cameraName, label string, limit int) ([]camera.Event, error) {
+func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.Event, error) {
 	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, snapshot_path, clip_path FROM events WHERE 1=1"
 	args := []any{}
 
@@ -121,6 +121,11 @@ func (d *DB) QueryEvents(cameraName, label string, limit int) ([]camera.Event, e
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
+	}
+
+	if offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, offset)
 	}
 
 	rows, err := d.db.Query(query, args...)
@@ -146,6 +151,53 @@ func (d *DB) QueryEvents(cameraName, label string, limit int) ([]camera.Event, e
 	}
 
 	return events, rows.Err()
+}
+
+// CountEventsByLabel returns the count of events grouped by label.
+func (d *DB) CountEventsByLabel() (map[string]int, error) {
+	rows, err := d.db.Query("SELECT label, COUNT(*) FROM events GROUP BY label")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var label string
+		var count int
+		if err := rows.Scan(&label, &count); err != nil {
+			return nil, err
+		}
+		result[label] = count
+	}
+	return result, rows.Err()
+}
+
+// CountEventsByCamera returns the count of events grouped by camera name.
+func (d *DB) CountEventsByCamera() (map[string]int, error) {
+	rows, err := d.db.Query("SELECT camera, COUNT(*) FROM events GROUP BY camera")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var cam string
+		var count int
+		if err := rows.Scan(&cam, &count); err != nil {
+			return nil, err
+		}
+		result[cam] = count
+	}
+	return result, rows.Err()
+}
+
+// CountEvents returns the total number of events.
+func (d *DB) CountEvents() (int, error) {
+	var count int
+	err := d.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	return count, err
 }
 
 // SaveSegment inserts or replaces a segment record in the database.
@@ -276,6 +328,42 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 	return scanSegments(rows)
 }
 
+// QueryEventsForDate returns events for a camera on a given date (UTC day).
+func (d *DB) QueryEventsForDate(cameraName string, date time.Time) ([]camera.Event, error) {
+	dayStart := date.UTC().Truncate(24 * time.Hour)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	rows, err := d.db.Query(`
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, snapshot_path, clip_path
+		FROM events
+		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
+		ORDER BY timestamp`,
+		cameraName, dayStart, dayEnd,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []camera.Event
+	for rows.Next() {
+		var e camera.Event
+		var snapshot, clip sql.NullString
+		err := rows.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
+			&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
+			&e.Timestamp, &snapshot, &clip,
+		)
+		if err != nil {
+			return nil, err
+		}
+		e.SnapshotPath = snapshot.String
+		e.ClipPath = clip.String
+		events = append(events, e)
+	}
+
+	return events, rows.Err()
+}
+
 // CountSegments returns the total number of segments.
 func (d *DB) CountSegments() (int, error) {
 	var count int
@@ -321,6 +409,72 @@ func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	defer rows.Close()
 
 	return scanSegments(rows)
+}
+
+// GetRecordingDays returns sorted day numbers that have segments for the given camera and month.
+// If camera is empty, returns days across all cameras.
+func (d *DB) GetRecordingDays(camera string, year int, month int) ([]int, error) {
+	yearMonth := fmt.Sprintf("%04d-%02d", year, month)
+
+	var rows *sql.Rows
+	var err error
+	if camera != "" {
+		rows, err = d.db.Query(`
+			SELECT DISTINCT CAST(strftime('%d', start_time) AS INTEGER) AS day
+			FROM segments
+			WHERE camera = ? AND strftime('%Y-%m', start_time) = ?
+			ORDER BY day`, camera, yearMonth)
+	} else {
+		rows, err = d.db.Query(`
+			SELECT DISTINCT CAST(strftime('%d', start_time) AS INTEGER) AS day
+			FROM segments
+			WHERE strftime('%Y-%m', start_time) = ?
+			ORDER BY day`, yearMonth)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var days []int
+	for rows.Next() {
+		var day int
+		if err := rows.Scan(&day); err != nil {
+			return nil, err
+		}
+		days = append(days, day)
+	}
+	return days, rows.Err()
+}
+
+// GetAdjacentEvents returns the previous and next event IDs relative to the given event,
+// ordered by timestamp.
+func (d *DB) GetAdjacentEvents(id string) (prevID, nextID string, err error) {
+	err = d.db.QueryRow(`
+		SELECT id FROM events
+		WHERE timestamp < (SELECT timestamp FROM events WHERE id = ?)
+		ORDER BY timestamp DESC LIMIT 1`, id).Scan(&prevID)
+	if err == sql.ErrNoRows {
+		prevID = ""
+		err = nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	err = d.db.QueryRow(`
+		SELECT id FROM events
+		WHERE timestamp > (SELECT timestamp FROM events WHERE id = ?)
+		ORDER BY timestamp ASC LIMIT 1`, id).Scan(&nextID)
+	if err == sql.ErrNoRows {
+		nextID = ""
+		err = nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	return prevID, nextID, nil
 }
 
 func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {

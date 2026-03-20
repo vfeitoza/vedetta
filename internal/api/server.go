@@ -79,8 +79,13 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder
 	s.mux.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
 	s.mux.HandleFunc("GET /api/events/{id}/snapshot", s.handleEventSnapshot)
 	s.mux.HandleFunc("GET /api/events/{id}/clip", s.handleEventClip)
+	s.mux.HandleFunc("GET /api/events/counts", s.handleEventCounts)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/system", s.handleSystemAPI)
+
+	s.mux.HandleFunc("GET /api/recordings/calendar", s.handleRecordingsCalendar)
+
+	s.mux.HandleFunc("GET /api/cameras/{name}/timeline", s.handleCameraTimeline)
 
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
@@ -203,7 +208,14 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	events, err := s.db.QueryEvents(cameraFilter, labelFilter, limit)
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	events, err := s.db.QueryEvents(cameraFilter, labelFilter, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -278,6 +290,69 @@ func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
 		"online":       onlineCount,
 		"storage_bytes": totalBytes,
 		"storage":      formatBytes(totalBytes),
+	})
+}
+
+func (s *Server) handleCameraTimeline(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	date := time.Now().UTC()
+	if dateStr := r.URL.Query().Get("date"); dateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+			date = parsed
+		}
+	}
+
+	segments, err := s.db.GetSegmentsForDate(name, date)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	events, err := s.db.QueryEventsForDate(name, date)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type timelineSegment struct {
+		StartTime time.Time `json:"start_time"`
+		EndTime   time.Time `json:"end_time"`
+	}
+
+	type timelineEvent struct {
+		ID        string    `json:"id"`
+		Label     string    `json:"label"`
+		Score     float32   `json:"score"`
+		Timestamp time.Time `json:"timestamp"`
+	}
+
+	segs := make([]timelineSegment, 0, len(segments))
+	for _, seg := range segments {
+		segs = append(segs, timelineSegment{
+			StartTime: seg.StartTime,
+			EndTime:   seg.EndTime,
+		})
+	}
+
+	evts := make([]timelineEvent, 0, len(events))
+	for _, evt := range events {
+		evts = append(evts, timelineEvent{
+			ID:        evt.ID,
+			Label:     evt.Label,
+			Score:     evt.Score,
+			Timestamp: evt.Timestamp,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"segments": segs,
+		"events":   evts,
 	})
 }
 
@@ -409,19 +484,32 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			limit = parsed
 		}
 	}
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
 
-	events, err := s.db.QueryEvents(cameraFilter, labelFilter, limit)
+	events, err := s.db.QueryEvents(cameraFilter, labelFilter, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "text/html")
+
+	if offset == 0 && len(events) == 0 {
+		fmt.Fprint(w, `<div class="empty-state"><p>No events recorded yet.</p></div>`)
+		return
+	}
+
 	tmpl := template.Must(template.New("gallery").Funcs(s.funcMap).Parse(
-		`{{if not .}}<div class="empty-state"><p>No events recorded yet.</p></div>{{else}}{{range .}}` +
+		`{{range .}}` +
 			`<a class="event-card" href="/event.html?id={{.ID}}" role="listitem">` +
 			`<div class="event-thumb">` +
 			`{{if .SnapshotPath}}<img src="/api/events/{{.ID}}/snapshot" alt="{{.Label}}" loading="lazy">` +
-		`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
+			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
 			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
 			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
 			`</div>` +
@@ -429,12 +517,36 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`<span class="event-camera-name">{{.CameraName}}</span>` +
 			`<span class="event-time">{{timeAgo .Timestamp}}</span>` +
 			`</div>` +
-			`</a>{{end}}{{end}}`))
+			`</a>{{end}}`))
 
-	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, events); err != nil {
 		slog.Error("template error", "error", err)
 	}
+
+	// If we got a full page of results, append a sentinel for infinite scroll
+	if len(events) == limit {
+		nextOffset := offset + limit
+		nextURL := fmt.Sprintf("/partials/events-gallery?limit=%d&offset=%d", limit, nextOffset)
+		if cameraFilter != "" {
+			nextURL += "&camera=" + cameraFilter
+		}
+		if labelFilter != "" {
+			nextURL += "&label=" + labelFilter
+		}
+		fmt.Fprintf(w, `<div id="load-more-trigger" hx-get="%s" hx-trigger="revealed" hx-swap="outerHTML"></div>`, nextURL)
+	}
+}
+
+func (s *Server) handleEventCounts(w http.ResponseWriter, _ *http.Request) {
+	total, _ := s.db.CountEvents()
+	byLabel, _ := s.db.CountEventsByLabel()
+	byCamera, _ := s.db.CountEventsByCamera()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":     total,
+		"by_label":  byLabel,
+		"by_camera": byCamera,
+	})
 }
 
 func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request) {
@@ -450,13 +562,27 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	prevID, nextID, _ := s.db.GetAdjacentEvents(id)
+
+	type eventDetailData struct {
+		camera.Event
+		PrevID string
+		NextID string
+	}
+
+	data := eventDetailData{
+		Event:  *event,
+		PrevID: prevID,
+		NextID: nextID,
+	}
+
 	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
 		`<div class="page-header"><h1>{{.Label}} Detection</h1></div>` +
 			`<div class="event-detail-layout">` +
 			`<div class="event-media">` +
 			`{{if .ClipPath}}<video controls autoplay><source src="/api/events/{{.ID}}/clip" type="video/mp4"></video>` +
 			`{{else if .SnapshotPath}}<img src="/api/events/{{.ID}}/snapshot" alt="event snapshot">` +
-		`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
+			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
 			`</div>` +
 			`<div class="event-sidebar">` +
 			`<div class="meta-card">` +
@@ -467,11 +593,15 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<div class="meta-row"><span class="key">Time</span><span class="val">{{formatTime .Timestamp}}</span></div>` +
 			`<div class="meta-row"><span class="key">Event ID</span><span class="val mono">{{.ID}}</span></div>` +
 			`</div>` +
+			`<div class="event-nav">` +
+			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
+			`{{if .NextID}}<a href="/event.html?id={{.NextID}}" class="btn" data-next-id="{{.NextID}}">Next &#8594;</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">Next &#8594;</span>{{end}}` +
+			`</div>` +
 			`</div>` +
 			`</div>`))
 
 	w.Header().Set("Content-Type", "text/html")
-	if err := tmpl.Execute(w, event); err != nil {
+	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("template error", "error", err)
 	}
 }
@@ -680,6 +810,30 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 	if err := tmpl.Execute(w, segments); err != nil {
 		slog.Error("template error", "error", err)
 	}
+}
+
+func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request) {
+	cameraFilter := r.URL.Query().Get("camera")
+	monthStr := r.URL.Query().Get("month")
+
+	year, month := time.Now().Year(), int(time.Now().Month())
+	if monthStr != "" {
+		if parsed, err := time.Parse("2006-01", monthStr); err == nil {
+			year = parsed.Year()
+			month = int(parsed.Month())
+		}
+	}
+
+	days, err := s.db.GetRecordingDays(cameraFilter, year, month)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if days == nil {
+		days = []int{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"days": days})
 }
 
 // formatDuration returns a human-readable duration string.
