@@ -175,22 +175,26 @@ func parseByteSize(s string) (int64, error) {
 
 	s = strings.ToUpper(s)
 
-	multipliers := map[string]int64{
-		"B":  1,
-		"KB": 1024,
-		"MB": 1024 * 1024,
-		"GB": 1024 * 1024 * 1024,
-		"TB": 1024 * 1024 * 1024 * 1024,
+	// Check longer suffixes first to avoid "B" matching "GB", "MB", etc.
+	suffixes := []struct {
+		suffix string
+		mult   int64
+	}{
+		{"TB", 1024 * 1024 * 1024 * 1024},
+		{"GB", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"KB", 1024},
+		{"B", 1},
 	}
 
-	for suffix, mult := range multipliers {
-		if strings.HasSuffix(s, suffix) {
-			numStr := strings.TrimSpace(strings.TrimSuffix(s, suffix))
+	for _, entry := range suffixes {
+		if strings.HasSuffix(s, entry.suffix) {
+			numStr := strings.TrimSpace(strings.TrimSuffix(s, entry.suffix))
 			val, err := strconv.ParseFloat(numStr, 64)
 			if err != nil {
 				return 0, fmt.Errorf("invalid size %q: %w", s, err)
 			}
-			return int64(val * float64(mult)), nil
+			return int64(val * float64(entry.mult)), nil
 		}
 	}
 
