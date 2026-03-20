@@ -264,6 +264,38 @@ func TestDetector_CloseNilBackend(t *testing.T) {
 	d.Close() // must not panic
 }
 
+func TestDetector_ConcurrentDetect(t *testing.T) {
+	modelData := loadTestModel(t)
+	b, err := NewGoBackend(modelData)
+	if err != nil {
+		t.Fatalf("NewGoBackend: %v", err)
+	}
+
+	d := &Detector{
+		backend: b,
+		enabled: true,
+		config: config.DetectConfig{
+			ScoreThreshold:  0.5,
+			MotionThreshold: 0.02,
+		},
+	}
+	defer d.Close()
+
+	// Simulate 3 cameras calling Detect concurrently on a shared Detector.
+	var wg sync.WaitGroup
+	for cam := range 3 {
+		wg.Go(func() {
+			img := image.NewRGBA(image.Rect(0, 0, 320, 240))
+			for frame := range 5 {
+				d.Detect(img)
+				_ = cam
+				_ = frame
+			}
+		})
+	}
+	wg.Wait()
+}
+
 // --- CAPIBackend stub ---
 
 func TestCAPIBackendStub_ReturnsError(t *testing.T) {

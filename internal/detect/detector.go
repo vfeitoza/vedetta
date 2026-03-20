@@ -5,6 +5,7 @@ import (
 	"image"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/rvben/watchpost/internal/config"
 )
@@ -18,7 +19,9 @@ type Detection struct {
 
 // Detector runs object detection on image frames.
 // It selects the best available backend automatically.
+// Safe for concurrent use by multiple camera goroutines.
 type Detector struct {
+	mu      sync.Mutex
 	config  config.DetectConfig
 	backend Backend
 	enabled bool
@@ -47,10 +50,14 @@ func (d *Detector) MotionThreshold() float64 {
 }
 
 // Detect runs object detection on a frame and returns detections above threshold.
+// Safe for concurrent use — serializes access to the backend.
 func (d *Detector) Detect(img *image.RGBA) []Detection {
 	if !d.enabled {
 		return nil
 	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	inputData, scale, padX, padY := prepareInput(img)
 
