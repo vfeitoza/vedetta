@@ -36,6 +36,12 @@
       <h1>Events</h1>
     </div>
 
+    <!-- Search -->
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="event-search" class="search-input" placeholder="Search events..." aria-label="Search events">
+    </div>
+
     <!-- Label Filter Chips -->
     <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event filters">
       <button class="chip active" data-filter="label" data-value="" onclick="toggleChip(this, 'label')">All</button>
@@ -80,9 +86,38 @@
     </div>
   </nav>
 
+  <!-- Keyboard Shortcut Modal -->
+  <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+    <div class="shortcut-modal-header">
+      <h2>Keyboard Shortcuts</h2>
+      <button class="btn btn-icon btn-ghost" onclick="closeShortcutModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="shortcut-modal-body">
+      <div class="shortcut-group">
+        <h3>Navigation</h3>
+        <div class="shortcut-row"><span>Cameras</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>1</kbd></span></div>
+        <div class="shortcut-row"><span>Events</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>2</kbd></span></div>
+        <div class="shortcut-row"><span>Recordings</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>3</kbd></span></div>
+        <div class="shortcut-row"><span>System</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>4</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>General</h3>
+        <div class="shortcut-row"><span>This help</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span>Dismiss / Back</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
+    // Initialize search and infinite scroll
+    initEventSearch();
+    initInfiniteScroll();
+
     // Populate camera chips from API and fetch event counts
     Promise.all([
       fetch('/api/cameras').then(r => r.json()),

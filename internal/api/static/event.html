@@ -51,6 +51,30 @@
     </div>
   </nav>
 
+  <!-- Keyboard Shortcut Modal -->
+  <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+    <div class="shortcut-modal-header">
+      <h2>Keyboard Shortcuts</h2>
+      <button class="btn btn-icon btn-ghost" onclick="closeShortcutModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="shortcut-modal-body">
+      <div class="shortcut-group">
+        <h3>Events</h3>
+        <div class="shortcut-row"><span>Download clip</span><span class="shortcut-keys"><kbd>D</kbd></span></div>
+        <div class="shortcut-row"><span>Previous event</span><span class="shortcut-keys"><kbd>&larr;</kbd></span></div>
+        <div class="shortcut-row"><span>Next event</span><span class="shortcut-keys"><kbd>&rarr;</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>General</h3>
+        <div class="shortcut-row"><span>This help</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span>Dismiss / Back</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
