@@ -55,6 +55,12 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
             Stop
           </button>
+          <button id="btn-live" class="btn btn-sm btn-live hidden" onclick="returnToLive()" aria-label="Return to live view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+            Return to Live
+          </button>
+          <span id="playback-badge" class="playback-badge hidden">PLAYBACK</span>
+          <span id="live-badge" class="live-badge-indicator">LIVE</span>
           <div class="spacer"></div>
           <button id="btn-pip" class="btn btn-icon btn-sm" onclick="togglePiP()" aria-label="Picture in picture" title="Picture-in-Picture (P)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="12" y="9" width="8" height="6" rx="1"/></svg>

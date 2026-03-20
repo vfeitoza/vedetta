@@ -6,6 +6,7 @@
 // ─── State ───
 let peerConnection = null;
 let currentStream = null; // 'webrtc' | 'mjpeg' | null
+let playbackMode = false; // true when playing back a recording
 let timelineDate = new Date();
 let calendarDate = new Date();
 
@@ -238,13 +239,19 @@ function scrubTimeline(e) {
   pct = Math.max(0, Math.min(1, pct));
 
   playhead.style.left = (pct * 100) + '%';
+  playhead.style.display = '';
 
-  // Calculate time from position
-  const hours = Math.floor(pct * 24);
-  const mins = Math.floor((pct * 24 - hours) * 60);
-  const timeStr = String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+  // Calculate the timestamp from position
+  const totalMinutes = pct * 24 * 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = Math.floor(totalMinutes % 60);
+  const secs = Math.floor((totalMinutes % 1) * 60);
 
-  // Could show tooltip here
+  // Build the full timestamp
+  var d = new Date(timelineDate);
+  d.setUTCHours(hours, mins, secs, 0);
+
+  startPlayback(d);
 }
 
 function timelineNav(delta) {
@@ -403,6 +410,223 @@ function hideTimelineTooltip() {
   document.querySelectorAll('.timeline-tooltip').forEach(function(t) { t.remove(); });
 }
 
+// ─── Birdseye View ───
+let birdseyeInterval = null;
+
+function setView(mode) {
+  var btnGrid = el('btn-grid-view');
+  var btnBirdseye = el('btn-birdseye-view');
+  var cameraGrid = el('camera-grid');
+  var birdseyeGrid = el('birdseye-grid');
+
+  if (!cameraGrid || !birdseyeGrid) return;
+
+  if (mode === 'birdseye') {
+    cameraGrid.style.display = 'none';
+    birdseyeGrid.style.display = '';
+    if (btnGrid) btnGrid.classList.remove('active');
+    if (btnBirdseye) btnBirdseye.classList.add('active');
+    startBirdseye();
+  } else {
+    cameraGrid.style.display = '';
+    birdseyeGrid.style.display = 'none';
+    if (btnGrid) btnGrid.classList.add('active');
+    if (btnBirdseye) btnBirdseye.classList.remove('active');
+    stopBirdseye();
+  }
+
+  localStorage.setItem('watchpost-view', mode);
+}
+
+function startBirdseye() {
+  stopBirdseye();
+  refreshBirdseye();
+  birdseyeInterval = setInterval(refreshBirdseye, 2000);
+}
+
+function stopBirdseye() {
+  if (birdseyeInterval) {
+    clearInterval(birdseyeInterval);
+    birdseyeInterval = null;
+  }
+}
+
+function refreshBirdseye() {
+  fetch('/api/cameras')
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    })
+    .then(function(cameras) {
+      var grid = el('birdseye-grid');
+      if (!grid) return;
+
+      var cameraList = cameras || [];
+      if (cameraList.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><p>No cameras configured</p></div>';
+        return;
+      }
+
+      // Build or update cells
+      cameraList.forEach(function(cam) {
+        var cellId = 'birdseye-' + cam.name;
+        var cell = document.getElementById(cellId);
+        if (!cell) {
+          cell = document.createElement('div');
+          cell.id = cellId;
+          cell.className = 'birdseye-cell';
+          cell.setAttribute('role', 'listitem');
+          cell.onclick = function() {
+            location.href = '/camera.html?name=' + encodeURIComponent(cam.name);
+          };
+
+          var img = document.createElement('img');
+          img.alt = cam.name + ' camera feed';
+          cell.appendChild(img);
+
+          var label = document.createElement('div');
+          label.className = 'birdseye-label';
+          label.textContent = cam.name;
+          cell.appendChild(label);
+
+          grid.appendChild(cell);
+        }
+
+        // Update snapshot with cache-busting timestamp
+        var img = cell.querySelector('img');
+        if (img) {
+          var newSrc = '/api/cameras/' + encodeURIComponent(cam.name) + '/snapshot?t=' + Date.now();
+          img.src = newSrc;
+        }
+      });
+
+      // Remove cells for cameras that no longer exist
+      var validIds = new Set(cameraList.map(function(c) { return 'birdseye-' + c.name; }));
+      Array.from(grid.querySelectorAll('.birdseye-cell')).forEach(function(cell) {
+        if (!validIds.has(cell.id)) {
+          cell.remove();
+        }
+      });
+    })
+    .catch(function(err) {
+      console.error('Birdseye refresh error:', err);
+    });
+}
+
+// Restore saved view preference on page load
+(function() {
+  var saved = localStorage.getItem('watchpost-view');
+  if (saved === 'birdseye') {
+    // Defer to after DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { setView('birdseye'); });
+    } else {
+      setView('birdseye');
+    }
+  }
+})();
+
+// ─── Playback ───
+function startPlayback(timestamp) {
+  var name = getCameraName();
+  if (!name) return;
+
+  var isoStr = timestamp.toISOString();
+  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback?start=' + encodeURIComponent(isoStr);
+
+  // Stop any live stream first
+  if (currentStream) {
+    stopStream();
+  }
+
+  var video = el('live-video');
+  if (!video) return;
+
+  // Fetch with HEAD first to check if segment exists and get offset
+  fetch(url, { method: 'HEAD' })
+    .then(function(resp) {
+      if (!resp.ok) {
+        if (resp.status === 404) {
+          toast('No recording found for this timestamp', 'error');
+        } else {
+          toast('Playback error: ' + resp.status, 'error');
+        }
+        return;
+      }
+
+      var offset = parseFloat(resp.headers.get('X-Playback-Offset') || '0');
+
+      // Set video source to playback endpoint
+      video.srcObject = null;
+      video.src = url;
+      video.muted = false;
+      video.autoplay = true;
+      video.classList.remove('hidden');
+      hide('live-snapshot');
+      hide('live-mjpeg');
+
+      video.onloadedmetadata = function() {
+        if (offset > 0 && offset < video.duration) {
+          video.currentTime = offset;
+        }
+        video.play().catch(function() {});
+      };
+
+      video.onended = function() {
+        // When segment finishes, return to live
+        returnToLive();
+      };
+
+      playbackMode = true;
+      updatePlaybackUI();
+      toast('Playing recording from ' + timestamp.toLocaleTimeString());
+    })
+    .catch(function(err) {
+      toast('Playback failed: ' + err.message, 'error');
+    });
+}
+
+function returnToLive() {
+  var video = el('live-video');
+  if (video) {
+    video.pause();
+    video.src = '';
+    video.srcObject = null;
+    video.onloadedmetadata = null;
+    video.onended = null;
+    video.classList.add('hidden');
+  }
+
+  var snap = el('live-snapshot');
+  if (snap) snap.classList.remove('hidden');
+
+  playbackMode = false;
+  currentStream = null;
+  updatePlaybackUI();
+  updateStreamButtons();
+
+  // Reset playhead to current time if viewing today
+  updatePlayheadToNow();
+
+  toast('Returned to live view');
+}
+
+function updatePlaybackUI() {
+  var badge = el('playback-badge');
+  var liveBadge = el('live-badge');
+  var btnLive = el('btn-live');
+
+  if (badge) badge.classList.toggle('hidden', !playbackMode);
+  if (liveBadge) liveBadge.classList.toggle('hidden', playbackMode);
+  if (btnLive) btnLive.classList.toggle('hidden', !playbackMode);
+
+  // Disable stream buttons during playback
+  var btnWebrtc = el('btn-webrtc');
+  var btnMjpeg = el('btn-mjpeg');
+  if (btnWebrtc) btnWebrtc.disabled = playbackMode;
+  if (btnMjpeg) btnMjpeg.disabled = playbackMode;
+}
+
 // ─── Filter Chips ───
 function toggleChip(chipEl, filterType) {
   // Deactivate siblings of same filter type
@@ -548,7 +772,7 @@ document.addEventListener('keydown', function(e) {
 
   switch (e.key) {
     case '?':
-      toast('Shortcuts: W=WebRTC, M=MJPEG, S=Stop, P=PiP, F=Fullscreen, Esc=Back');
+      toast('Shortcuts: W=WebRTC, M=MJPEG, S=Stop, L=Live, P=PiP, F=Fullscreen, D=Download, Esc=Back');
       break;
     case 'w':
     case 'W':
@@ -566,6 +790,10 @@ document.addEventListener('keydown', function(e) {
     case 'P':
       if (el('btn-pip')) togglePiP();
       break;
+    case 'l':
+    case 'L':
+      if (playbackMode) returnToLive();
+      break;
     case 'f':
     case 'F':
       if (el('live-viewport')) toggleFullscreen();
@@ -580,9 +808,17 @@ document.addEventListener('keydown', function(e) {
       if (next) { location.href = next.href; e.preventDefault(); }
       break;
     }
+    case 'd':
+    case 'D': {
+      var clipLink = document.querySelector('.download-row[href*="/clip"]');
+      if (clipLink) { clipLink.click(); }
+      break;
+    }
     case 'Escape':
       if (document.fullscreenElement) {
         document.exitFullscreen();
+      } else if (playbackMode) {
+        returnToLive();
       } else if (currentStream) {
         stopStream();
       }
@@ -677,7 +913,14 @@ document.addEventListener('htmx:afterRequest', function(e) {
 
 // ─── Page visibility: pause updates when hidden ───
 document.addEventListener('visibilitychange', function() {
-  // htmx will handle this via polling triggers
+  if (document.hidden) {
+    stopBirdseye();
+  } else if (localStorage.getItem('watchpost-view') === 'birdseye') {
+    var birdseyeGrid = el('birdseye-grid');
+    if (birdseyeGrid && birdseyeGrid.style.display !== 'none') {
+      startBirdseye();
+    }
+  }
 });
 
 // ─── Snapshot Crossfade ───

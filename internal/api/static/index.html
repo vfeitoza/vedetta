@@ -75,6 +75,10 @@
     <!-- Camera Grid -->
     <div class="page-header">
       <h1>Cameras</h1>
+      <div class="view-toggle">
+        <button class="btn btn-sm active" id="btn-grid-view" onclick="setView('grid')">Grid</button>
+        <button class="btn btn-sm" id="btn-birdseye-view" onclick="setView('birdseye')">Birdseye</button>
+      </div>
     </div>
 
     <div class="camera-grid"
@@ -85,6 +89,9 @@
          role="list"
          aria-label="Camera feeds">
       <div class="loading-state">Loading cameras...</div>
+    </div>
+
+    <div class="birdseye-grid" id="birdseye-grid" style="display:none" role="list" aria-label="Birdseye camera view">
     </div>
   </main>
 
