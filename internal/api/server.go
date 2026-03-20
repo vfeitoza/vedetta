@@ -420,7 +420,8 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		`{{if not .}}<div class="empty-state"><p>No events recorded yet.</p></div>{{else}}{{range .}}` +
 			`<a class="event-card" href="/event.html?id={{.ID}}" role="listitem">` +
 			`<div class="event-thumb">` +
-			`<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">` +
+			`{{if .SnapshotPath}}<img src="/api/events/{{.ID}}/snapshot" alt="{{.Label}}" loading="lazy">` +
+		`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
 			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
 			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
 			`</div>` +
@@ -454,7 +455,8 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<div class="event-detail-layout">` +
 			`<div class="event-media">` +
 			`{{if .ClipPath}}<video controls autoplay><source src="/api/events/{{.ID}}/clip" type="video/mp4"></video>` +
-			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
+			`{{else if .SnapshotPath}}<img src="/api/events/{{.ID}}/snapshot" alt="event snapshot">` +
+		`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
 			`</div>` +
 			`<div class="event-sidebar">` +
 			`<div class="meta-card">` +
@@ -659,27 +661,15 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	tmpl := template.Must(template.New("recordings").Funcs(s.funcMap).Parse(
-		`{{range .}}<div class="segment-row">` +
-			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
-			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
-			`<span class="segment-size">{{formatBytes .SizeBytes}}</span>` +
-			`</div>{{end}}`))
-
-	tmpl.Funcs(template.FuncMap{
-		"segDuration": func(start, end time.Time) string {
-			return formatDuration(end.Sub(start))
-		},
-	})
-
-	// Re-parse with the extra function
-	tmpl = template.Must(template.New("recordings").Funcs(template.FuncMap{
+	funcs := template.FuncMap{
 		"formatTime":  s.funcMap["formatTime"],
 		"formatBytes": formatBytes,
 		"segDuration": func(start, end time.Time) string {
 			return formatDuration(end.Sub(start))
 		},
-	}).Parse(
+	}
+
+	tmpl := template.Must(template.New("recordings").Funcs(funcs).Parse(
 		`{{range .}}<div class="segment-row">` +
 			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
 			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
