@@ -865,6 +865,7 @@ input, select { font-family: inherit; }
 .live-viewport {
   position: relative;
   aspect-ratio: 16 / 9;
+  max-height: 60vh;
   background: var(--void);
   overflow: hidden;
 }
