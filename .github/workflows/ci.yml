@@ -75,3 +75,14 @@ jobs:
             vedetta-linux-amd64
             vedetta-linux-arm64
           generate_release_notes: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Publish to PyPI
+        run: |
+          pip install uv
+          cd pypi && uv build && uv publish --username __token__ --password "$PYPI_TOKEN"
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}

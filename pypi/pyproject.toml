@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vedetta"
+version = "0.0.1"
+description = "Vedetta NVR — lightweight open-source network video recorder with object detection"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Ruben Jongejan", email = "ruben.jongejan@gmail.com" }
+]
+urls.Homepage = "https://github.com/rvben/vedetta"
+urls.Repository = "https://github.com/rvben/vedetta"
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vedetta"]
