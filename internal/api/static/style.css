@@ -487,6 +487,16 @@ input, select { font-family: inherit; }
   animation: none;
 }
 
+/* Dim offline camera cards — show last snapshot grayed out */
+.cam-card:has(.cam-live-dot.offline) .cam-preview img {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+}
+
+.cam-card:has(.cam-live-dot.offline) {
+  opacity: 0.75;
+}
+
 .cam-live-dot.motion {
   background: var(--amber);
   animation: pulse-dot 0.8s ease-in-out infinite;

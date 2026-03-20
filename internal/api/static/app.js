@@ -953,41 +953,102 @@ document.addEventListener('htmx:afterRequest', function(e) {
 document.addEventListener('visibilitychange', function() {
   if (document.hidden) {
     stopBirdseye();
-  } else if (localStorage.getItem('watchpost-view') === 'birdseye') {
-    var birdseyeGrid = el('birdseye-grid');
-    if (birdseyeGrid && birdseyeGrid.style.display !== 'none') {
-      startBirdseye();
+    stopGridSnapshotRefresh();
+    stopStatsRefresh();
+  } else {
+    if (localStorage.getItem('watchpost-view') === 'birdseye') {
+      var birdseyeGrid = el('birdseye-grid');
+      if (birdseyeGrid && birdseyeGrid.style.display !== 'none') {
+        startBirdseye();
+      }
+    } else if (el('camera-grid')) {
+      startGridSnapshotRefresh();
+    }
+    if (el('stats-row')) {
+      startStatsRefresh();
     }
   }
 });
 
-// ─── Snapshot Crossfade ───
-// Capture current image sources before camera grid swap to prevent flash
-let cachedSnapshotSrcs = {};
+// ─── Grid Snapshot Refresh ───
+// Instead of htmx replacing the entire grid DOM every 2s (causes flash),
+// update only the <img> src attributes with a cache-busting timestamp.
+let gridSnapshotInterval = null;
 
-document.addEventListener('htmx:beforeSwap', function(e) {
+function startGridSnapshotRefresh() {
+  stopGridSnapshotRefresh();
+  gridSnapshotInterval = setInterval(refreshGridSnapshots, 2000);
+}
+
+function stopGridSnapshotRefresh() {
+  if (gridSnapshotInterval) {
+    clearInterval(gridSnapshotInterval);
+    gridSnapshotInterval = null;
+  }
+}
+
+function refreshGridSnapshots() {
+  var grid = el('camera-grid');
+  if (!grid || grid.style.display === 'none') return;
+  var cards = grid.querySelectorAll('.cam-card');
+  var t = Date.now();
+  cards.forEach(function(card) {
+    // Skip offline cameras — their snapshot endpoint returns 503
+    if (card.querySelector('.cam-live-dot.offline')) return;
+    var img = card.querySelector('.cam-preview img');
+    if (!img) return;
+    var base = img.src.split('?')[0];
+    img.src = base + '?t=' + t;
+  });
+}
+
+// Start refresh after htmx loads the grid initially
+document.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'camera-grid') {
-    cachedSnapshotSrcs = {};
-    var imgs = e.detail.target.querySelectorAll('.cam-preview img');
-    imgs.forEach(function(img) {
-      if (img.src && img.naturalWidth > 0) {
-        cachedSnapshotSrcs[img.src] = true;
-      }
-    });
+    startGridSnapshotRefresh();
   }
 });
 
+// ─── Stats Refresh ───
+// Fetch dashboard stats as HTML fragment and diff-update only changed values.
+let statsInterval = null;
+
+function startStatsRefresh() {
+  stopStatsRefresh();
+  statsInterval = setInterval(refreshStats, 5000);
+}
+
+function stopStatsRefresh() {
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+  }
+}
+
+function refreshStats() {
+  var row = el('stats-row');
+  if (!row) return;
+  fetch('/partials/dashboard-stats')
+    .then(function(r) { return r.ok ? r.text() : null; })
+    .then(function(html) {
+      if (!html) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var newValues = tmp.querySelectorAll('.stat-value');
+      var oldValues = row.querySelectorAll('.stat-value');
+      newValues.forEach(function(nv, i) {
+        if (i < oldValues.length && oldValues[i].innerHTML !== nv.innerHTML) {
+          oldValues[i].innerHTML = nv.innerHTML;
+          oldValues[i].className = nv.className;
+        }
+      });
+    })
+    .catch(function() {});
+}
+
 document.addEventListener('htmx:afterSwap', function(e) {
-  if (e.detail.target && e.detail.target.id === 'camera-grid') {
-    var imgs = e.detail.target.querySelectorAll('.cam-preview img');
-    imgs.forEach(function(img) {
-      if (cachedSnapshotSrcs[img.src]) {
-        // Same image, skip the fade — hold at full opacity
-        img.classList.add('crossfade-hold');
-        setTimeout(function() { img.classList.remove('crossfade-hold'); }, 50);
-      }
-    });
-    cachedSnapshotSrcs = {};
+  if (e.detail.target && e.detail.target.id === 'stats-row') {
+    startStatsRefresh();
   }
 });
 

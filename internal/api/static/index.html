@@ -63,8 +63,9 @@
   <main class="page">
     <!-- Stats Row -->
     <div class="stats-row"
+         id="stats-row"
          hx-get="/partials/dashboard-stats"
-         hx-trigger="load, every 5s"
+         hx-trigger="load"
          hx-swap="innerHTML">
       <div class="stat-card"><div class="stat-label">Cameras</div><div class="stat-value skeleton" style="width:2ch;height:1.25rem">&nbsp;</div></div>
       <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value skeleton" style="width:2ch;height:1.25rem">&nbsp;</div></div>
@@ -84,7 +85,7 @@
     <div class="camera-grid"
          id="camera-grid"
          hx-get="/partials/camera-grid"
-         hx-trigger="load, every 2s"
+         hx-trigger="load"
          hx-swap="innerHTML"
          role="list"
          aria-label="Camera feeds">
