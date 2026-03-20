@@ -19,23 +19,31 @@ type Tensor struct {
 	pooled bool
 }
 
-// tensorPools provides pooled float32 slices bucketed by power-of-2 sizes.
-// After the first inference pass with a model, all allocations hit the pool.
-var tensorPools [32]sync.Pool
+// tensorFreeLists provides persistent float32 buffer pools bucketed by power-of-2 sizes.
+// Unlike sync.Pool, these survive GC cycles, so repeated inference runs reuse buffers.
+var tensorFreeLists [32]struct {
+	mu   sync.Mutex
+	bufs [][]float32
+}
 
 func getTensorData(size int) []float32 {
 	if size <= 0 {
 		return nil
 	}
 	bucket := bucketFor(size)
-	if v := tensorPools[bucket].Get(); v != nil {
-		buf := v.([]float32)
+	fl := &tensorFreeLists[bucket]
+	fl.mu.Lock()
+	if n := len(fl.bufs); n > 0 {
+		buf := fl.bufs[n-1]
+		fl.bufs = fl.bufs[:n-1]
+		fl.mu.Unlock()
 		buf = buf[:size]
 		for i := range buf {
 			buf[i] = 0
 		}
 		return buf
 	}
+	fl.mu.Unlock()
 	return make([]float32, size, 1<<bucket)
 }
 
@@ -44,7 +52,10 @@ func putTensorData(buf []float32) {
 		return
 	}
 	bucket := bucketFor(cap(buf))
-	tensorPools[bucket].Put(buf[:cap(buf)])
+	fl := &tensorFreeLists[bucket]
+	fl.mu.Lock()
+	fl.bufs = append(fl.bufs, buf[:cap(buf)])
+	fl.mu.Unlock()
 }
 
 func bucketFor(size int) int {
@@ -73,10 +84,15 @@ func newTensorUninit(shape []int64) *Tensor {
 		return &Tensor{Shape: shape}
 	}
 	bucket := bucketFor(size)
+	fl := &tensorFreeLists[bucket]
+	fl.mu.Lock()
 	var data []float32
-	if v := tensorPools[bucket].Get(); v != nil {
-		data = v.([]float32)[:size]
+	if n := len(fl.bufs); n > 0 {
+		data = fl.bufs[n-1][:size]
+		fl.bufs = fl.bufs[:n-1]
+		fl.mu.Unlock()
 	} else {
+		fl.mu.Unlock()
 		data = make([]float32, size, 1<<bucket)
 	}
 	return &Tensor{Data: data, Shape: shape, pooled: true}
@@ -248,7 +264,7 @@ func (t *Tensor) Transpose(perm []int64) *Tensor {
 	}
 
 	oldStrides := t.Strides()
-	newData := make([]float32, len(t.Data))
+	result := newTensorUninit(newShape)
 	newSize := int(tensorSize(newShape))
 
 	newStrides := make([]int64, ndim)
@@ -259,19 +275,18 @@ func (t *Tensor) Transpose(perm []int64) *Tensor {
 		}
 	}
 
-	for i := 0; i < newSize; i++ {
-		// Decompose i into new coordinates
+	for i := range newSize {
 		remaining := int64(i)
 		oldIdx := int64(0)
-		for d := 0; d < ndim; d++ {
+		for d := range ndim {
 			coord := remaining / newStrides[d]
 			remaining %= newStrides[d]
 			oldIdx += coord * oldStrides[perm[d]]
 		}
-		newData[i] = t.Data[oldIdx]
+		result.Data[i] = t.Data[oldIdx]
 	}
 
-	return &Tensor{Data: newData, Shape: newShape}
+	return result
 }
 
 // Fill sets all elements to the given value.

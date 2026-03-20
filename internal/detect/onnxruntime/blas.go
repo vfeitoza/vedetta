@@ -2,31 +2,34 @@ package onnxruntime
 
 import "sync"
 
-// gemmPool reuses GEMM output buffers to reduce allocation pressure.
-var gemmPool = sync.Pool{
-	New: func() any {
-		return &[]float32{}
-	},
+// gemmFreeList reuses GEMM output buffers across GC cycles.
+var gemmFreeList struct {
+	mu   sync.Mutex
+	bufs [][]float32
 }
 
 func getGemmBuffer(size int) []float32 {
-	bp := gemmPool.Get().(*[]float32)
-	buf := *bp
-	if cap(buf) >= size {
-		buf = buf[:size]
-		for i := range buf {
-			buf[i] = 0
+	gemmFreeList.mu.Lock()
+	for i := len(gemmFreeList.bufs) - 1; i >= 0; i-- {
+		buf := gemmFreeList.bufs[i]
+		if cap(buf) >= size {
+			gemmFreeList.bufs = append(gemmFreeList.bufs[:i], gemmFreeList.bufs[i+1:]...)
+			gemmFreeList.mu.Unlock()
+			buf = buf[:size]
+			for j := range buf {
+				buf[j] = 0
+			}
+			return buf
 		}
-	} else {
-		buf = make([]float32, size)
 	}
-	*bp = buf
-	return buf
+	gemmFreeList.mu.Unlock()
+	return make([]float32, size)
 }
 
 func putGemmBuffer(buf []float32) {
-	bp := &buf
-	gemmPool.Put(bp)
+	gemmFreeList.mu.Lock()
+	gemmFreeList.bufs = append(gemmFreeList.bufs, buf)
+	gemmFreeList.mu.Unlock()
 }
 
 // Sgemm performs single-precision general matrix multiplication:
@@ -43,12 +46,23 @@ func Sgemm(a []float32, b []float32, m, n, k int) []float32 {
 	return sgemm(a, b, m, n, k)
 }
 
+// SgemmInto writes the result of A × B directly into the provided output slice c.
+// c must have length >= m*n.
+func SgemmInto(a []float32, b []float32, c []float32, m, n, k int) {
+	sgemmInto(a, b, c, m, n, k)
+}
+
 // sgemmThreshold is the minimum total output elements (m*n) below which
 // pure Go GEMM is used to avoid CGo call overhead.
 const sgemmThreshold = 512
 
 // sgemmPureGo performs matrix multiplication in pure Go with tiled loops.
+// Zeroes the output buffer before accumulating.
 func sgemmPureGo(a []float32, b []float32, c []float32, m, n, k int) {
+	for i := range c[:m*n] {
+		c[i] = 0
+	}
+
 	const tileSize = 64
 
 	for ii := 0; ii < m; ii += tileSize {

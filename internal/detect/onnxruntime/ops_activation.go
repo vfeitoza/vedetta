@@ -11,21 +11,21 @@ func init() {
 	Register("Softmax", opSoftmax)
 }
 
-// sigmoidLUT is a lookup table for sigmoid over [-8, 8] with 2048 entries.
+// sigmoidLUT is a lookup table for sigmoid over [-8, 8] with 4096 entries.
 // Using a LUT with linear interpolation is ~10x faster than math.Exp.
 var sigmoidLUT [sigmoidLUTSize + 1]float32
 
 const (
-	sigmoidLUTSize = 2048
-	sigmoidLUTMin  = -8.0
-	sigmoidLUTMax  = 8.0
+	sigmoidLUTSize  = 4096
+	sigmoidLUTMin   = float32(-8.0)
+	sigmoidLUTMax   = float32(8.0)
 	sigmoidLUTRange = sigmoidLUTMax - sigmoidLUTMin
 	sigmoidLUTScale = sigmoidLUTSize / sigmoidLUTRange
 )
 
 func init() {
 	for i := range sigmoidLUTSize + 1 {
-		x := sigmoidLUTMin + float64(i)/float64(sigmoidLUTSize)*sigmoidLUTRange
+		x := float64(sigmoidLUTMin) + float64(i)/float64(sigmoidLUTSize)*float64(sigmoidLUTRange)
 		sigmoidLUT[i] = float32(1.0 / (1.0 + math.Exp(-x)))
 	}
 }
@@ -52,7 +52,6 @@ func fastSigmoid(x float32) float32 {
 	if x >= sigmoidLUTMax {
 		return sigmoidLUT[sigmoidLUTSize]
 	}
-	// Map x to LUT index
 	pos := (x - sigmoidLUTMin) * sigmoidLUTScale
 	idx := int(pos)
 	frac := pos - float32(idx)

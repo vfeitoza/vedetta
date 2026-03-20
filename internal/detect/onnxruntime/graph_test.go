@@ -673,15 +673,9 @@ func TestSessionUnknownOp(t *testing.T) {
 	graphData := buildGraphProto([][]byte{nodeData}, nil, []string{"X"}, []string{"Y"})
 	modelData := buildModelProto(9, 20, graphData)
 
-	session, err := NewSession(modelData)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	input := NewTensor([]int64{2}, []float32{1, 2})
-	_, err = session.Run(map[string]*Tensor{"X": input})
+	_, err := NewSession(modelData)
 	if err == nil {
-		t.Fatal("expected error for unknown operator")
+		t.Fatal("expected error for unknown operator at session init")
 	}
 }
 
