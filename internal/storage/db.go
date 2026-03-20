@@ -308,6 +308,21 @@ func (d *DB) SegmentBytesByCamera() (map[string]int64, error) {
 	return result, rows.Err()
 }
 
+// GetOldestSegments returns the N oldest segments across all cameras, ordered by start_time.
+func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes
+		FROM segments
+		ORDER BY start_time ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanSegments(rows)
+}
+
 func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {
 	var segments []SegmentRecord
 	for rows.Next() {

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rvben/watchpost/internal/config"
@@ -28,6 +29,7 @@ type SegmentRecorder struct {
 	config     config.RecordingConfig
 	baseDir    string
 	db         *storage.DB
+	mu         sync.RWMutex
 	audioCodec map[string]string // camera name → detected audio codec (e.g. "aac", "pcm_alaw")
 }
 
@@ -54,7 +56,9 @@ func (sr *SegmentRecorder) StartRecording(ctx context.Context, cameraName, rtspU
 
 	// Probe the stream's audio codec so we can decide copy vs transcode
 	codec := probeAudioCodec(rtspURL)
+	sr.mu.Lock()
 	sr.audioCodec[cameraName] = codec
+	sr.mu.Unlock()
 	slog.Info("detected audio codec", "camera", cameraName, "codec", codec)
 
 	go sr.recordLoop(ctx, cameraName, rtspURL, segDir)
@@ -168,8 +172,11 @@ func (sr *SegmentRecorder) recordSegment(ctx context.Context, cameraName, rtspUR
 	defer cancel()
 
 	// Use -c:a copy when audio is already AAC (saves CPU), otherwise transcode
+	sr.mu.RLock()
+	codec := sr.audioCodec[cameraName]
+	sr.mu.RUnlock()
 	audioCodecArg := "aac"
-	if sr.audioCodec[cameraName] == "aac" {
+	if codec == "aac" {
 		audioCodecArg = "copy"
 	}
 
@@ -359,7 +366,10 @@ func (sr *SegmentRecorder) ScanExistingSegments(cameraName, segDir string) {
 
 // probeDuration uses ffprobe to determine the duration of a video file.
 func probeDuration(path string) time.Duration {
-	cmd := exec.Command("ffprobe",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "json",

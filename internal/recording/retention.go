@@ -63,28 +63,31 @@ func (r *Recorder) enforceStorageCap() {
 		"cap", cap,
 	)
 
-	for _, cameraName := range r.listCameras() {
-		segments := r.segments.AllSegments(cameraName)
-		for _, seg := range segments {
+	// Fetch oldest segments in batches rather than loading all per camera.
+	for totalBytes > cap {
+		oldest, err := r.db.GetOldestSegments(20)
+		if err != nil {
+			slog.Error("failed to query oldest segments", "error", err)
+			return
+		}
+		if len(oldest) == 0 {
+			return
+		}
+
+		for _, seg := range oldest {
 			if totalBytes <= cap {
 				return
 			}
 
-			info, err := os.Stat(seg.Path)
-			if err != nil {
-				continue
-			}
-			size := info.Size()
-
 			slog.Debug("removing segment for storage cap",
-				"camera", cameraName,
+				"camera", seg.Camera,
 				"path", seg.Path,
 			)
-			if err := r.segments.RemoveSegment(cameraName, seg.Path); err != nil {
+			if err := r.segments.RemoveSegment(seg.Camera, seg.Path); err != nil {
 				slog.Error("failed to remove segment", "path", seg.Path, "error", err)
 				continue
 			}
-			totalBytes -= size
+			totalBytes -= seg.SizeBytes
 		}
 	}
 }
@@ -132,7 +135,9 @@ func (r *Recorder) cleanClips(cutoff time.Time) {
 
 		if info.ModTime().Before(cutoff) {
 			slog.Debug("removing expired clip", "path", path, "age", time.Since(info.ModTime()).Round(time.Hour))
-			os.Remove(path)
+			if err := os.Remove(path); err != nil {
+				slog.Warn("failed to remove expired clip", "path", path, "error", err)
+			}
 		}
 
 		return nil

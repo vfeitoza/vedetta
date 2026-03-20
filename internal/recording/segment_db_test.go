@@ -116,6 +116,44 @@ func TestGetAllSegments(t *testing.T) {
 	}
 }
 
+func TestGetOldestSegments(t *testing.T) {
+	sr := newTestSegmentRecorder(t)
+	now := time.Now().Truncate(time.Second)
+
+	seedSegments(t, sr, []storage.SegmentRecord{
+		{Camera: "cam1", Path: "/c.mp4", StartTime: now.Add(-10 * time.Minute), EndTime: now, SizeBytes: 300},
+		{Camera: "cam2", Path: "/a.mp4", StartTime: now.Add(-30 * time.Minute), EndTime: now.Add(-20 * time.Minute), SizeBytes: 100},
+		{Camera: "cam1", Path: "/b.mp4", StartTime: now.Add(-20 * time.Minute), EndTime: now.Add(-10 * time.Minute), SizeBytes: 200},
+	})
+
+	oldest, err := sr.db.GetOldestSegments(2)
+	if err != nil {
+		t.Fatalf("GetOldestSegments: %v", err)
+	}
+	if len(oldest) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(oldest))
+	}
+	// Should be ordered by start_time ascending, across all cameras
+	if oldest[0].Path != "/a.mp4" {
+		t.Errorf("expected oldest segment /a.mp4, got %s", oldest[0].Path)
+	}
+	if oldest[1].Path != "/b.mp4" {
+		t.Errorf("expected second oldest /b.mp4, got %s", oldest[1].Path)
+	}
+}
+
+func TestGetOldestSegments_Empty(t *testing.T) {
+	sr := newTestSegmentRecorder(t)
+
+	oldest, err := sr.db.GetOldestSegments(10)
+	if err != nil {
+		t.Fatalf("GetOldestSegments: %v", err)
+	}
+	if len(oldest) != 0 {
+		t.Errorf("expected 0 segments, got %d", len(oldest))
+	}
+}
+
 func TestScanExistingSegments_FindsNewFiles(t *testing.T) {
 	sr := newTestSegmentRecorder(t)
 	segDir := filepath.Join(t.TempDir(), "cam1", "segments")
