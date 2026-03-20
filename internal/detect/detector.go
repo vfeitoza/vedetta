@@ -129,7 +129,7 @@ func selectBackend(preference string, modelData []byte) (Backend, error) {
 	case "onnxruntime_c":
 		b, err := NewCAPIBackend(modelData)
 		if err != nil {
-			return nil, fmt.Errorf("C ONNX Runtime backend: %w", err)
+			return nil, fmt.Errorf("c ONNX Runtime backend: %w", err)
 		}
 		return b, nil
 

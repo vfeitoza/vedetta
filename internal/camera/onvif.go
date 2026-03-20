@@ -80,7 +80,7 @@ func DiscoverCameras(timeout time.Duration) ([]DiscoveredCamera, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen udp: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	_, err = conn.WriteToUDP([]byte(wsDiscoveryProbe), addr)
 	if err != nil {
@@ -326,9 +326,9 @@ func GenerateConfig(cameras []DiscoveredCamera) string {
 
 	for _, cam := range cameras {
 		name := sanitizeName(cam.Name)
-		b.WriteString(fmt.Sprintf("  - name: %s\n", name))
-		b.WriteString(fmt.Sprintf("    url: rtsp://user:pass@%s:%d/stream1  # adjust credentials and path\n", cam.IP, cam.Port))
-		b.WriteString(fmt.Sprintf("    record_url: rtsp://user:pass@%s:%d/stream1  # high-res stream\n", cam.IP, cam.Port))
+		fmt.Fprintf(&b, "  - name: %s\n", name)
+		fmt.Fprintf(&b, "    url: rtsp://user:pass@%s:%d/stream1  # adjust credentials and path\n", cam.IP, cam.Port)
+		fmt.Fprintf(&b, "    record_url: rtsp://user:pass@%s:%d/stream1  # high-res stream\n", cam.IP, cam.Port)
 		b.WriteString("    enabled: true\n")
 		b.WriteString("    detect:\n")
 		b.WriteString("      width: 640\n")
@@ -340,7 +340,7 @@ func GenerateConfig(cameras []DiscoveredCamera) string {
 		b.WriteString("      fps: 15\n")
 
 		if cam.Manufacturer != "" || cam.Model != "" {
-			b.WriteString(fmt.Sprintf("    # Discovered: %s %s (%s)\n", cam.Manufacturer, cam.Model, cam.IP))
+			fmt.Fprintf(&b, "    # Discovered: %s %s (%s)\n", cam.Manufacturer, cam.Model, cam.IP)
 		}
 		b.WriteString("\n")
 	}

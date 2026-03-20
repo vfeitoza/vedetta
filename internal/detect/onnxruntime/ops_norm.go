@@ -21,14 +21,14 @@ func opBatchNorm(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	variance := inputs[4]
 
 	if len(x.Shape) < 2 {
-		return nil, fmt.Errorf("BatchNormalization: input must be at least 2D, got %dD", len(x.Shape))
+		return nil, fmt.Errorf("batchNormalization: input must be at least 2D, got %dD", len(x.Shape))
 	}
 
 	epsilon := attrs.GetFloat("epsilon", 1e-5)
 
 	c := int(x.Shape[1])
 	if len(scale.Data) != c || len(bias.Data) != c || len(mean.Data) != c || len(variance.Data) != c {
-		return nil, fmt.Errorf("BatchNormalization: channel dimension mismatch")
+		return nil, fmt.Errorf("batchNormalization: channel dimension mismatch")
 	}
 
 	// Pre-compute per-channel coefficients: a = scale / sqrt(var + eps), b = bias - mean * a

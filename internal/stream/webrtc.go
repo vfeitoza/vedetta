@@ -77,12 +77,12 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		fmt.Sprintf("watchpost-%s", cameraName),
 	)
 	if err != nil {
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("create video track: %w", err)
 	}
 
 	if _, err := pc.AddTrack(videoTrack); err != nil {
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("add track: %w", err)
 	}
 
@@ -92,7 +92,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		slog.Info("WebRTC ICE state changed", "camera", cameraName, "state", state.String())
 		if state == webrtc.ICEConnectionStateFailed || state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateClosed {
 			session.removePeer(peer)
-			pc.Close()
+			_ = pc.Close()
 		}
 	})
 
@@ -104,7 +104,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		if err := session.startRTPForwarding(); err != nil {
 			session.ffmpegMu.Unlock()
 			session.removePeer(peer)
-			pc.Close()
+			_ = pc.Close()
 			return nil, fmt.Errorf("start RTP forwarding: %w", err)
 		}
 	}
@@ -112,20 +112,20 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		session.removePeer(peer)
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("set remote description: %w", err)
 	}
 
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		session.removePeer(peer)
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("create answer: %w", err)
 	}
 
 	if err := pc.SetLocalDescription(answer); err != nil {
 		session.removePeer(peer)
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("set local description: %w", err)
 	}
 
@@ -180,7 +180,7 @@ func (s *cameraSession) startRTPForwarding() error {
 
 	// Start ffmpeg to transcode RTSP to RTP
 	if _, err := StartRTPStream(s.rtspURL, port); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		s.running = false
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
@@ -236,7 +236,7 @@ func (s *cameraSession) stopForwarding() {
 	}
 	close(s.stopCh)
 	if s.rtpConn != nil {
-		s.rtpConn.Close()
+		_ = s.rtpConn.Close()
 	}
 	s.running = false
 }
@@ -251,7 +251,7 @@ func findFreeUDPPort() (int, error) {
 		return 0, err
 	}
 	port := conn.LocalAddr().(*net.UDPAddr).Port
-	conn.Close()
+	_ = conn.Close()
 	return port, nil
 }
 
@@ -263,7 +263,7 @@ func (sm *StreamManager) Close() {
 	for _, session := range sm.sessions {
 		session.mu.Lock()
 		for _, peer := range session.peers {
-			peer.pc.Close()
+			_ = peer.pc.Close()
 		}
 		session.peers = nil
 		session.mu.Unlock()

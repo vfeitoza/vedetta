@@ -126,7 +126,7 @@ func ParseModel(data []byte) (*ModelProto, error) {
 					v, _ := opR.readVarint()
 					model.OpsetVersion = int64(v)
 				} else {
-					opR.skip(wt)
+					_ = opR.skip(wt)
 				}
 			}
 
@@ -508,7 +508,7 @@ func parseTypeProtoShape(data []byte) ([]int64, error) {
 			}
 			return parseTensorTypeShape(ttData)
 		}
-		r.skip(wireType)
+		_ = r.skip(wireType)
 	}
 	return nil, nil
 }
@@ -527,7 +527,7 @@ func parseTensorTypeShape(data []byte) ([]int64, error) {
 			}
 			return parseTensorShapeProto(shapeData)
 		}
-		r.skip(wireType)
+		_ = r.skip(wireType)
 	}
 	return nil, nil
 }
@@ -551,7 +551,7 @@ func parseTensorShapeProto(data []byte) ([]int64, error) {
 			}
 			dims = append(dims, dim)
 		} else {
-			r.skip(wireType)
+			_ = r.skip(wireType)
 		}
 	}
 	return dims, nil
@@ -571,7 +571,7 @@ func parseDimensionProto(data []byte) (int64, error) {
 			}
 			return int64(v), nil
 		}
-		r.skip(wireType)
+		_ = r.skip(wireType)
 	}
 	return 0, nil
 }

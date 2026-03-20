@@ -1,6 +1,32 @@
+# Binaries
+watchpost
+*.test
+
+# Build
 build/
+
+# SQLite
 *.db
+*.db-shm
+*.db-wal
+
+# Config
+config.yml
+
+# Recordings and snapshots
 recordings/
 snapshots/
+
+# ONNX models
 *.onnx
-config.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

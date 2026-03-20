@@ -109,7 +109,7 @@ func TestSaveSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open snapshot: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	decoded, err := jpeg.Decode(f)
 	if err != nil {

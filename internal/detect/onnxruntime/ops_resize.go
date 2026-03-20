@@ -11,11 +11,11 @@ func init() {
 
 func opResize(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Resize: need at least 1 input")
+		return nil, fmt.Errorf("resize: need at least 1 input")
 	}
 	x := inputs[0]
 	if len(x.Shape) != 4 {
-		return nil, fmt.Errorf("Resize: expected 4D input [N,C,H,W], got %dD", len(x.Shape))
+		return nil, fmt.Errorf("resize: expected 4D input [N,C,H,W], got %dD", len(x.Shape))
 	}
 
 	n := x.Shape[0]
@@ -35,11 +35,11 @@ func opResize(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 		outH = int64(float32(inH) * inputs[2].Data[2])
 		outW = int64(float32(inW) * inputs[2].Data[3])
 	} else {
-		return nil, fmt.Errorf("Resize: need either scales or sizes input")
+		return nil, fmt.Errorf("resize: need either scales or sizes input")
 	}
 
 	if outH <= 0 || outW <= 0 {
-		return nil, fmt.Errorf("Resize: invalid output size %dx%d", outH, outW)
+		return nil, fmt.Errorf("resize: invalid output size %dx%d", outH, outW)
 	}
 
 	mode := attrs.GetString("mode", "nearest")
@@ -53,7 +53,7 @@ func opResize(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	case "linear":
 		resizeBilinear(x, out, n, c, inH, inW, outH, outW)
 	default:
-		return nil, fmt.Errorf("Resize: unsupported mode %q", mode)
+		return nil, fmt.Errorf("resize: unsupported mode %q", mode)
 	}
 
 	return []*Tensor{out}, nil

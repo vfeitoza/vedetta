@@ -193,12 +193,12 @@ func SaveSnapshot(img *image.RGBA, path string, quality int) error {
 
 	w := bufio.NewWriter(f)
 	if err := jpeg.Encode(w, img, &jpeg.Options{Quality: quality}); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("encode jpeg: %w", err)
 	}
 
 	if err := w.Flush(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("flush buffer: %w", err)
 	}
 

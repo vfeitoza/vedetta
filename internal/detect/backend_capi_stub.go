@@ -10,11 +10,11 @@ type CAPIBackend struct{}
 
 // NewCAPIBackend returns an error when built without the cgo_onnxruntime tag.
 func NewCAPIBackend(_ []byte) (*CAPIBackend, error) {
-	return nil, fmt.Errorf("C ONNX Runtime not available: build with -tags cgo_onnxruntime")
+	return nil, fmt.Errorf("c ONNX Runtime not available: build with -tags cgo_onnxruntime")
 }
 
 func (b *CAPIBackend) Run(_ []float32) ([]float32, error) {
-	return nil, fmt.Errorf("C ONNX Runtime not available")
+	return nil, fmt.Errorf("c ONNX Runtime not available")
 }
 
 func (b *CAPIBackend) Close() {}

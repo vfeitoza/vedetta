@@ -39,5 +39,5 @@ func opConstant(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 		return []*Tensor{t}, nil
 	}
 
-	return nil, fmt.Errorf("Constant: no value attribute found")
+	return nil, fmt.Errorf("constant: no value attribute found")
 }

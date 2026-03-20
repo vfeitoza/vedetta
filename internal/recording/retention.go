@@ -151,7 +151,7 @@ func (r *Recorder) cleanClips(cutoff time.Time) {
 // cleanEmptyDirs removes empty directories left after cleanup,
 // but preserves structural directories used by active recording (e.g. "segments").
 func (r *Recorder) cleanEmptyDirs() {
-	filepath.Walk(r.config.Path, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(r.config.Path, func(path string, info os.FileInfo, err error) error {
 		if err != nil || !info.IsDir() || path == r.config.Path {
 			return nil
 		}
@@ -168,7 +168,7 @@ func (r *Recorder) cleanEmptyDirs() {
 		}
 		if len(entries) == 0 {
 			slog.Debug("removing empty directory", "path", path)
-			os.Remove(path)
+			_ = os.Remove(path)
 		}
 
 		return nil

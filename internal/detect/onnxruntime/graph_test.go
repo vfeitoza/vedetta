@@ -45,15 +45,6 @@ func protoVarintField(fieldNum int, v uint64) []byte {
 	return out
 }
 
-func protoFixed32Field(fieldNum int, v uint32) []byte {
-	var out []byte
-	out = append(out, protoTag(fieldNum, wire32Bit)...)
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], v)
-	out = append(out, buf[:]...)
-	return out
-}
-
 func encodePackedFloat32(vals []float32) []byte {
 	buf := make([]byte, len(vals)*4)
 	for i, v := range vals {
@@ -693,7 +684,7 @@ func BenchmarkConv3x3_64ch_32x32(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("Conv", inputs, attrs)
+		_, _ = Execute("Conv", inputs, attrs)
 	}
 }
 
@@ -706,7 +697,7 @@ func BenchmarkConv1x1_256ch_16x16(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("Conv", inputs, attrs)
+		_, _ = Execute("Conv", inputs, attrs)
 	}
 }
 
@@ -719,7 +710,7 @@ func BenchmarkMaxPool2x2_64ch_32x32(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("MaxPool", inputs, attrs)
+		_, _ = Execute("MaxPool", inputs, attrs)
 	}
 }
 
@@ -737,7 +728,7 @@ func BenchmarkBatchNorm_64ch_32x32(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("BatchNormalization", inputs, NewAttributes())
+		_, _ = Execute("BatchNormalization", inputs, NewAttributes())
 	}
 }
 
@@ -746,7 +737,7 @@ func BenchmarkSigmoid_Large(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("Sigmoid", []*Tensor{x}, NewAttributes())
+		_, _ = Execute("Sigmoid", []*Tensor{x}, NewAttributes())
 	}
 }
 
@@ -756,7 +747,7 @@ func BenchmarkAdd_Broadcast(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("Add", []*Tensor{x, bias}, NewAttributes())
+		_, _ = Execute("Add", []*Tensor{x, bias}, NewAttributes())
 	}
 }
 
@@ -766,7 +757,7 @@ func BenchmarkMatMul_256x256(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("MatMul", []*Tensor{a, bm}, NewAttributes())
+		_, _ = Execute("MatMul", []*Tensor{a, bm}, NewAttributes())
 	}
 }
 
@@ -780,7 +771,7 @@ func BenchmarkConcat_8Tensors(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		Execute("Concat", inputs, attrs)
+		_, _ = Execute("Concat", inputs, attrs)
 	}
 }
 
@@ -806,6 +797,6 @@ func BenchmarkSyntheticInference3Nodes(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		session.Run(map[string]*Tensor{"X": input})
+		_, _ = session.Run(map[string]*Tensor{"X": input})
 	}
 }

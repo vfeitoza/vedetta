@@ -219,13 +219,13 @@ func remuxToFaststart(path string) error {
 	)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("ffmpeg remux: %w: %s", err, string(output))
 	}
 
 	// Atomic replace: rename tmp over the original
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename remuxed file: %w", err)
 	}
 
@@ -296,7 +296,7 @@ func (sr *SegmentRecorder) ScanExistingSegments(cameraName, segDir string) {
 		if strings.HasSuffix(entry.Name(), ".remux.mp4") {
 			tmpPath := filepath.Join(segDir, entry.Name())
 			slog.Warn("removing stale remux temp file", "path", tmpPath)
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 		}
 	}
 

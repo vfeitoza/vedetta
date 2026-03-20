@@ -33,7 +33,7 @@ func TestMJPEGHandlerProducesValidMultipart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to GET MJPEG stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "multipart/x-mixed-replace") {
@@ -68,7 +68,7 @@ func TestMJPEGHandlerNilSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "multipart/x-mixed-replace") {
@@ -101,7 +101,7 @@ func TestMJPEGHandlerRGB24ProducesValidMultipart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to GET MJPEG stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "multipart/x-mixed-replace") {
@@ -140,7 +140,7 @@ func TestMJPEGHandlerRGB24NoFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "multipart/x-mixed-replace") {

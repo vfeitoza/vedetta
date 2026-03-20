@@ -140,10 +140,10 @@ func BenchmarkYOLOv8nInference(b *testing.B) {
 	input := NewTensor([]int64{1, 3, 640, 640}, nil)
 
 	// Warm up
-	session.Run(map[string]*Tensor{"images": input})
+	_, _ = session.Run(map[string]*Tensor{"images": input})
 
 	b.ResetTimer()
 	for range b.N {
-		session.Run(map[string]*Tensor{"images": input})
+		_, _ = session.Run(map[string]*Tensor{"images": input})
 	}
 }

@@ -21,7 +21,7 @@ func init() {
 
 func opReshape(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("Reshape: need 2 inputs, got %d", len(inputs))
+		return nil, fmt.Errorf("reshape: need 2 inputs, got %d", len(inputs))
 	}
 	data := inputs[0]
 	shapeTensor := inputs[1]
@@ -40,14 +40,14 @@ func opReshape(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 	out, err := data.Reshape(newShape)
 	if err != nil {
-		return nil, fmt.Errorf("Reshape: %w", err)
+		return nil, fmt.Errorf("reshape: %w", err)
 	}
 	return []*Tensor{out}, nil
 }
 
 func opTranspose(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Transpose: need 1 input")
+		return nil, fmt.Errorf("transpose: need 1 input")
 	}
 	t := inputs[0]
 	perm := attrs.GetIntList("perm")
@@ -64,7 +64,7 @@ func opTranspose(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opConcat(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) == 0 {
-		return nil, fmt.Errorf("Concat: need at least 1 input")
+		return nil, fmt.Errorf("concat: need at least 1 input")
 	}
 
 	axis := int(attrs.GetInt("axis", 0))
@@ -73,7 +73,7 @@ func opConcat(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 		axis += ndim
 	}
 	if axis < 0 || axis >= ndim {
-		return nil, fmt.Errorf("Concat: axis %d out of range for %d dims", axis, ndim)
+		return nil, fmt.Errorf("concat: axis %d out of range for %d dims", axis, ndim)
 	}
 
 	// Compute output shape
@@ -84,7 +84,7 @@ func opConcat(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 			if d == axis {
 				outShape[d] += inp.Shape[d]
 			} else if inp.Shape[d] != outShape[d] {
-				return nil, fmt.Errorf("Concat: shape mismatch on dim %d", d)
+				return nil, fmt.Errorf("concat: shape mismatch on dim %d", d)
 			}
 		}
 	}
@@ -122,7 +122,7 @@ func opConcat(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opSlice(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 3 {
-		return nil, fmt.Errorf("Slice: need at least 3 inputs")
+		return nil, fmt.Errorf("slice: need at least 3 inputs")
 	}
 	data := inputs[0]
 	ndim := len(data.Shape)
@@ -230,7 +230,7 @@ func opSlice(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 func opSplit(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Split: need at least 1 input")
+		return nil, fmt.Errorf("split: need at least 1 input")
 	}
 	data := inputs[0]
 	ndim := len(data.Shape)
@@ -301,7 +301,7 @@ func opSplit(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opShape(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Shape: need 1 input")
+		return nil, fmt.Errorf("shape: need 1 input")
 	}
 	shape := inputs[0].Shape
 	data := make([]float32, len(shape))
@@ -313,7 +313,7 @@ func opShape(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 func opGather(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("Gather: need 2 inputs")
+		return nil, fmt.Errorf("gather: need 2 inputs")
 	}
 	data := inputs[0]
 	indices := inputs[1]
@@ -377,7 +377,7 @@ func opGather(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Squeeze: need at least 1 input")
+		return nil, fmt.Errorf("squeeze: need at least 1 input")
 	}
 	data := inputs[0]
 	ndim := len(data.Shape)
@@ -417,7 +417,7 @@ func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 func opUnsqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("Unsqueeze: need 2 inputs")
+		return nil, fmt.Errorf("unsqueeze: need 2 inputs")
 	}
 	data := inputs[0]
 	axesTensor := inputs[1]
@@ -453,7 +453,7 @@ func opUnsqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 func opFlatten(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Flatten: need 1 input")
+		return nil, fmt.Errorf("flatten: need 1 input")
 	}
 	data := inputs[0]
 	axis := int(attrs.GetInt("axis", 1))
@@ -477,7 +477,7 @@ func opFlatten(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opPad(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("Pad: need at least 2 inputs")
+		return nil, fmt.Errorf("pad: need at least 2 inputs")
 	}
 	data := inputs[0]
 	padsTensor := inputs[1]
@@ -490,13 +490,13 @@ func opPad(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 	mode := attrs.GetString("mode", "constant")
 	if mode != "constant" {
-		return nil, fmt.Errorf("Pad: only 'constant' mode supported, got %q", mode)
+		return nil, fmt.Errorf("pad: only 'constant' mode supported, got %q", mode)
 	}
 
 	// pads format: [x1_begin, x2_begin, ..., xn_begin, x1_end, x2_end, ..., xn_end]
 	pads := toInt64Slice(padsTensor.Data)
 	if len(pads) != 2*ndim {
-		return nil, fmt.Errorf("Pad: pads length %d != 2*ndim %d", len(pads), 2*ndim)
+		return nil, fmt.Errorf("pad: pads length %d != 2*ndim %d", len(pads), 2*ndim)
 	}
 
 	outShape := make([]int64, ndim)

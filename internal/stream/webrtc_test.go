@@ -21,7 +21,7 @@ func TestSDPOfferAnswerExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create client peer connection: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Add a transceiver to receive video
 	if _, err := client.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{

@@ -32,7 +32,7 @@ func init() {
 
 func opSigmoid(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Sigmoid requires 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("sigmoid requires 1 input, got %d", len(inputs))
 	}
 	x := inputs[0]
 	out := newTensorUninit(x.Shape)
@@ -60,7 +60,7 @@ func fastSigmoid(x float32) float32 {
 
 func opRelu(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Relu requires 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("relu requires 1 input, got %d", len(inputs))
 	}
 	x := inputs[0]
 	out := newTensorUninit(x.Shape)
@@ -78,7 +78,7 @@ func opRelu(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 func opSoftmax(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("Softmax requires 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("softmax requires 1 input, got %d", len(inputs))
 	}
 	x := inputs[0]
 	axis := int(attrs.GetInt("axis", -1))
@@ -88,7 +88,7 @@ func opSoftmax(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 		axis += ndim
 	}
 	if axis < 0 || axis >= ndim {
-		return nil, fmt.Errorf("Softmax: axis %d out of range for %dD tensor", axis, ndim)
+		return nil, fmt.Errorf("softmax: axis %d out of range for %dD tensor", axis, ndim)
 	}
 
 	out := NewTensor(x.Shape, nil)

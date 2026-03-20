@@ -13,12 +13,12 @@ func init() {
 
 func opMaxPool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("MaxPool: need 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("maxPool: need 1 input, got %d", len(inputs))
 	}
 
 	x := inputs[0]
 	if x.Dims() != 4 {
-		return nil, fmt.Errorf("MaxPool: expected 4D input, got %dD", x.Dims())
+		return nil, fmt.Errorf("maxPool: expected 4D input, got %dD", x.Dims())
 	}
 
 	N := int(x.Shape[0])
@@ -28,7 +28,7 @@ func opMaxPool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 	kernelShape := attrs.GetIntList("kernel_shape")
 	if len(kernelShape) < 2 {
-		return nil, fmt.Errorf("MaxPool: kernel_shape required")
+		return nil, fmt.Errorf("maxPool: kernel_shape required")
 	}
 	kH := int(kernelShape[0])
 	kW := int(kernelShape[1])
@@ -160,12 +160,12 @@ func opMaxPool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 func opGlobalAveragePool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("GlobalAveragePool: need 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("globalAveragePool: need 1 input, got %d", len(inputs))
 	}
 
 	x := inputs[0]
 	if x.Dims() != 4 {
-		return nil, fmt.Errorf("GlobalAveragePool: expected 4D input, got %dD", x.Dims())
+		return nil, fmt.Errorf("globalAveragePool: expected 4D input, got %dD", x.Dims())
 	}
 
 	N := int(x.Shape[0])
@@ -192,12 +192,12 @@ func opGlobalAveragePool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error)
 
 func opAveragePool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
-		return nil, fmt.Errorf("AveragePool: need 1 input, got %d", len(inputs))
+		return nil, fmt.Errorf("averagePool: need 1 input, got %d", len(inputs))
 	}
 
 	x := inputs[0]
 	if x.Dims() != 4 {
-		return nil, fmt.Errorf("AveragePool: expected 4D input, got %dD", x.Dims())
+		return nil, fmt.Errorf("averagePool: expected 4D input, got %dD", x.Dims())
 	}
 
 	N := int(x.Shape[0])
@@ -207,7 +207,7 @@ func opAveragePool(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 	kernelShape := attrs.GetIntList("kernel_shape")
 	if len(kernelShape) < 2 {
-		return nil, fmt.Errorf("AveragePool: kernel_shape required")
+		return nil, fmt.Errorf("averagePool: kernel_shape required")
 	}
 	kH := int(kernelShape[0])
 	kW := int(kernelShape[1])

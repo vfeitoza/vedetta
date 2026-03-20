@@ -39,14 +39,14 @@ func putColBuffer(buf []float32) {
 
 func opConv(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("Conv: need at least 2 inputs (X, W), got %d", len(inputs))
+		return nil, fmt.Errorf("conv: need at least 2 inputs (X, W), got %d", len(inputs))
 	}
 
 	x := inputs[0] // [N, C, H, W]
 	w := inputs[1] // [M, C/group, kH, kW]
 
 	if x.Dims() != 4 || w.Dims() != 4 {
-		return nil, fmt.Errorf("Conv: expected 4D inputs, got X=%dD W=%dD", x.Dims(), w.Dims())
+		return nil, fmt.Errorf("conv: expected 4D inputs, got X=%dD W=%dD", x.Dims(), w.Dims())
 	}
 
 	var bias []float32
@@ -126,7 +126,7 @@ func opConv(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	outW := (W + padLeft + padRight - effKW) / strideW + 1
 
 	if outH <= 0 || outW <= 0 {
-		return nil, fmt.Errorf("Conv: invalid output dimensions %dx%d", outH, outW)
+		return nil, fmt.Errorf("conv: invalid output dimensions %dx%d", outH, outW)
 	}
 
 	cPerGroup := C / group
@@ -212,14 +212,14 @@ func opConv(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 // allocations and 2 full memory passes over the output.
 func opConvSiLU(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("ConvSiLU: need at least 2 inputs (X, W), got %d", len(inputs))
+		return nil, fmt.Errorf("convSiLU: need at least 2 inputs (X, W), got %d", len(inputs))
 	}
 
 	x := inputs[0]
 	w := inputs[1]
 
 	if x.Dims() != 4 || w.Dims() != 4 {
-		return nil, fmt.Errorf("ConvSiLU: expected 4D inputs, got X=%dD W=%dD", x.Dims(), w.Dims())
+		return nil, fmt.Errorf("convSiLU: expected 4D inputs, got X=%dD W=%dD", x.Dims(), w.Dims())
 	}
 
 	var bias []float32
@@ -298,7 +298,7 @@ func opConvSiLU(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	outW := (W + padLeft + padRight - effKW) / strideW + 1
 
 	if outH <= 0 || outW <= 0 {
-		return nil, fmt.Errorf("ConvSiLU: invalid output dimensions %dx%d", outH, outW)
+		return nil, fmt.Errorf("convSiLU: invalid output dimensions %dx%d", outH, outW)
 	}
 
 	cPerGroup := C / group

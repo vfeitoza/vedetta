@@ -166,14 +166,15 @@ func resolveShape(shape []int64, totalSize int64) ([]int64, error) {
 	inferIdx := -1
 	product := int64(1)
 	for i, d := range out {
-		if d == -1 {
+		switch d {
+		case -1:
 			if inferIdx != -1 {
 				return nil, fmt.Errorf("reshape: multiple -1 dimensions")
 			}
 			inferIdx = i
-		} else if d == 0 {
+		case 0:
 			return nil, fmt.Errorf("reshape: zero dimension at index %d", i)
-		} else {
+		default:
 			product *= d
 		}
 	}

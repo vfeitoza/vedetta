@@ -194,12 +194,12 @@ func binaryOpSlow(a, b *Tensor, op func(x, y float32) float32) ([]*Tensor, error
 
 func opMatMul(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("MatMul requires 2 inputs, got %d", len(inputs))
+		return nil, fmt.Errorf("matMul requires 2 inputs, got %d", len(inputs))
 	}
 	a, b := inputs[0], inputs[1]
 
 	if a.Dims() < 2 || b.Dims() < 2 {
-		return nil, fmt.Errorf("MatMul requires at least 2D inputs, got %dD and %dD", a.Dims(), b.Dims())
+		return nil, fmt.Errorf("matMul requires at least 2D inputs, got %dD and %dD", a.Dims(), b.Dims())
 	}
 
 	aShape := a.Shape
@@ -210,7 +210,7 @@ func opMatMul(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	n := int(bShape[len(bShape)-1])
 
 	if int(bShape[len(bShape)-2]) != k {
-		return nil, fmt.Errorf("MatMul: inner dimensions mismatch %d vs %d", k, bShape[len(bShape)-2])
+		return nil, fmt.Errorf("matMul: inner dimensions mismatch %d vs %d", k, bShape[len(bShape)-2])
 	}
 
 	// Compute batch dimensions
@@ -219,7 +219,7 @@ func opMatMul(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 	batchShape, err := broadcastShapes(aBatch, bBatch)
 	if err != nil {
-		return nil, fmt.Errorf("MatMul: %w", err)
+		return nil, fmt.Errorf("matMul: %w", err)
 	}
 
 	batchSize := int(tensorSize(batchShape))

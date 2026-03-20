@@ -136,7 +136,7 @@ func concatAndTrim(ctx context.Context, segments []Segment, outputPath string, s
 	if err := os.WriteFile(listPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write concat list: %w", err)
 	}
-	defer os.Remove(listPath)
+	defer func() { _ = os.Remove(listPath) }()
 
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-hide_banner",
