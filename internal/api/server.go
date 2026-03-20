@@ -86,6 +86,8 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder
 	s.mux.HandleFunc("GET /api/recordings/calendar", s.handleRecordingsCalendar)
 
 	s.mux.HandleFunc("GET /api/cameras/{name}/timeline", s.handleCameraTimeline)
+	s.mux.HandleFunc("GET /api/cameras/{name}/playback", s.handlePlayback)
+	s.mux.HandleFunc("GET /api/recordings/segments/{camera}", s.handleListSegments)
 
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
@@ -170,7 +172,43 @@ func (s *Server) cameraStatuses() []camera.CameraStatus {
 // --- JSON API handlers ---
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	status := "ok"
+
+	// Database check
+	dbStatus := "ok"
+	if err := s.db.Ping(); err != nil {
+		dbStatus = "error"
+		status = "degraded"
+	}
+
+	// Camera check
+	statuses := s.cameraStatuses()
+	onlineCount := 0
+	for _, st := range statuses {
+		if st.Online {
+			onlineCount++
+		}
+	}
+
+	// Storage check
+	totalBytes, _ := s.db.TotalStorageBytes()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": status,
+		"checks": map[string]any{
+			"database": dbStatus,
+			"cameras": map[string]any{
+				"total":  len(statuses),
+				"online": onlineCount,
+			},
+			"storage": map[string]any{
+				"used_bytes": totalBytes,
+				"used":       formatBytes(totalBytes),
+			},
+		},
+		"version": "0.1.0",
+		"uptime":  formatDuration(time.Since(startTime)),
+	})
 }
 
 func (s *Server) handleListCameras(w http.ResponseWriter, _ *http.Request) {
@@ -249,6 +287,8 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
 		return
 	}
+	filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	http.ServeFile(w, r, event.SnapshotPath)
 }
 
@@ -263,6 +303,8 @@ func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "clip not found"})
 		return
 	}
+	filename := fmt.Sprintf("%s_%s.mp4", event.ID, event.Label)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	http.ServeFile(w, r, event.ClipPath)
 }
 
@@ -354,6 +396,93 @@ func (s *Server) handleCameraTimeline(w http.ResponseWriter, r *http.Request) {
 		"segments": segs,
 		"events":   evts,
 	})
+}
+
+func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	startStr := r.URL.Query().Get("start")
+	if startStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start parameter required"})
+		return
+	}
+
+	start, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid start time format, use RFC3339"})
+		return
+	}
+
+	// Find the segment that contains the requested timestamp
+	segments, err := s.db.QuerySegments(name, start, start.Add(1*time.Second))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if len(segments) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no recording found for this timestamp"})
+		return
+	}
+
+	seg := segments[0]
+
+	// Calculate the offset into the segment
+	offset := start.Sub(seg.StartTime).Seconds()
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Set a header with the offset so the client can seek to the right position
+	w.Header().Set("X-Playback-Offset", fmt.Sprintf("%.1f", offset))
+	w.Header().Set("X-Segment-Start", seg.StartTime.Format(time.RFC3339))
+	w.Header().Set("X-Segment-End", seg.EndTime.Format(time.RFC3339))
+
+	http.ServeFile(w, r, seg.Path)
+}
+
+func (s *Server) handleListSegments(w http.ResponseWriter, r *http.Request) {
+	cameraName := r.PathValue("camera")
+	cam := s.cameras.GetCamera(cameraName)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	date := time.Now().UTC()
+	if dateStr := r.URL.Query().Get("date"); dateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+			date = parsed
+		}
+	}
+
+	segments, err := s.db.GetSegmentsForDate(cameraName, date)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type segmentInfo struct {
+		StartTime time.Time `json:"start_time"`
+		EndTime   time.Time `json:"end_time"`
+		SizeBytes int64     `json:"size_bytes"`
+	}
+
+	result := make([]segmentInfo, 0, len(segments))
+	for _, seg := range segments {
+		result = append(result, segmentInfo{
+			StartTime: seg.StartTime,
+			EndTime:   seg.EndTime,
+			SizeBytes: seg.SizeBytes,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"segments": result})
 }
 
 // --- Streaming handlers ---
@@ -500,7 +629,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "text/html")
 
 	if offset == 0 && len(events) == 0 {
-		fmt.Fprint(w, `<div class="empty-state"><p>No events recorded yet.</p></div>`)
+		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No events recorded yet.</p></div>`)
 		return
 	}
 
@@ -533,7 +662,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		if labelFilter != "" {
 			nextURL += "&label=" + labelFilter
 		}
-		fmt.Fprintf(w, `<div id="load-more-trigger" hx-get="%s" hx-trigger="revealed" hx-swap="outerHTML"></div>`, nextURL)
+		_, _ = fmt.Fprintf(w, `<div id="load-more-trigger" hx-get="%s" hx-trigger="revealed" hx-swap="outerHTML"></div>`, nextURL)
 	}
 }
 
@@ -592,6 +721,16 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<div class="meta-row"><span class="key">Confidence</span><span class="val">{{scorePercent .Score}}</span></div>` +
 			`<div class="meta-row"><span class="key">Time</span><span class="val">{{formatTime .Timestamp}}</span></div>` +
 			`<div class="meta-row"><span class="key">Event ID</span><span class="val mono">{{.ID}}</span></div>` +
+			`</div>` +
+			`<div class="meta-card">` +
+			`<div class="meta-card-header">Downloads</div>` +
+			`{{if .ClipPath}}<a href="/api/events/{{.ID}}/clip" download class="download-row">` +
+			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>` +
+			` Download Clip</a>{{end}}` +
+			`{{if .SnapshotPath}}<a href="/api/events/{{.ID}}/snapshot" download class="download-row">` +
+			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>` +
+			` Download Snapshot</a>{{end}}` +
+			`{{if not .ClipPath}}{{if not .SnapshotPath}}<div class="download-row disabled">No media available</div>{{end}}{{end}}` +
 			`</div>` +
 			`<div class="event-nav">` +
 			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
@@ -775,7 +914,7 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 
 	if cameraFilter == "" {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<div class="empty-state"><p>No cameras configured.</p></div>`)
+		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No cameras configured.</p></div>`)
 		return
 	}
 
@@ -787,7 +926,7 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 
 	if len(segments) == 0 {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<div class="empty-state"><p>No recordings for this date.</p></div>`)
+		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No recordings for this date.</p></div>`)
 		return
 	}
 

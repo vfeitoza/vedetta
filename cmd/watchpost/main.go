@@ -48,7 +48,7 @@ func main() {
 		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var mqttClient *mqtt.Client
 	if cfg.MQTT.Enabled {

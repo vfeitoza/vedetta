@@ -148,12 +148,18 @@ func TestHandleHealth(t *testing.T) {
 		t.Fatalf("GET /api/health: status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var body map[string]string
+	var body map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body["status"] != "ok" {
 		t.Errorf("status = %q, want %q", body["status"], "ok")
+	}
+	if _, ok := body["checks"]; !ok {
+		t.Error("response missing 'checks' key")
+	}
+	if body["version"] != "0.1.0" {
+		t.Errorf("version = %v, want %q", body["version"], "0.1.0")
 	}
 
 	ct := w.Header().Get("Content-Type")
@@ -789,6 +795,355 @@ func TestHandleListEvents_OrderedByTimestampDesc(t *testing.T) {
 	}
 	if body.Events[2].ID != "ord-old" {
 		t.Errorf("third event = %q, want %q (oldest)", body.Events[2].ID, "ord-old")
+	}
+}
+
+// --- Camera Timeline tests ---
+
+func TestHandleCameraTimeline_CameraNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/nonexistent/timeline?date=2025-01-15", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "camera not found" {
+		t.Errorf("error = %q, want %q", body["error"], "camera not found")
+	}
+}
+
+// --- Recordings Calendar tests ---
+
+func TestHandleRecordingsCalendar_WithSegments(t *testing.T) {
+	srv, db := newTestServer(t)
+
+	// Seed segments on specific days in January 2025
+	day5 := time.Date(2025, 1, 5, 10, 0, 0, 0, time.UTC)
+	day10 := time.Date(2025, 1, 10, 14, 0, 0, 0, time.UTC)
+	day20 := time.Date(2025, 1, 20, 8, 0, 0, 0, time.UTC)
+
+	seedSegment(t, db, "cam1", "/tmp/cal-seg1.mp4", day5, day5.Add(time.Hour), 1024)
+	seedSegment(t, db, "cam1", "/tmp/cal-seg2.mp4", day10, day10.Add(time.Hour), 2048)
+	seedSegment(t, db, "cam2", "/tmp/cal-seg3.mp4", day20, day20.Add(time.Hour), 4096)
+
+	t.Run("no camera filter returns days across all cameras", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/recordings/calendar?month=2025-01", nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		var body struct {
+			Days []int `json:"days"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Days) != 3 {
+			t.Fatalf("got %d days, want 3: %v", len(body.Days), body.Days)
+		}
+		want := []int{5, 10, 20}
+		for i, d := range want {
+			if body.Days[i] != d {
+				t.Errorf("days[%d] = %d, want %d", i, body.Days[i], d)
+			}
+		}
+	})
+
+	t.Run("filter by specific camera", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/recordings/calendar?month=2025-01&camera=cam1", nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		var body struct {
+			Days []int `json:"days"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Days) != 2 {
+			t.Fatalf("got %d days, want 2: %v", len(body.Days), body.Days)
+		}
+		if body.Days[0] != 5 || body.Days[1] != 10 {
+			t.Errorf("days = %v, want [5, 10]", body.Days)
+		}
+	})
+}
+
+func TestHandleRecordingsCalendar_EmptyMonth(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/recordings/calendar?month=2030-06", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Days []int `json:"days"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Days) != 0 {
+		t.Errorf("got %d days, want 0: %v", len(body.Days), body.Days)
+	}
+}
+
+func TestHandleRecordingsCalendar_DefaultsToCurrentMonth(t *testing.T) {
+	srv, db := newTestServer(t)
+
+	// Seed a segment for today
+	now := time.Now().UTC()
+	seedSegment(t, db, "cam1", "/tmp/cal-today.mp4", now.Add(-time.Hour), now, 1024)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/recordings/calendar", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Days []int `json:"days"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Days) != 1 {
+		t.Fatalf("got %d days, want 1: %v", len(body.Days), body.Days)
+	}
+	if body.Days[0] != now.Day() {
+		t.Errorf("day = %d, want %d (today)", body.Days[0], now.Day())
+	}
+}
+
+// --- Event Counts tests ---
+
+func TestHandleEventCounts_WithEvents(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedEvent(t, db, "cnt-1", "front_door", "person", 0.95, now)
+	seedEvent(t, db, "cnt-2", "front_door", "car", 0.80, now.Add(-time.Minute))
+	seedEvent(t, db, "cnt-3", "back_yard", "person", 0.70, now.Add(-2*time.Minute))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events/counts", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Total    int            `json:"total"`
+		ByLabel  map[string]int `json:"by_label"`
+		ByCamera map[string]int `json:"by_camera"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 3 {
+		t.Errorf("total = %d, want 3", body.Total)
+	}
+	if body.ByLabel["person"] != 2 {
+		t.Errorf("by_label[person] = %d, want 2", body.ByLabel["person"])
+	}
+	if body.ByLabel["car"] != 1 {
+		t.Errorf("by_label[car] = %d, want 1", body.ByLabel["car"])
+	}
+	if body.ByCamera["front_door"] != 2 {
+		t.Errorf("by_camera[front_door] = %d, want 2", body.ByCamera["front_door"])
+	}
+	if body.ByCamera["back_yard"] != 1 {
+		t.Errorf("by_camera[back_yard] = %d, want 1", body.ByCamera["back_yard"])
+	}
+}
+
+func TestHandleEventCounts_NoEvents(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events/counts", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Total    int            `json:"total"`
+		ByLabel  map[string]int `json:"by_label"`
+		ByCamera map[string]int `json:"by_camera"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 0 {
+		t.Errorf("total = %d, want 0", body.Total)
+	}
+}
+
+// --- Events with offset tests ---
+
+func TestHandleListEvents_WithOffset(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedEvent(t, db, "off-1", "cam1", "person", 0.9, now)
+	seedEvent(t, db, "off-2", "cam1", "car", 0.8, now.Add(-time.Minute))
+	seedEvent(t, db, "off-3", "cam1", "dog", 0.7, now.Add(-2*time.Minute))
+
+	t.Run("offset skips events", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/events?offset=1", nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		var body struct {
+			Events []camera.Event `json:"events"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Events) != 2 {
+			t.Fatalf("got %d events, want 2", len(body.Events))
+		}
+		// Events are ordered by timestamp DESC, so skipping the first (newest) gives us off-2 and off-3
+		if body.Events[0].ID != "off-2" {
+			t.Errorf("first event = %q, want %q", body.Events[0].ID, "off-2")
+		}
+		if body.Events[1].ID != "off-3" {
+			t.Errorf("second event = %q, want %q", body.Events[1].ID, "off-3")
+		}
+	})
+
+	t.Run("offset and limit combined", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/events?offset=0&limit=1", nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		var body struct {
+			Events []camera.Event `json:"events"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Events) != 1 {
+			t.Fatalf("got %d events, want 1", len(body.Events))
+		}
+		if body.Events[0].ID != "off-1" {
+			t.Errorf("event = %q, want %q (most recent)", body.Events[0].ID, "off-1")
+		}
+	})
+}
+
+// --- Event Detail Partial with adjacent events ---
+
+func TestHandleEventDetailPartial_AdjacentEvents(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedEvent(t, db, "adj-1", "cam1", "person", 0.9, now.Add(-2*time.Minute))
+	seedEvent(t, db, "adj-2", "cam1", "car", 0.8, now.Add(-time.Minute))
+	seedEvent(t, db, "adj-3", "cam1", "dog", 0.7, now)
+
+	// Fetch the middle event's detail partial
+	req := httptest.NewRequest(http.MethodGet, "/partials/event/adj-2", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+
+	// The template renders prev/next as links with data-prev-id and data-next-id attributes
+	if !contains(body, "data-prev-id=\"adj-1\"") {
+		t.Errorf("response missing previous event link to adj-1, body: %s", body)
+	}
+	if !contains(body, "data-next-id=\"adj-3\"") {
+		t.Errorf("response missing next event link to adj-3, body: %s", body)
+	}
+}
+
+func TestHandleEventDetailPartial_FirstEvent_NoPrev(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedEvent(t, db, "first-1", "cam1", "person", 0.9, now.Add(-time.Minute))
+	seedEvent(t, db, "first-2", "cam1", "car", 0.8, now)
+
+	// Fetch the first (oldest) event
+	req := httptest.NewRequest(http.MethodGet, "/partials/event/first-1", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+
+	// No previous link (disabled span), but next link should exist
+	if contains(body, "data-prev-id") {
+		t.Error("first event should not have a previous link")
+	}
+	if !contains(body, "data-next-id=\"first-2\"") {
+		t.Errorf("response missing next event link to first-2, body: %s", body)
+	}
+}
+
+func TestHandleEventDetailPartial_LastEvent_NoNext(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedEvent(t, db, "last-1", "cam1", "person", 0.9, now.Add(-time.Minute))
+	seedEvent(t, db, "last-2", "cam1", "car", 0.8, now)
+
+	// Fetch the last (newest) event
+	req := httptest.NewRequest(http.MethodGet, "/partials/event/last-2", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+
+	// Previous link should exist, no next link
+	if !contains(body, "data-prev-id=\"last-1\"") {
+		t.Errorf("response missing previous event link to last-1, body: %s", body)
+	}
+	if contains(body, "data-next-id") {
+		t.Error("last event should not have a next link")
 	}
 }
 
