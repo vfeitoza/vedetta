@@ -21,10 +21,11 @@ type Detection struct {
 // It selects the best available backend automatically.
 // Safe for concurrent use by multiple camera goroutines.
 type Detector struct {
-	mu      sync.Mutex
-	config  config.DetectConfig
-	backend Backend
-	enabled bool
+	mu       sync.Mutex
+	config   config.DetectConfig
+	backend  Backend
+	enabled  bool
+	inputBuf []float32 // reusable preprocessing buffer [3*640*640], guarded by mu
 }
 
 func New(cfg config.DetectConfig) *Detector {
@@ -59,7 +60,10 @@ func (d *Detector) Detect(img *image.RGBA) []Detection {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	inputData, scale, padX, padY := prepareInput(img)
+	if d.inputBuf == nil {
+		d.inputBuf = make([]float32, 3*modelInputSize*modelInputSize)
+	}
+	inputData, scale, padX, padY := prepareInputInto(d.inputBuf, img)
 
 	output, err := d.backend.Run(inputData)
 	if err != nil {

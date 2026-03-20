@@ -15,31 +15,31 @@ const (
 // prepareInput converts an RGBA image to a float32 tensor in CHW format
 // normalized to [0, 1], resized to 640x640 with letterboxing.
 func prepareInput(img *image.RGBA) ([]float32, float64, float64, float64) {
+	buf := make([]float32, 3*modelInputSize*modelInputSize)
+	return prepareInputInto(buf, img)
+}
+
+// prepareInputInto is like prepareInput but writes into the provided buffer,
+// avoiding allocation. buf must have length >= 3*640*640.
+func prepareInputInto(buf []float32, img *image.RGBA) ([]float32, float64, float64, float64) {
 	bounds := img.Bounds()
 	origW := float64(bounds.Dx())
 	origH := float64(bounds.Dy())
 
-	// Compute scale to fit within 640x640 while preserving aspect ratio
 	scale := math.Min(float64(modelInputSize)/origW, float64(modelInputSize)/origH)
 	newW := int(origW * scale)
 	newH := int(origH * scale)
 
-	// Offsets for centering the image (letterboxing)
 	padX := (modelInputSize - newW) / 2
 	padY := (modelInputSize - newH) / 2
 
-	// Allocate CHW tensor: 3 channels x 640 x 640
-	tensorSize := 3 * modelInputSize * modelInputSize
-	input := make([]float32, tensorSize)
-
-	// Fill with gray (0.5) for letterbox padding
-	for i := range input {
-		input[i] = 0.5
+	// Fill with gray (0.5) for letterbox padding.
+	for i := range buf {
+		buf[i] = 0.5
 	}
 
 	channelStride := modelInputSize * modelInputSize
 
-	// Nearest-neighbor resize + normalize to [0, 1]
 	for y := 0; y < newH; y++ {
 		srcY := int(float64(y) / scale)
 		if srcY >= bounds.Dy() {
@@ -60,13 +60,13 @@ func prepareInput(img *image.RGBA) ([]float32, float64, float64, float64) {
 			dstX := x + padX
 			dstIdx := dstY*modelInputSize + dstX
 
-			input[0*channelStride+dstIdx] = r
-			input[1*channelStride+dstIdx] = g
-			input[2*channelStride+dstIdx] = b
+			buf[0*channelStride+dstIdx] = r
+			buf[1*channelStride+dstIdx] = g
+			buf[2*channelStride+dstIdx] = b
 		}
 	}
 
-	return input, scale, float64(padX), float64(padY)
+	return buf, scale, float64(padX), float64(padY)
 }
 
 // processOutput extracts detections from the raw YOLOv8 output tensor.
