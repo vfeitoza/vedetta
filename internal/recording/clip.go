@@ -52,27 +52,33 @@ func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string,
 		return clipPath, nil
 	}
 
-	if len(segments) == 1 {
-		// Single segment — trim it directly
-		seg := segments[0]
-		startOffset := from.Sub(seg.StartTime)
-		if startOffset < 0 {
-			startOffset = 0
+	// Filter out segments whose files no longer exist (retention may have deleted them).
+	valid := segments[:0]
+	for _, seg := range segments {
+		if _, err := os.Stat(seg.Path); err == nil {
+			valid = append(valid, seg)
 		}
-		duration := to.Sub(from)
+	}
+	segments = valid
 
-		if err := trimSegment(ctx, seg.Path, clipPath, startOffset, duration); err != nil {
-			return "", fmt.Errorf("trim segment: %w", err)
+	if len(segments) == 0 {
+		// Segments were deleted between query and access — fall back to stream
+		slog.Warn("segments deleted before clip extraction, recording from stream",
+			"camera", event.CameraName,
+		)
+		duration := r.config.PreCapture + r.config.PostCapture
+		if duration == 0 {
+			duration = 15 * time.Second
+		}
+		rtspURL := r.cameraURLs[event.CameraName]
+		if rtspURL == "" {
+			return "", fmt.Errorf("no stream URL for camera %q", event.CameraName)
+		}
+		if err := r.recordFromStream(ctx, rtspURL, clipPath, duration); err != nil {
+			return "", err
 		}
 		return clipPath, nil
 	}
-
-	// Multiple segments — concatenate then trim
-	concatPath := clipPath + ".concat.mp4"
-	if err := concatSegments(ctx, segments, concatPath); err != nil {
-		return "", fmt.Errorf("concat segments: %w", err)
-	}
-	defer os.Remove(concatPath)
 
 	startOffset := from.Sub(segments[0].StartTime)
 	if startOffset < 0 {
@@ -80,8 +86,17 @@ func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string,
 	}
 	duration := to.Sub(from)
 
-	if err := trimSegment(ctx, concatPath, clipPath, startOffset, duration); err != nil {
-		return "", fmt.Errorf("trim concatenated: %w", err)
+	if len(segments) == 1 {
+		// Single segment — trim it directly
+		if err := trimSegment(ctx, segments[0].Path, clipPath, startOffset, duration); err != nil {
+			return "", fmt.Errorf("trim segment: %w", err)
+		}
+		return clipPath, nil
+	}
+
+	// Multiple segments — concat+trim in a single ffmpeg pass
+	if err := concatAndTrim(ctx, segments, clipPath, startOffset, duration); err != nil {
+		return "", fmt.Errorf("concat and trim: %w", err)
 	}
 
 	return clipPath, nil
@@ -108,13 +123,12 @@ func trimSegment(ctx context.Context, inputPath, outputPath string, startOffset,
 	return nil
 }
 
-// concatSegments joins multiple video segments into a single file using ffmpeg's concat demuxer.
-func concatSegments(ctx context.Context, segments []Segment, outputPath string) error {
-	// Create a temporary concat list file
+// concatAndTrim concatenates multiple segments and trims to the desired window
+// in a single ffmpeg pass, avoiding an intermediate concatenated file.
+func concatAndTrim(ctx context.Context, segments []Segment, outputPath string, startOffset, duration time.Duration) error {
 	listPath := outputPath + ".txt"
 	var lines []string
 	for _, seg := range segments {
-		// ffmpeg concat format requires escaped single quotes in paths
 		escaped := strings.ReplaceAll(seg.Path, "'", "'\\''")
 		lines = append(lines, fmt.Sprintf("file '%s'", escaped))
 	}
@@ -130,6 +144,8 @@ func concatSegments(ctx context.Context, segments []Segment, outputPath string) 
 		"-f", "concat",
 		"-safe", "0",
 		"-i", listPath,
+		"-ss", formatDuration(startOffset),
+		"-t", formatDuration(duration),
 		"-c", "copy",
 		"-movflags", "+faststart",
 		"-y",
@@ -137,7 +153,7 @@ func concatSegments(ctx context.Context, segments []Segment, outputPath string) 
 	)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg concat: %w: %s", err, string(output))
+		return fmt.Errorf("ffmpeg concat+trim: %w: %s", err, string(output))
 	}
 
 	return nil
