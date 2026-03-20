@@ -244,6 +244,27 @@ func (c *Camera) Status() CameraStatus {
 	}
 }
 
+// SnapshotRGB24 copies the raw RGB24 frame into dst and returns dimensions.
+// Returns false if no frame is available. dst must be large enough.
+func (c *Camera) SnapshotRGB24(dst []byte) (w, h int, ok bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.rawFrame == nil {
+		return 0, 0, false
+	}
+	needed := len(c.rawFrame)
+	if len(dst) < needed {
+		return 0, 0, false
+	}
+	copy(dst, c.rawFrame)
+	return c.frameW, c.frameH, true
+}
+
+// FrameSize returns the expected RGB24 frame size based on detect config.
+func (c *Camera) FrameSize() int {
+	return c.config.Detect.Width * c.config.Detect.Height * 3
+}
+
 func rawToRGBA(data []byte, w, h int) *image.RGBA {
 	n := w * h
 	img := image.NewRGBA(image.Rect(0, 0, w, h))

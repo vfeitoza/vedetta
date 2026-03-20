@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"image"
 	"image/jpeg"
 	"io/fs"
 	"log/slog"
@@ -318,10 +317,7 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	handler := stream.MJPEGHandler(func() *image.RGBA {
-		return cam.LastSnapshot()
-	})
-
+	handler := stream.MJPEGHandlerRGB24(cam.SnapshotRGB24, cam.FrameSize())
 	handler.ServeHTTP(w, r)
 }
 
