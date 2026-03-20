@@ -191,6 +191,17 @@
 
       // Timeline date
       initTimeline();
+
+      // Auto-playback if ?t= parameter is present (from recordings page)
+      const playbackTime = new URLSearchParams(location.search).get('t');
+      if (playbackTime) {
+        const ts = new Date(playbackTime);
+        if (!isNaN(ts.getTime())) {
+          // Set timeline to that day and start playback after a short delay
+          timelineDate = new Date(ts);
+          setTimeout(function() { startPlayback(ts); }, 500);
+        }
+      }
     })();
   </script>
 </body>

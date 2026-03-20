@@ -1240,7 +1240,21 @@ input, select { font-family: inherit; }
 .segment-size {
   font-family: var(--font-mono);
   color: var(--text-tertiary);
+}
+
+.segment-actions {
+  display: flex;
+  gap: 0.25rem;
   margin-left: auto;
+}
+
+.segment-actions .btn {
+  padding: 0.25rem 0.5rem;
+}
+
+.segment-actions svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* ─── System Page ─── */

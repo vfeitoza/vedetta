@@ -944,10 +944,16 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 	}
 
 	tmpl := template.Must(template.New("recordings").Funcs(funcs).Parse(
-		`{{range .}}<div class="segment-row">` +
+		`{{range .}}<div class="segment-row" data-camera="{{.Camera}}" data-start="{{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}">` +
 			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
 			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
 			`<span class="segment-size">{{formatBytes .SizeBytes}}</span>` +
+			`<span class="segment-actions">` +
+			`<a href="/camera.html?name={{.Camera}}&t={{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}" class="btn btn-sm" title="Play in camera view">` +
+			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>` +
+			`<a href="/api/cameras/{{.Camera}}/playback?start={{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}" download class="btn btn-sm" title="Download segment">` +
+			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>` +
+			`</span>` +
 			`</div>{{end}}`))
 
 	w.Header().Set("Content-Type", "text/html")
