@@ -69,6 +69,52 @@ func prepareInputInto(buf []float32, img *image.RGBA) ([]float32, float64, float
 	return buf, scale, float64(padX), float64(padY)
 }
 
+// prepareInputFromRGB24Into builds a float32 CHW tensor directly from RGB24 data,
+// skipping the intermediate RGBA conversion. buf must have length >= 3*640*640.
+func prepareInputFromRGB24Into(buf []float32, data []byte, w, h int) ([]float32, float64, float64, float64) {
+	origW := float64(w)
+	origH := float64(h)
+
+	scale := math.Min(float64(modelInputSize)/origW, float64(modelInputSize)/origH)
+	newW := int(origW * scale)
+	newH := int(origH * scale)
+
+	padX := (modelInputSize - newW) / 2
+	padY := (modelInputSize - newH) / 2
+
+	for i := range buf {
+		buf[i] = 0.5
+	}
+
+	channelStride := modelInputSize * modelInputSize
+
+	for y := 0; y < newH; y++ {
+		srcY := int(float64(y) / scale)
+		if srcY >= h {
+			srcY = h - 1
+		}
+		for x := 0; x < newW; x++ {
+			srcX := int(float64(x) / scale)
+			if srcX >= w {
+				srcX = w - 1
+			}
+
+			srcIdx := (srcY*w + srcX) * 3 // RGB24 stride
+			r := float32(data[srcIdx+0]) / 255.0
+			g := float32(data[srcIdx+1]) / 255.0
+			b := float32(data[srcIdx+2]) / 255.0
+
+			dstIdx := (y+padY)*modelInputSize + (x + padX)
+
+			buf[0*channelStride+dstIdx] = r
+			buf[1*channelStride+dstIdx] = g
+			buf[2*channelStride+dstIdx] = b
+		}
+	}
+
+	return buf, scale, float64(padX), float64(padY)
+}
+
 // processOutput extracts detections from the raw YOLOv8 output tensor.
 // The output shape is (1, 84, 8400): 4 bbox coords + 80 class scores per detection.
 func processOutput(output []float32, scoreThreshold float32, scale, padX, padY float64) []Detection {

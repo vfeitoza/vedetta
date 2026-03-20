@@ -35,7 +35,8 @@ type Camera struct {
 	hwaccel        *HWAccel
 
 	mu              sync.RWMutex
-	lastSnapshot    *image.RGBA
+	rawFrame        []byte // RGB24 frame data, guarded by mu
+	frameW, frameH  int
 	lastMotion      time.Time
 	lastFrameTime   time.Time
 	confirmedTracks map[int]bool
@@ -72,10 +73,15 @@ func (c *Camera) RecordURL() string {
 	return c.config.URL
 }
 
+// LastSnapshot converts the stored RGB24 frame to RGBA on demand.
+// Allocates only when called (typically by the API), not on every frame.
 func (c *Camera) LastSnapshot() *image.RGBA {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.lastSnapshot
+	if c.rawFrame == nil {
+		return nil
+	}
+	return rawToRGBA(c.rawFrame, c.frameW, c.frameH)
 }
 
 // Start begins reading frames from the RTSP stream.
@@ -157,11 +163,14 @@ func (c *Camera) runFFmpeg(ctx context.Context) error {
 			return fmt.Errorf("read frame: %w (got %d bytes)", err, n)
 		}
 
-		// Convert to image
-		img := rawToRGBA(buf, w, h)
-
+		// Store raw RGB24 frame for on-demand snapshot conversion.
 		c.mu.Lock()
-		c.lastSnapshot = img
+		if c.rawFrame == nil || len(c.rawFrame) != frameSize {
+			c.rawFrame = make([]byte, frameSize)
+		}
+		copy(c.rawFrame, buf)
+		c.frameW = w
+		c.frameH = h
 		c.lastFrameTime = time.Now()
 		c.mu.Unlock()
 
@@ -172,10 +181,10 @@ func (c *Camera) runFFmpeg(ctx context.Context) error {
 			c.lastMotion = time.Now()
 			c.mu.Unlock()
 
-			// Run object detection on the full frame when motion is detected.
+			// Run object detection directly from RGB24, skipping RGBA conversion.
 			// The motion regions tell us WHERE motion is, but the YOLO model
 			// expects a full frame (it handles its own letterboxing/scaling).
-			detections := c.detector.Detect(img)
+			detections := c.detector.DetectRGB24(buf, w, h)
 			tracked := c.tracker.Update(detections)
 
 			// Emit events for newly confirmed tracks
@@ -236,16 +245,16 @@ func (c *Camera) Status() CameraStatus {
 }
 
 func rawToRGBA(data []byte, w, h int) *image.RGBA {
+	n := w * h
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			srcIdx := (y*w + x) * 3
-			dstIdx := (y*w + x) * 4
-			img.Pix[dstIdx+0] = data[srcIdx+0] // R
-			img.Pix[dstIdx+1] = data[srcIdx+1] // G
-			img.Pix[dstIdx+2] = data[srcIdx+2] // B
-			img.Pix[dstIdx+3] = 255             // A
-		}
+	pix := img.Pix
+	for i := range n {
+		si := i * 3
+		di := i * 4
+		pix[di+0] = data[si+0]
+		pix[di+1] = data[si+1]
+		pix[di+2] = data[si+2]
+		pix[di+3] = 255
 	}
 	return img
 }

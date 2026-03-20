@@ -155,10 +155,9 @@ func (s *Server) cameraStatuses() []camera.CameraStatus {
 		if cam == nil {
 			continue
 		}
-		online := cam.LastSnapshot() != nil
 		statuses = append(statuses, camera.CameraStatus{
 			Name:   name,
-			Online: online,
+			Online: cam.IsOnline(),
 		})
 	}
 	return statuses

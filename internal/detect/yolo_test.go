@@ -70,6 +70,58 @@ func TestNMS_DifferentClasses(t *testing.T) {
 	}
 }
 
+func TestPrepareInputFromRGB24_MatchesRGBA(t *testing.T) {
+	w, h := 320, 240
+	// Build matching RGB24 and RGBA images with identical pixel data.
+	rgb24 := make([]byte, w*h*3)
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := range w * h {
+		r, g, b := byte(i%256), byte((i*7)%256), byte((i*13)%256)
+		rgb24[i*3+0] = r
+		rgb24[i*3+1] = g
+		rgb24[i*3+2] = b
+		img.Pix[i*4+0] = r
+		img.Pix[i*4+1] = g
+		img.Pix[i*4+2] = b
+		img.Pix[i*4+3] = 255
+	}
+
+	bufRGBA := make([]float32, 3*modelInputSize*modelInputSize)
+	bufRGB24 := make([]float32, 3*modelInputSize*modelInputSize)
+
+	outRGBA, scaleA, padXA, padYA := prepareInputInto(bufRGBA, img)
+	outRGB24, scaleB, padXB, padYB := prepareInputFromRGB24Into(bufRGB24, rgb24, w, h)
+
+	if scaleA != scaleB || padXA != padXB || padYA != padYB {
+		t.Fatalf("metadata mismatch: RGBA(%f,%f,%f) vs RGB24(%f,%f,%f)",
+			scaleA, padXA, padYA, scaleB, padXB, padYB)
+	}
+
+	for i := range outRGBA {
+		if outRGBA[i] != outRGB24[i] {
+			t.Fatalf("tensor mismatch at index %d: RGBA=%f, RGB24=%f", i, outRGBA[i], outRGB24[i])
+		}
+	}
+}
+
+func TestPrepareInputFromRGB24_OutputShape(t *testing.T) {
+	w, h := 1920, 1080
+	data := make([]byte, w*h*3)
+	buf := make([]float32, 3*modelInputSize*modelInputSize)
+	out, scale, padX, padY := prepareInputFromRGB24Into(buf, data, w, h)
+
+	expectedLen := 3 * modelInputSize * modelInputSize
+	if len(out) != expectedLen {
+		t.Errorf("expected tensor length %d, got %d", expectedLen, len(out))
+	}
+	if scale <= 0 {
+		t.Errorf("expected positive scale, got %f", scale)
+	}
+	if padX < 0 || padY < 0 {
+		t.Errorf("expected non-negative padding, got padX=%f padY=%f", padX, padY)
+	}
+}
+
 func TestIOU_FullOverlap(t *testing.T) {
 	a := [4]int{0, 0, 100, 100}
 	result := iou(a, a)

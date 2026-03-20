@@ -217,6 +217,36 @@ func TestDetector_EndToEnd_GoBackend(t *testing.T) {
 	t.Logf("detections on black image: %d", len(detections))
 }
 
+func TestDetector_DetectRGB24(t *testing.T) {
+	modelData := loadTestModel(t)
+	b, err := NewGoBackend(modelData)
+	if err != nil {
+		t.Fatalf("NewGoBackend: %v", err)
+	}
+
+	d := &Detector{
+		backend: b,
+		enabled: true,
+		config: config.DetectConfig{
+			ScoreThreshold:  0.5,
+			MotionThreshold: 0.02,
+		},
+	}
+	defer d.Close()
+
+	// All-black 320x240 RGB24 frame.
+	data := make([]byte, 320*240*3)
+	detections := d.DetectRGB24(data, 320, 240)
+	t.Logf("detections on black RGB24 frame: %d", len(detections))
+}
+
+func TestDetector_DetectRGB24_Disabled(t *testing.T) {
+	d := &Detector{enabled: false}
+	if detections := d.DetectRGB24(make([]byte, 100), 10, 10); detections != nil {
+		t.Fatalf("expected nil from disabled detector, got %d", len(detections))
+	}
+}
+
 func TestDetector_Disabled(t *testing.T) {
 	d := &Detector{enabled: false}
 	img := image.NewRGBA(image.Rect(0, 0, 10, 10))

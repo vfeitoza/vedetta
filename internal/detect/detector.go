@@ -74,6 +74,31 @@ func (d *Detector) Detect(img *image.RGBA) []Detection {
 	return processOutput(output, d.config.ScoreThreshold, scale, padX, padY)
 }
 
+// DetectRGB24 runs object detection directly on RGB24 frame data,
+// avoiding the intermediate RGBA conversion.
+// Safe for concurrent use — serializes access to the backend.
+func (d *Detector) DetectRGB24(data []byte, w, h int) []Detection {
+	if !d.enabled {
+		return nil
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.inputBuf == nil {
+		d.inputBuf = make([]float32, 3*modelInputSize*modelInputSize)
+	}
+	inputData, scale, padX, padY := prepareInputFromRGB24Into(d.inputBuf, data, w, h)
+
+	output, err := d.backend.Run(inputData)
+	if err != nil {
+		slog.Error("inference failed", "error", err)
+		return nil
+	}
+
+	return processOutput(output, d.config.ScoreThreshold, scale, padX, padY)
+}
+
 func (d *Detector) Close() {
 	if d.backend != nil {
 		d.backend.Close()
