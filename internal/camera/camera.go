@@ -378,17 +378,9 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 			}
 		}
 
-		// Emit end events for deleted tracks
+		// Clean up deleted tracks
 		for _, obj := range c.tracker.DeletedTracks() {
 			delete(c.confirmedTracks, obj.TrackID)
-			c.events <- Event{
-				ID:         fmt.Sprintf("%s-t%d-end-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli()),
-				CameraName: c.config.Name,
-				Label:      obj.Label,
-				Score:      obj.Score,
-				Box:        obj.Box,
-				Timestamp:  time.Now(),
-			}
 		}
 	}
 }
