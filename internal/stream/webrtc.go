@@ -21,18 +21,43 @@ type StreamManager struct {
 	consumers map[string]*webrtcConsumer
 }
 
-type peerState struct {
-	pc    *webrtc.PeerConnection
+// trackState handles per-track sequence/timestamp rewriting for mid-stream joins.
+type trackState struct {
 	track *webrtc.TrackLocalStaticRTP
 
+	mu        sync.Mutex
+	seqOffset uint16
+	tsOffset  uint32
+	started   bool
+}
+
+func (t *trackState) write(pkt *rtp.Packet) error {
+	t.mu.Lock()
+	if !t.started {
+		t.seqOffset = -pkt.Header.SequenceNumber
+		t.tsOffset = -pkt.Header.Timestamp
+		t.started = true
+	}
+	seq := pkt.Header.SequenceNumber + t.seqOffset
+	ts := pkt.Header.Timestamp + t.tsOffset
+	t.mu.Unlock()
+
+	clone := *pkt
+	clone.Header.SequenceNumber = seq
+	clone.Header.Timestamp = ts
+	return t.track.WriteRTP(&clone)
+}
+
+type peerState struct {
+	pc    *webrtc.PeerConnection
+	video *trackState
+	audio *trackState // nil if camera has no supported audio
+
 	mu           sync.Mutex
-	seqOffset    uint16
-	tsOffset     uint32
-	started      bool
 	keyframeSeen bool
 }
 
-func (p *peerState) write(pkt *rtp.Packet) error {
+func (p *peerState) writeVideo(pkt *rtp.Packet) error {
 	p.mu.Lock()
 	if !p.keyframeSeen {
 		if isKeyframe(pkt) {
@@ -42,20 +67,24 @@ func (p *peerState) write(pkt *rtp.Packet) error {
 			return nil
 		}
 	}
-
-	if !p.started {
-		p.seqOffset = -pkt.Header.SequenceNumber
-		p.tsOffset = -pkt.Header.Timestamp
-		p.started = true
-	}
-	seq := pkt.Header.SequenceNumber + p.seqOffset
-	ts := pkt.Header.Timestamp + p.tsOffset
 	p.mu.Unlock()
 
-	clone := *pkt
-	clone.Header.SequenceNumber = seq
-	clone.Header.Timestamp = ts
-	return p.track.WriteRTP(&clone)
+	return p.video.write(pkt)
+}
+
+func (p *peerState) writeAudio(pkt *rtp.Packet) error {
+	if p.audio == nil {
+		return nil
+	}
+	// Only forward audio after the first video keyframe
+	p.mu.Lock()
+	if !p.keyframeSeen {
+		p.mu.Unlock()
+		return nil
+	}
+	p.mu.Unlock()
+
+	return p.audio.write(pkt)
 }
 
 // isKeyframe checks if an RTP packet contains the start of an H264 IDR frame.
@@ -97,14 +126,23 @@ func (wc *webrtcConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	wc.mu.RLock()
 	defer wc.mu.RUnlock()
 	for _, p := range wc.peers {
-		if err := p.write(pkt); err != nil {
-			slog.Debug("failed to write RTP to peer", "error", err)
+		if err := p.writeVideo(pkt); err != nil {
+			slog.Debug("failed to write video RTP to peer", "error", err)
 		}
 	}
 }
 
-func (wc *webrtcConsumer) OnAudioRTP(_ *rtp.Packet) {}
-func (wc *webrtcConsumer) OnDisconnect()             {}
+func (wc *webrtcConsumer) OnAudioRTP(pkt *rtp.Packet) {
+	wc.mu.RLock()
+	defer wc.mu.RUnlock()
+	for _, p := range wc.peers {
+		if err := p.writeAudio(pkt); err != nil {
+			slog.Debug("failed to write audio RTP to peer", "error", err)
+		}
+	}
+}
+
+func (wc *webrtcConsumer) OnDisconnect() {}
 
 func (wc *webrtcConsumer) addPeer(peer *peerState) {
 	wc.mu.Lock()
@@ -132,6 +170,38 @@ func NewStreamManager(hub *rtsp.Hub) *StreamManager {
 	}
 }
 
+// audioCodecForTrack returns the WebRTC codec parameters for a camera's audio track.
+// Returns nil if the audio codec is not directly supported by WebRTC browsers
+// (e.g. AAC requires transcoding to Opus which is not yet implemented).
+func audioCodecForTrack(at *rtsp.TrackInfo) *webrtc.RTPCodecParameters {
+	if at == nil {
+		return nil
+	}
+	switch at.Codec {
+	case "PCMU":
+		return &webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypePCMU,
+				ClockRate: 8000,
+				Channels:  1,
+			},
+			PayloadType: 0,
+		}
+	case "PCMA":
+		return &webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypePCMA,
+				ClockRate: 8000,
+				Channels:  1,
+			},
+			PayloadType: 8,
+		}
+	default:
+		slog.Info("audio codec not supported for WebRTC passthrough, audio disabled", "codec", at.Codec)
+		return nil
+	}
+}
+
 // HandleOffer processes a WebRTC SDP offer and returns an SDP answer.
 func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	// Build H264 codec capability with profile-level-id from camera SPS
@@ -142,9 +212,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		sdpFmtpLine = fmt.Sprintf("level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s", profileLevelID)
 	}
 
-	// Register only the H264 codec we'll actually send.
-	// This ensures the SDP answer contains exactly one codec, so the browser
-	// knows which payload type to expect.
+	// Register only the codecs we'll actually send.
 	me := &webrtc.MediaEngine{}
 	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -154,7 +222,16 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		},
 		PayloadType: 96,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, fmt.Errorf("register codec: %w", err)
+		return nil, fmt.Errorf("register video codec: %w", err)
+	}
+
+	// Register audio codec if the camera provides a supported one
+	audioCodec := audioCodecForTrack(source.AudioTrack())
+	if audioCodec != nil {
+		if err := me.RegisterCodec(*audioCodec, webrtc.RTPCodecTypeAudio); err != nil {
+			slog.Warn("failed to register audio codec, continuing without audio", "error", err)
+			audioCodec = nil
+		}
 	}
 
 	// Force IPv4 only — IPv6 UDP causes packet loss on some networks
@@ -190,10 +267,30 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 
 	if _, err := pc.AddTrack(videoTrack); err != nil {
 		_ = pc.Close()
-		return nil, fmt.Errorf("add track: %w", err)
+		return nil, fmt.Errorf("add video track: %w", err)
 	}
 
-	peer := &peerState{pc: pc, track: videoTrack}
+	peer := &peerState{
+		pc:    pc,
+		video: &trackState{track: videoTrack},
+	}
+
+	// Add audio track if supported
+	if audioCodec != nil {
+		audioTrack, err := webrtc.NewTrackLocalStaticRTP(
+			audioCodec.RTPCodecCapability,
+			"audio",
+			fmt.Sprintf("vedetta-%s-audio", cameraName),
+		)
+		if err != nil {
+			slog.Warn("failed to create audio track, continuing without audio", "error", err)
+		} else if _, err := pc.AddTrack(audioTrack); err != nil {
+			slog.Warn("failed to add audio track, continuing without audio", "error", err)
+		} else {
+			peer.audio = &trackState{track: audioTrack}
+			slog.Info("WebRTC audio enabled", "camera", cameraName, "codec", source.AudioTrack().Codec)
+		}
+	}
 
 	if sm.hub == nil {
 		_ = pc.Close()

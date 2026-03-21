@@ -59,6 +59,7 @@ async function startWebRTC() {
     });
 
     peerConnection.addTransceiver('video', { direction: 'recvonly' });
+    peerConnection.addTransceiver('audio', { direction: 'recvonly' });
 
     peerConnection.ontrack = function(event) {
       const video = el('live-video');
@@ -96,6 +97,17 @@ async function startWebRTC() {
 
     currentStream = 'webrtc';
     updateStreamButtons();
+    startStreamStats();
+
+    // Check if audio was negotiated (m=audio with port > 0 in SDP answer)
+    var hasAudio = false;
+    if (peerConnection.remoteDescription && peerConnection.remoteDescription.sdp) {
+      var sdpLines = peerConnection.remoteDescription.sdp.split('\r\n');
+      hasAudio = sdpLines.some(function(l) {
+        return l.startsWith('m=audio ') && !l.startsWith('m=audio 0');
+      });
+    }
+    updateMuteButton(hasAudio);
     toast('WebRTC connected');
   } catch (err) {
     console.error('WebRTC error:', err);
@@ -119,6 +131,17 @@ function startMJPEG() {
   currentStream = 'mjpeg';
   updateStreamButtons();
   toast('MJPEG stream started');
+
+  // Start MJPEG stream stats to show resolution on hover
+  stopStreamStats();
+  streamStatsInterval = setInterval(function() {
+    var statsEl = el('stream-stats');
+    var mjpegImg = el('live-mjpeg');
+    if (!statsEl || !mjpegImg) return;
+    if (mjpegImg.naturalWidth && mjpegImg.naturalHeight) {
+      statsEl.innerHTML = '<span>MJPEG</span><span>' + mjpegImg.naturalWidth + '×' + mjpegImg.naturalHeight + '</span>';
+    }
+  }, 2000);
 }
 
 function stopStream() {
@@ -137,7 +160,9 @@ function stopStream() {
   if (snap) snap.classList.remove('hidden');
 
   currentStream = null;
+  stopStreamStats();
   updateStreamButtons();
+  updateMuteButton(false);
 }
 
 function updateStreamButtons() {
@@ -156,11 +181,187 @@ function updateStreamButtons() {
   if (btnStop) {
     btnStop.classList.toggle('hidden', currentStream === null);
   }
+
+  updateStreamBadge();
+}
+
+function updateStreamBadge(resolution) {
+  var badge = el('stream-badge');
+  if (!badge) return;
+
+  var type = playbackMode ? null : currentStream;
+
+  if (!type) {
+    // Show snapshot badge when no stream is active (and not in playback)
+    if (!playbackMode) {
+      badge.setAttribute('data-type', 'snapshot');
+      badge.innerHTML = '<span class="badge-dot"></span>SNAPSHOT';
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+    return;
+  }
+
+  badge.setAttribute('data-type', type);
+  badge.classList.remove('hidden');
+
+  var label = type.toUpperCase();
+  var resStr = '';
+
+  if (type === 'webrtc' && resolution) {
+    resStr = '<span class="badge-res">' + resolution + '</span>';
+  }
+
+  badge.innerHTML = '<span class="badge-dot"></span>' + label + (resStr ? ' · ' + resStr : '');
+}
+
+// Stream stats overlay — shows codec, resolution, framerate, bitrate on hover
+var streamStatsInterval = null;
+
+function startStreamStats() {
+  stopStreamStats();
+  streamStatsInterval = setInterval(updateStreamStats, 1000);
+}
+
+function stopStreamStats() {
+  if (streamStatsInterval) {
+    clearInterval(streamStatsInterval);
+    streamStatsInterval = null;
+  }
+  var statsEl = el('stream-stats');
+  if (statsEl) statsEl.innerHTML = '';
+}
+
+function updateStreamStats() {
+  var statsEl = el('stream-stats');
+  var video = el('live-video');
+  if (!statsEl || !video || currentStream !== 'webrtc' || !peerConnection) return;
+
+  // Get resolution from the video element
+  var w = video.videoWidth;
+  var h = video.videoHeight;
+  if (w && h) {
+    updateStreamBadge(w + '×' + h);
+  }
+
+  peerConnection.getStats().then(function(stats) {
+    var parts = [];
+
+    stats.forEach(function(report) {
+      if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+        if (report.codecId) {
+          stats.forEach(function(codec) {
+            if (codec.id === report.codecId && codec.mimeType) {
+              parts.push('<span>' + codec.mimeType.replace('audio/', '') + '</span>');
+            }
+          });
+        }
+      }
+      if (report.type === 'inbound-rtp' && report.kind === 'video') {
+        // Codec
+        if (report.codecId) {
+          stats.forEach(function(codec) {
+            if (codec.id === report.codecId && codec.mimeType) {
+              parts.push('<span>' + codec.mimeType.replace('video/', '') + '</span>');
+            }
+          });
+        }
+
+        // Resolution
+        if (w && h) {
+          parts.push('<span>' + w + '×' + h + '</span>');
+        }
+
+        // FPS
+        if (report.framesPerSecond) {
+          parts.push('<span>' + Math.round(report.framesPerSecond) + ' fps</span>');
+        }
+
+        // Bitrate (calculate from bytesReceived delta)
+        if (typeof report.bytesReceived === 'number') {
+          var key = 'lastBytes_' + report.id;
+          var timeKey = 'lastTime_' + report.id;
+          var prev = statsEl[key];
+          var prevTime = statsEl[timeKey];
+          var now = report.timestamp;
+
+          if (prev !== undefined && prevTime !== undefined) {
+            var deltaBits = (report.bytesReceived - prev) * 8;
+            var deltaSec = (now - prevTime) / 1000;
+            if (deltaSec > 0) {
+              var bps = deltaBits / deltaSec;
+              var label = bps >= 1000000
+                ? (bps / 1000000).toFixed(1) + ' Mbps'
+                : Math.round(bps / 1000) + ' kbps';
+              parts.push('<span>' + label + '</span>');
+            }
+          }
+
+          statsEl[key] = report.bytesReceived;
+          statsEl[timeKey] = now;
+        }
+
+        // Packet loss
+        if (report.packetsLost > 0 && report.packetsReceived > 0) {
+          var lossRate = (report.packetsLost / (report.packetsReceived + report.packetsLost) * 100);
+          if (lossRate > 0.1) {
+            parts.push('<span style="color:var(--red)">' + lossRate.toFixed(1) + '% loss</span>');
+          }
+        }
+      }
+    });
+
+    statsEl.innerHTML = parts.join('');
+  });
 }
 
 function hide(id) {
   const e = el(id);
   if (e) e.classList.add('hidden');
+}
+
+// ─── Audio Mute/Unmute ───
+var audioAvailable = false;
+
+function toggleMute() {
+  var video = el('live-video');
+  if (!video || !audioAvailable) return;
+
+  video.muted = !video.muted;
+  updateMuteIcon();
+
+  if (!video.muted) {
+    toast('Audio enabled');
+  }
+}
+
+function updateMuteButton(hasAudio) {
+  audioAvailable = hasAudio;
+  var btn = el('btn-mute');
+  if (!btn) return;
+
+  if (!hasAudio) {
+    btn.disabled = true;
+    btn.title = 'No audio available (camera uses unsupported codec)';
+    btn.style.opacity = '0.3';
+  } else {
+    btn.disabled = false;
+    btn.title = 'Toggle audio (A)';
+    btn.style.opacity = '';
+  }
+  updateMuteIcon();
+}
+
+function updateMuteIcon() {
+  var video = el('live-video');
+  var iconOff = el('mute-icon-off');
+  var iconOn = el('mute-icon-on');
+  if (!iconOff || !iconOn) return;
+
+  var muted = !video || video.muted || !audioAvailable;
+  iconOff.style.display = muted ? '' : 'none';
+  iconOn.style.display = muted ? 'none' : '';
 }
 
 // ─── Picture-in-Picture ───
@@ -184,14 +385,26 @@ async function togglePiP() {
 
 // ─── Fullscreen ───
 function toggleFullscreen() {
-  const viewport = el('live-viewport');
-  if (!viewport) return;
+  var container = el('live-viewport')?.closest('.live-container');
+  if (!container) return;
 
   if (document.fullscreenElement) {
     document.exitFullscreen();
   } else {
-    viewport.requestFullscreen().catch(() => {});
+    (container.requestFullscreen || container.webkitRequestFullscreen).call(container).catch(function() {});
   }
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenIcon);
+document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
+
+function updateFullscreenIcon() {
+  var enter = el('fs-icon-enter');
+  var exit = el('fs-icon-exit');
+  if (!enter || !exit) return;
+  var isFs = !!document.fullscreenElement;
+  enter.style.display = isFs ? 'none' : '';
+  exit.style.display = isFs ? '' : 'none';
 }
 
 // ─── Timeline ───
@@ -648,12 +861,12 @@ function returnToLive() {
 }
 
 function updatePlaybackUI() {
-  var badge = el('playback-badge');
-  var liveBadge = el('live-badge');
+  var pbBadge = el('playback-badge');
+  var streamBadge = el('stream-badge');
   var btnLive = el('btn-live');
 
-  if (badge) badge.classList.toggle('hidden', !playbackMode);
-  if (liveBadge) liveBadge.classList.toggle('hidden', playbackMode);
+  if (pbBadge) pbBadge.classList.toggle('hidden', !playbackMode);
+  if (streamBadge) streamBadge.classList.toggle('hidden', playbackMode);
   if (btnLive) btnLive.classList.toggle('hidden', !playbackMode);
 
   // Disable stream buttons during playback
@@ -831,6 +1044,10 @@ document.addEventListener('keydown', function(e) {
     case 'l':
     case 'L':
       if (playbackMode) returnToLive();
+      break;
+    case 'a':
+    case 'A':
+      if (el('btn-mute')) toggleMute();
       break;
     case 'f':
     case 'F':

@@ -143,7 +143,9 @@
 [data-theme="light"] .event-duration-badge { background: rgba(255, 255, 255, 0.85); color: var(--amber); }
 
 [data-theme="light"] .playback-badge { background: rgba(245, 127, 23, 0.15); color: var(--amber); }
-[data-theme="light"] .live-badge-indicator { background: rgba(46, 125, 50, 0.15); color: var(--green); }
+[data-theme="light"] .stream-badge[data-type="webrtc"] { background: rgba(46, 125, 50, 0.12); color: var(--green); }
+[data-theme="light"] .stream-badge[data-type="mjpeg"] { background: rgba(0, 151, 167, 0.12); color: var(--cyan); }
+[data-theme="light"] .stream-badge[data-type="snapshot"] { background: var(--surface-2); color: var(--text-tertiary); }
 [data-theme="light"] .btn-live { background: rgba(245, 127, 23, 0.15); border-color: var(--amber); color: var(--amber); }
 [data-theme="light"] .btn-live:hover { background: var(--amber); color: #fff; }
 
@@ -923,17 +925,56 @@ input, select { font-family: inherit; }
   50% { opacity: 0.7; }
 }
 
-.live-badge-indicator {
+/* Stream type badge (WEBRTC · 2560×1920, MJPEG, SNAPSHOT) */
+.stream-badge {
   display: inline-flex;
   align-items: center;
+  gap: 0.375rem;
   padding: 0.125rem 0.5rem;
-  background: var(--green-dim);
-  color: var(--green);
   border-radius: var(--radius-full);
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   font-weight: 700;
   letter-spacing: 0.05em;
+  transition: all var(--dur-normal) var(--ease-out);
+}
+
+.stream-badge[data-type="webrtc"] {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.stream-badge[data-type="mjpeg"] {
+  background: var(--cyan-ghost);
+  color: var(--cyan);
+}
+
+.stream-badge[data-type="snapshot"] {
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+}
+
+.stream-badge .badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.stream-badge[data-type="webrtc"] .badge-dot,
+.stream-badge[data-type="mjpeg"] .badge-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.stream-badge .badge-res {
+  opacity: 0.7;
+  font-weight: 500;
 }
 
 .btn-live {
@@ -945,6 +986,80 @@ input, select { font-family: inherit; }
 .btn-live:hover {
   background: var(--amber);
   color: var(--text-inverse);
+}
+
+/* Stream stats overlay (bottom-left of viewport) */
+.stream-stats {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-normal);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  z-index: 2;
+}
+
+.live-viewport:hover .stream-stats:not(:empty) {
+  opacity: 1;
+}
+
+.stream-stats span {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-xs);
+}
+
+/* ─── Fullscreen ─── */
+.live-container:fullscreen,
+.live-container:-webkit-full-screen {
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.live-container:fullscreen .live-toolbar,
+.live-container:-webkit-full-screen .live-toolbar {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity var(--dur-normal);
+}
+
+.live-container:fullscreen:hover .live-toolbar,
+.live-container:-webkit-full-screen:hover .live-toolbar,
+.live-container:fullscreen .live-toolbar:focus-within,
+.live-container:-webkit-full-screen .live-toolbar:focus-within {
+  opacity: 1;
+}
+
+.live-container:fullscreen .live-viewport,
+.live-container:-webkit-full-screen .live-viewport {
+  flex: 1;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+.live-container:fullscreen .stream-stats:not(:empty),
+.live-container:-webkit-full-screen .stream-stats:not(:empty) {
+  opacity: 1;
+}
+
+.live-container:fullscreen .live-viewport video,
+.live-container:fullscreen .live-viewport img,
+.live-container:-webkit-full-screen .live-viewport video,
+.live-container:-webkit-full-screen .live-viewport img {
+  object-fit: contain;
 }
 
 .hidden { display: none !important; }
