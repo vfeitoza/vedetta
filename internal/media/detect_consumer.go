@@ -37,6 +37,9 @@ type DetectConsumer struct {
 	frameDelay time.Duration
 	frameCount uint64
 	lastLog    time.Time
+	rtpCount   uint64
+	auCount    uint64
+	idrCount   uint64
 }
 
 // NewDetectConsumer creates a consumer that decodes H264 keyframes for detection.
@@ -101,19 +104,33 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		return
 	}
 
+	dc.mu.Lock()
+	dc.rtpCount++
+	dc.mu.Unlock()
+
 	au, err := dc.h264Decoder.Decode(pkt)
 	if err != nil {
 		return
 	}
+
+	dc.mu.Lock()
+	dc.auCount++
+	dc.mu.Unlock()
 
 	// Periodic status log — fires whether or not frames are being decoded
 	dc.mu.Lock()
 	if time.Since(dc.lastLog) >= 5*time.Minute {
 		slog.Info("detection status",
 			"camera", dc.camera,
+			"rtp_packets", dc.rtpCount,
+			"access_units", dc.auCount,
+			"idr_frames", dc.idrCount,
 			"frames_decoded", dc.frameCount,
 		)
 		dc.frameCount = 0
+		dc.rtpCount = 0
+		dc.auCount = 0
+		dc.idrCount = 0
 		dc.lastLog = time.Now()
 	}
 	// Rate limit
@@ -126,6 +143,10 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	if !h264.IsRandomAccess(au) {
 		return
 	}
+
+	dc.mu.Lock()
+	dc.idrCount++
+	dc.mu.Unlock()
 
 	// Update SPS/PPS from in-band parameters
 	for _, nalu := range au {
@@ -145,9 +166,28 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		return
 	}
 
-	// Build NAL unit stream with start codes for OpenH264
+	// Build NAL unit stream with start codes for OpenH264.
+	// Always prepend SPS/PPS before IDR if not already present in the AU,
+	// as some cameras (Tapo) send IDR without inline parameter sets.
 	var nalStream []byte
 	startCode := []byte{0, 0, 0, 1}
+
+	hasSPS := false
+	for _, nalu := range au {
+		if len(nalu) > 0 && h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeSPS {
+			hasSPS = true
+			break
+		}
+	}
+	if !hasSPS && dc.sps != nil {
+		nalStream = append(nalStream, startCode...)
+		nalStream = append(nalStream, dc.sps...)
+		if dc.pps != nil {
+			nalStream = append(nalStream, startCode...)
+			nalStream = append(nalStream, dc.pps...)
+		}
+	}
+
 	for _, nalu := range au {
 		if len(nalu) == 0 {
 			continue
