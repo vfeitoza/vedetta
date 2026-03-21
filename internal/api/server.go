@@ -17,6 +17,7 @@ import (
 
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/storage"
@@ -36,6 +37,7 @@ type Server struct {
 	cameras  *camera.Manager
 	recorder *recording.Recorder
 	streams  *stream.StreamManager
+	mse      *stream.MSEManager
 	mux      *http.ServeMux
 	funcMap  template.FuncMap
 }
@@ -47,6 +49,7 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder
 		cameras:  cameras,
 		recorder: recorder,
 		streams:  stream.NewStreamManager(hub),
+		mse:      stream.NewMSEManager(hub),
 		mux:      http.NewServeMux(),
 	}
 
@@ -106,6 +109,7 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder
 
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
+	s.mux.HandleFunc("GET /api/cameras/{name}/mse/ws", s.handleMSEWebSocket)
 	s.mux.HandleFunc("GET /api/cameras/{name}/mjpeg", s.handleMJPEG)
 
 	// HTML partial endpoints for htmx
@@ -207,6 +211,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 	// Storage check
 	totalBytes, _ := s.db.TotalStorageBytes()
+	storageStats := s.recorder.StorageStats()
+
+	if storageStats.DiskLow {
+		status = "degraded"
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": status,
@@ -217,8 +226,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 				"online": onlineCount,
 			},
 			"storage": map[string]any{
-				"used_bytes": totalBytes,
-				"used":       formatBytes(totalBytes),
+				"used_bytes":       totalBytes,
+				"used":             formatBytes(totalBytes),
+				"disk_available":   formatBytes(int64(storageStats.DiskAvailable)),
+				"disk_low":         storageStats.DiskLow,
+				"recording_paused": storageStats.RecordingPaused,
 			},
 		},
 		"version": "0.1.0",
@@ -450,17 +462,32 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	seg := segments[0]
 
 	// Calculate the offset into the segment
-	offset := start.Sub(seg.StartTime).Seconds()
+	offset := start.Sub(seg.StartTime)
 	if offset < 0 {
 		offset = 0
 	}
 
-	// Set a header with the offset so the client can seek to the right position
-	w.Header().Set("X-Playback-Offset", fmt.Sprintf("%.1f", offset))
 	w.Header().Set("X-Segment-Start", seg.StartTime.Format(time.RFC3339))
 	w.Header().Set("X-Segment-End", seg.EndTime.Format(time.RFC3339))
 
-	http.ServeFile(w, r, seg.Path)
+	// For HEAD requests, just confirm the segment exists
+	if r.Method == "HEAD" {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Serve full segment if offset is negligible (< 2s)
+	if offset < 2*time.Second {
+		http.ServeFile(w, r, seg.Path)
+		return
+	}
+
+	// Stream trimmed fMP4 starting at the requested offset
+	w.Header().Set("Content-Type", "video/mp4")
+	if err := media.TrimMP4ToWriter(seg.Path, w, offset); err != nil {
+		slog.Error("playback trim failed", "path", seg.Path, "offset", offset, "error", err)
+	}
 }
 
 func (s *Server) handleListSegments(w http.ResponseWriter, r *http.Request) {
@@ -528,6 +555,18 @@ func (s *Server) handleWebRTCOffer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, answer)
+}
+
+func (s *Server) handleMSEWebSocket(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	rtspURL := cam.RecordURL()
+	s.mse.HandleWebSocket(w, r, name, rtspURL)
 }
 
 func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {

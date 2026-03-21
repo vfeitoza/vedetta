@@ -285,6 +285,59 @@ func TrimMP4(inputPath, outputPath string, start, duration time.Duration) error 
 	return nil
 }
 
+// TrimMP4ToWriter writes a trimmed fMP4 starting at the given offset to w.
+// This is used for HTTP playback so the browser receives video starting at
+// the requested position without needing client-side seeking.
+func TrimMP4ToWriter(inputPath string, w io.Writer, start time.Duration) error {
+	in, err := os.Open(inputPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	timeScale, _ := readTimeScale(in)
+	if timeScale == 0 {
+		timeScale = 90000
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	startTick := uint64(start.Seconds() * float64(timeScale))
+
+	initBoxes, fragments, err := indexFile(in)
+	if err != nil {
+		return fmt.Errorf("index file: %w", err)
+	}
+
+	// Copy init segment boxes (ftyp, moov)
+	for _, loc := range initBoxes {
+		if _, err := in.Seek(loc.offset, io.SeekStart); err != nil {
+			return err
+		}
+		if _, err := io.CopyN(w, in, loc.size); err != nil {
+			return err
+		}
+	}
+
+	// Copy fragments from the start offset onward
+	var newSeqNum uint32 = 1
+	var newBaseTime uint64
+	for _, frag := range fragments {
+		if frag.decodeTime+uint64(frag.duration) <= startTick {
+			continue
+		}
+
+		if err := copyFragmentAdjusted(in, w, frag, newSeqNum, newBaseTime); err != nil {
+			return fmt.Errorf("copy fragment: %w", err)
+		}
+		newSeqNum++
+		newBaseTime += uint64(frag.duration)
+	}
+
+	return nil
+}
+
 // ConcatMP4 concatenates multiple fMP4 files with continuous timing.
 func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration) error {
 	if len(inputs) == 0 {

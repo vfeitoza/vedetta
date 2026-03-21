@@ -5,8 +5,16 @@
 
 // ─── State ───
 let peerConnection = null;
-let currentStream = null; // 'webrtc' | 'mjpeg' | null
+let mseWebSocket = null;
+let mseMediaSource = null;
+let mseBlobURL = null;
+let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
 let playbackMode = false; // true when playing back a recording
+let playbackStartTime = null; // Date when playback segment starts
+let playbackOffset = 0; // offset into segment where playback begins
+let timelineDragging = false; // true during timeline drag
+var cachedSegments = []; // raw segment data from API
+var mergedBlocks = []; // merged blocks {start: sec, end: sec} for hit-testing
 let timelineDate = new Date();
 let calendarDate = new Date();
 
@@ -45,6 +53,205 @@ function toast(message, type) {
   div.textContent = message;
   container.appendChild(div);
   setTimeout(() => div.remove(), 4000);
+}
+
+// ─── MSE over WebSocket ───
+function startMSE() {
+  var name = getCameraName();
+  if (!name) return;
+  stopStream();
+
+  if (typeof MediaSource === 'undefined') {
+    console.warn('MSE not supported, falling back to WebRTC');
+    startWebRTC();
+    return;
+  }
+
+  var video = el('live-video');
+  if (!video) return;
+
+  var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsURL = protocol + '//' + location.host + '/api/cameras/' + encodeURIComponent(name) + '/mse/ws';
+  var ws = new WebSocket(wsURL);
+  ws.binaryType = 'arraybuffer';
+  mseWebSocket = ws;
+
+  var mediaSource = null;
+  var sourceBuffer = null;
+  var queue = [];
+  var initReceived = false;
+
+  ws.onmessage = function(event) {
+    // First message is text: codec MIME type string
+    if (!initReceived && typeof event.data === 'string') {
+      initReceived = true;
+      var codecStr = event.data;
+      console.log('MSE codec:', codecStr);
+
+      // Check if the browser supports this codec
+      if (!MediaSource.isTypeSupported(codecStr)) {
+        console.warn('MSE codec not supported: ' + codecStr + ', falling back to WebRTC');
+        cleanupMSE();
+        startWebRTC();
+        return;
+      }
+
+      mediaSource = new MediaSource();
+      mseMediaSource = mediaSource;
+      mseBlobURL = URL.createObjectURL(mediaSource);
+      video.src = mseBlobURL;
+      video.classList.remove('hidden');
+      hide('live-snapshot');
+      hide('live-mjpeg');
+
+      mediaSource.addEventListener('sourceopen', function() {
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer(codecStr);
+          sourceBuffer.mode = 'segments';
+
+          sourceBuffer.addEventListener('updateend', function() {
+            // Drain one queued segment at a time (appendBuffer is async)
+            if (queue.length > 0 && !sourceBuffer.updating) {
+              sourceBuffer.appendBuffer(queue.shift());
+              return;
+            }
+            // Trim buffer to keep ~10s to avoid unbounded growth
+            if (!sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
+              var end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+              var start = sourceBuffer.buffered.start(0);
+              if (end - start > 15) {
+                sourceBuffer.remove(start, end - 10);
+              }
+            }
+          });
+
+          // Flush first queued segment (only one — updateend handles the rest)
+          if (queue.length > 0 && !sourceBuffer.updating) {
+            sourceBuffer.appendBuffer(queue.shift());
+          }
+        } catch (err) {
+          console.error('MSE sourceopen error:', err);
+          cleanupMSE();
+          startWebRTC();
+        }
+      });
+
+      currentStream = 'mse';
+      mseReconnectAttempts = 0;
+      updateStreamButtons();
+      updateMuteButton(codecStr.indexOf('mp4a') !== -1);
+      startMSEStats();
+      toast('MSE stream connected');
+      return;
+    }
+
+    // Binary messages: fMP4 segments
+    if (event.data instanceof ArrayBuffer) {
+      var data = new Uint8Array(event.data);
+      if (sourceBuffer && !sourceBuffer.updating) {
+        try {
+          sourceBuffer.appendBuffer(data);
+        } catch (err) {
+          // QuotaExceededError: trim buffer aggressively
+          if (err.name === 'QuotaExceededError' && sourceBuffer.buffered.length > 0) {
+            var bEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+            sourceBuffer.remove(0, bEnd - 5);
+          }
+          queue.push(data);
+        }
+      } else {
+        queue.push(data);
+        // Prevent unbounded queue growth
+        while (queue.length > 120) {
+          queue.shift();
+        }
+      }
+
+      // Auto-seek to live edge to minimize latency
+      if (video.buffered.length > 0) {
+        var liveEdge = video.buffered.end(video.buffered.length - 1);
+        if (liveEdge - video.currentTime > 2) {
+          video.currentTime = liveEdge - 0.5;
+        }
+      }
+    }
+  };
+
+  ws.onerror = function() {
+    console.error('MSE WebSocket error');
+  };
+
+  ws.onclose = function() {
+    if (currentStream === 'mse') {
+      toast('MSE stream disconnected', 'error');
+      cleanupMSE();
+      mseAutoReconnect();
+    }
+  };
+}
+
+function cleanupMSE() {
+  if (mseWebSocket) {
+    mseWebSocket.onclose = null;
+    mseWebSocket.close();
+    mseWebSocket = null;
+  }
+  if (mseMediaSource && mseMediaSource.readyState === 'open') {
+    try { mseMediaSource.endOfStream(); } catch (e) { /* ignore */ }
+  }
+  mseMediaSource = null;
+  if (mseBlobURL) {
+    URL.revokeObjectURL(mseBlobURL);
+    mseBlobURL = null;
+  }
+}
+
+// ─── MSE Auto-Reconnect ───
+var mseReconnectAttempts = 0;
+var mseMaxReconnect = 5;
+var mseReconnectTimer = null;
+
+function mseAutoReconnect() {
+  if (mseReconnectAttempts >= mseMaxReconnect) {
+    toast('MSE reconnect failed, trying WebRTC...', 'error');
+    mseReconnectAttempts = 0;
+    startWebRTC();
+    return;
+  }
+
+  mseReconnectAttempts++;
+  var delay = Math.min(1000 * Math.pow(2, mseReconnectAttempts - 1), 8000);
+  toast('Reconnecting MSE (' + mseReconnectAttempts + '/' + mseMaxReconnect + ')...');
+
+  mseReconnectTimer = setTimeout(function() {
+    startMSE();
+  }, delay);
+}
+
+function startMSEStats() {
+  stopStreamStats();
+  streamStatsInterval = setInterval(function() {
+    var statsEl = el('stream-stats');
+    var video = el('live-video');
+    if (!statsEl || !video || currentStream !== 'mse') return;
+
+    var w = video.videoWidth;
+    var h = video.videoHeight;
+    if (w && h) {
+      updateStreamBadge(w + '×' + h);
+    }
+
+    var parts = [];
+    if (w && h) parts.push('<span>' + w + '×' + h + '</span>');
+
+    // Buffer health
+    if (video.buffered.length > 0) {
+      var buffered = video.buffered.end(video.buffered.length - 1) - video.currentTime;
+      parts.push('<span>' + buffered.toFixed(1) + 's buf</span>');
+    }
+
+    statsEl.innerHTML = parts.join('');
+  }, 1000);
 }
 
 // ─── WebRTC ───
@@ -145,13 +352,24 @@ function startMJPEG() {
 }
 
 function stopStream() {
+  if (mseReconnectTimer) {
+    clearTimeout(mseReconnectTimer);
+    mseReconnectTimer = null;
+  }
+  if (webrtcReconnectTimer) {
+    clearTimeout(webrtcReconnectTimer);
+    webrtcReconnectTimer = null;
+  }
+
+  cleanupMSE();
+
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
   }
 
   const video = el('live-video');
-  if (video) { video.srcObject = null; video.classList.add('hidden'); }
+  if (video) { video.srcObject = null; video.src = ''; video.classList.add('hidden'); }
 
   const mjpeg = el('live-mjpeg');
   if (mjpeg) { mjpeg.src = ''; mjpeg.classList.add('hidden'); }
@@ -171,7 +389,7 @@ function updateStreamButtons() {
   const btnStop = el('btn-stop');
 
   if (btnWebrtc) {
-    btnWebrtc.classList.toggle('active', currentStream === 'webrtc');
+    btnWebrtc.classList.toggle('active', currentStream === 'webrtc' || currentStream === 'mse');
     btnWebrtc.disabled = currentStream !== null;
   }
   if (btnMjpeg) {
@@ -203,13 +421,13 @@ function updateStreamBadge(resolution) {
     return;
   }
 
-  badge.setAttribute('data-type', type);
+  badge.setAttribute('data-type', type === 'mse' ? 'webrtc' : type);
   badge.classList.remove('hidden');
 
-  var label = type.toUpperCase();
+  var label = type === 'mse' ? 'MSE' : type.toUpperCase();
   var resStr = '';
 
-  if (type === 'webrtc' && resolution) {
+  if ((type === 'webrtc' || type === 'mse') && resolution) {
     resStr = '<span class="badge-res">' + resolution + '</span>';
   }
 
@@ -236,7 +454,9 @@ function stopStreamStats() {
 function updateStreamStats() {
   var statsEl = el('stream-stats');
   var video = el('live-video');
-  if (!statsEl || !video || currentStream !== 'webrtc' || !peerConnection) return;
+  if (!statsEl || !video) return;
+  if (currentStream === 'mse') return; // MSE has its own stats via startMSEStats
+  if (currentStream !== 'webrtc' || !peerConnection) return;
 
   // Get resolution from the video element
   var w = video.videoWidth;
@@ -426,51 +646,97 @@ function initTimeline() {
   cursor.appendChild(cursorTime);
   track.appendChild(cursor);
 
-  let dragging = false;
-
   track.addEventListener('mousedown', function(e) {
-    dragging = true;
-    scrubTimeline(e);
+    timelineDragging = true;
+    scrubTimeline(e, false);
   });
 
   track.addEventListener('mousemove', function(e) {
-    if (dragging) scrubTimeline(e);
+    if (timelineDragging) scrubTimeline(e, false);
     // Update hover cursor position and time
     var rect = track.getBoundingClientRect();
     var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     cursor.style.left = (pct * 100) + '%';
-    var totalMin = pct * 24 * 60;
-    var h = Math.floor(totalMin / 60);
-    var m = Math.floor(totalMin % 60);
+    var totalSec = pct * 86400;
+    var h = Math.floor(totalSec / 3600);
+    var m = Math.floor((totalSec % 3600) / 60);
     cursorTime.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    // Change cursor when over a recorded segment
+    track.style.cursor = isOverSegment(pct) ? 'pointer' : 'default';
   });
 
   track.addEventListener('mouseleave', function() {
     cursor.style.display = 'none';
+    track.style.cursor = '';
   });
 
   track.addEventListener('mouseenter', function() {
     cursor.style.display = '';
   });
 
-  document.addEventListener('mouseup', function() { dragging = false; });
+  document.addEventListener('mouseup', function() {
+    if (timelineDragging) {
+      timelineDragging = false;
+      scrubTimeline(lastScrubEvent, true);
+    }
+  });
 
   // Touch support
   track.addEventListener('touchstart', function(e) {
-    dragging = true;
-    scrubTimeline(e.touches[0]);
+    timelineDragging = true;
+    scrubTimeline(e.touches[0], false);
     e.preventDefault();
   }, { passive: false });
 
   track.addEventListener('touchmove', function(e) {
-    if (dragging) scrubTimeline(e.touches[0]);
+    if (timelineDragging) scrubTimeline(e.touches[0], false);
     e.preventDefault();
   }, { passive: false });
 
-  track.addEventListener('touchend', function() { dragging = false; });
+  track.addEventListener('touchend', function(e) {
+    if (timelineDragging) {
+      timelineDragging = false;
+      scrubTimeline(lastScrubEvent, true);
+    }
+  });
 }
 
-function scrubTimeline(e) {
+var lastScrubEvent = null;
+
+// Convert a 0-1 fraction to seconds-of-day
+function pctToSec(pct) {
+  return pct * 86400;
+}
+
+// Check if a 0-1 fraction falls within any merged block
+function isOverSegment(pct) {
+  var sec = pctToSec(pct);
+  return mergedBlocks.some(function(block) {
+    return sec >= block.start && sec <= block.end;
+  });
+}
+
+// Find nearest merged block edge to a given seconds-of-day value
+function snapToNearestSegment(sec) {
+  var best = null;
+  var bestDist = Infinity;
+  mergedBlocks.forEach(function(block) {
+    if (Math.abs(sec - block.start) < bestDist) {
+      bestDist = Math.abs(sec - block.start);
+      best = block.start;
+    }
+    if (Math.abs(sec - block.end) < bestDist) {
+      bestDist = Math.abs(sec - block.end);
+      best = block.end;
+    }
+  });
+  return best;
+}
+
+function scrubTimeline(e, commit) {
+  if (!e) return;
+  lastScrubEvent = e;
+
   const track = el('timeline-track');
   const playhead = el('timeline-playhead');
   if (!track || !playhead) return;
@@ -482,17 +748,36 @@ function scrubTimeline(e) {
   playhead.style.left = (pct * 100) + '%';
   playhead.style.display = '';
 
-  // Calculate the timestamp from position
-  const totalMinutes = pct * 24 * 60;
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = Math.floor(totalMinutes % 60);
-  const secs = Math.floor((totalMinutes % 1) * 60);
+  // Only start playback on commit (mouseup/touchend)
+  if (!commit) return;
 
-  // Build the full timestamp
-  var d = new Date(timelineDate);
-  d.setUTCHours(hours, mins, secs, 0);
+  var sec = pctToSec(pct);
 
-  startPlayback(d);
+  // Check if directly on a segment
+  if (isOverSegment(pct)) {
+    var hours = Math.floor(sec / 3600);
+    var mins = Math.floor((sec % 3600) / 60);
+    var secs = Math.floor(sec % 60);
+    var d = new Date(timelineDate);
+    d.setHours(hours, mins, secs, 0);
+    startPlayback(d);
+    return;
+  }
+
+  // Not on a segment — snap to nearest edge if close (within 5 min)
+  var nearest = snapToNearestSegment(sec);
+  if (nearest !== null && Math.abs(sec - nearest) < 300) {
+    var hours = Math.floor(nearest / 3600);
+    var mins = Math.floor((nearest % 3600) / 60);
+    var secs = Math.floor(nearest % 60);
+    var d = new Date(timelineDate);
+    d.setHours(hours, mins, secs, 0);
+    startPlayback(d);
+    return;
+  }
+
+  // Too far from any segment — return to live
+  updatePlayheadToNow();
 }
 
 function timelineNav(delta) {
@@ -565,7 +850,8 @@ function fetchTimelineData() {
       return resp.json();
     })
     .then(function(data) {
-      renderTimelineSegments(data.segments || []);
+      cachedSegments = data.segments || [];
+      renderTimelineSegments(cachedSegments);
       renderTimelineEvents(data.events || []);
     })
     .catch(function(err) {
@@ -580,13 +866,32 @@ function renderTimelineSegments(segments) {
   // Remove existing segments
   track.querySelectorAll('.timeline-segment').forEach(function(s) { s.remove(); });
 
+  // Merge adjacent segments (gap < 60s) into continuous blocks
+  var blocks = [];
   segments.forEach(function(seg) {
     var start = new Date(seg.start_time);
     var end = new Date(seg.end_time);
-    var startPct = (start.getUTCHours() * 60 + start.getUTCMinutes()) / (24 * 60) * 100;
-    var endPct = (end.getUTCHours() * 60 + end.getUTCMinutes()) / (24 * 60) * 100;
-    var widthPct = endPct - startPct;
-    if (widthPct < 0.1) widthPct = 0.1;
+    var startSec = start.getHours() * 3600 + start.getMinutes() * 60 + start.getSeconds();
+    var endSec = end.getHours() * 3600 + end.getMinutes() * 60 + end.getSeconds();
+    if (endSec <= startSec) return;
+
+    if (blocks.length > 0 && startSec - blocks[blocks.length - 1].end <= 60) {
+      // Extend previous block
+      if (endSec > blocks[blocks.length - 1].end) {
+        blocks[blocks.length - 1].end = endSec;
+      }
+    } else {
+      blocks.push({ start: startSec, end: endSec });
+    }
+  });
+
+  // Store merged blocks for hit-testing
+  mergedBlocks = blocks;
+
+  blocks.forEach(function(block) {
+    var startPct = block.start / 86400 * 100;
+    var widthPct = (block.end - block.start) / 86400 * 100;
+    if (widthPct < 0.15) widthPct = 0.15;
 
     var div = document.createElement('div');
     div.className = 'timeline-segment';
@@ -606,10 +911,10 @@ function renderTimelineEvents(events) {
 
   events.forEach(function(evt) {
     var ts = new Date(evt.timestamp);
-    var pct = (ts.getUTCHours() * 60 + ts.getUTCMinutes()) / (24 * 60) * 100;
-    var timeStr = String(ts.getUTCHours()).padStart(2, '0') + ':' +
-      String(ts.getUTCMinutes()).padStart(2, '0') + ':' +
-      String(ts.getUTCSeconds()).padStart(2, '0');
+    var pct = (ts.getHours() * 3600 + ts.getMinutes() * 60 + ts.getSeconds()) / 86400 * 100;
+    var timeStr = String(ts.getHours()).padStart(2, '0') + ':' +
+      String(ts.getMinutes()).padStart(2, '0') + ':' +
+      String(ts.getSeconds()).padStart(2, '0');
     var scoreStr = Math.round(evt.score * 100) + '%';
 
     var dot = document.createElement('div');
@@ -791,7 +1096,7 @@ function startPlayback(timestamp) {
   var video = el('live-video');
   if (!video) return;
 
-  // Fetch with HEAD first to check if segment exists and get offset
+  // Check if segment exists before loading video
   fetch(url, { method: 'HEAD' })
     .then(function(resp) {
       if (!resp.ok) {
@@ -800,12 +1105,15 @@ function startPlayback(timestamp) {
         } else {
           toast('Playback error: ' + resp.status, 'error');
         }
+        updatePlayheadToNow();
         return;
       }
 
-      var offset = parseFloat(resp.headers.get('X-Playback-Offset') || '0');
+      // Server trims the fMP4 to start at the requested time,
+      // so playback starts at the clicked position directly.
+      playbackOffset = 0;
+      playbackStartTime = timestamp;
 
-      // Set video source to playback endpoint
       video.srcObject = null;
       video.src = url;
       video.muted = false;
@@ -815,14 +1123,14 @@ function startPlayback(timestamp) {
       hide('live-mjpeg');
 
       video.onloadedmetadata = function() {
-        if (offset > 0 && offset < video.duration) {
-          video.currentTime = offset;
-        }
         video.play().catch(function() {});
       };
 
+      video.ontimeupdate = function() {
+        updatePlayheadForPlayback(video.currentTime);
+      };
+
       video.onended = function() {
-        // When segment finishes, return to live
         returnToLive();
       };
 
@@ -842,6 +1150,7 @@ function returnToLive() {
     video.src = '';
     video.srcObject = null;
     video.onloadedmetadata = null;
+    video.ontimeupdate = null;
     video.onended = null;
     video.classList.add('hidden');
   }
@@ -874,6 +1183,18 @@ function updatePlaybackUI() {
   var btnMjpeg = el('btn-mjpeg');
   if (btnWebrtc) btnWebrtc.disabled = playbackMode;
   if (btnMjpeg) btnMjpeg.disabled = playbackMode;
+}
+
+function updatePlayheadForPlayback(currentTime) {
+  if (!playbackStartTime) return;
+  var playhead = el('timeline-playhead');
+  if (!playhead) return;
+
+  // Calculate the wall-clock time being played
+  var wallTime = new Date(playbackStartTime.getTime() + currentTime * 1000);
+  var pct = (wallTime.getHours() * 3600 + wallTime.getMinutes() * 60 + wallTime.getSeconds()) / 86400 * 100;
+  playhead.style.left = pct + '%';
+  playhead.style.display = '';
 }
 
 // ─── Filter Chips ───
@@ -1027,7 +1348,7 @@ document.addEventListener('keydown', function(e) {
       break;
     case 'w':
     case 'W':
-      if (el('btn-webrtc')) startWebRTC();
+      if (el('btn-webrtc')) startMSE();
       break;
     case 'm':
     case 'M':
@@ -1345,7 +1666,7 @@ function startPlayheadAnimation() {
   if (playheadRAF) cancelAnimationFrame(playheadRAF);
 
   function tick() {
-    if (!playbackMode) {
+    if (!playbackMode && !timelineDragging) {
       var playhead = el('timeline-playhead');
       if (playhead) {
         var now = new Date();
@@ -1554,3 +1875,52 @@ function webrtcAutoReconnect() {
     });
   }, delay);
 }
+
+// ─── Health Monitor ───
+var healthWarningVisible = false;
+
+function pollHealth() {
+  fetch('/api/health')
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      var storage = data.checks && data.checks.storage;
+      if (!storage) return;
+
+      if (storage.disk_low || storage.recording_paused) {
+        showDiskWarning(storage);
+      } else {
+        hideDiskWarning();
+      }
+    })
+    .catch(function() {});
+}
+
+function showDiskWarning(storage) {
+  var banner = document.getElementById('disk-warning');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'disk-warning';
+    banner.className = 'disk-warning';
+    var page = document.querySelector('.page');
+    if (page) page.insertBefore(banner, page.firstChild);
+  }
+
+  var msg = storage.recording_paused
+    ? 'Recording paused — disk space critically low (' + storage.disk_available + ' free)'
+    : 'Disk space low (' + storage.disk_available + ' free) — recording may stop soon';
+
+  banner.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' + msg;
+  banner.style.display = '';
+  healthWarningVisible = true;
+}
+
+function hideDiskWarning() {
+  if (!healthWarningVisible) return;
+  var banner = document.getElementById('disk-warning');
+  if (banner) banner.style.display = 'none';
+  healthWarningVisible = false;
+}
+
+// Poll health every 30 seconds
+pollHealth();
+setInterval(pollHealth, 30000);
