@@ -84,15 +84,13 @@ func ensureOpenH264() bool {
 		if err != nil {
 			slog.Warn("failed to auto-download OpenH264", "error", err)
 			openh264LoadErr = fmt.Errorf("OpenH264 not found and auto-download failed: %w", err)
-			slog.Warn("H264 decode unavailable — detection will use compressed-data fallback",
-				"error", openh264LoadErr)
+			slog.Warn("H264 decode unavailable — detection disabled", "error", openh264LoadErr)
 			return
 		}
 
 		if !tryLoadOpenH264(downloaded) {
 			openh264LoadErr = fmt.Errorf("downloaded OpenH264 but failed to load from %s", downloaded)
-			slog.Warn("H264 decode unavailable — detection will use compressed-data fallback",
-				"error", openh264LoadErr)
+			slog.Warn("H264 decode unavailable — detection disabled", "error", openh264LoadErr)
 		}
 	})
 	return openh264Loaded

@@ -268,11 +268,12 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 	}
 }
 
-// IsOnline returns true if a frame was received within the last 10 seconds.
+// IsOnline returns true if the camera's detection RTSP source is connected.
 func (c *Camera) IsOnline() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return !c.lastFrameTime.IsZero() && time.Since(c.lastFrameTime) < 10*time.Second
+	if src := c.hub.Get(c.config.URL); src != nil {
+		return src.Connected()
+	}
+	return false
 }
 
 // HasMotion returns true if motion was detected within the last 5 seconds.
@@ -286,9 +287,13 @@ func (c *Camera) HasMotion() bool {
 func (c *Camera) Status() CameraStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	online := false
+	if src := c.hub.Get(c.config.URL); src != nil {
+		online = src.Connected()
+	}
 	return CameraStatus{
 		Name:      c.config.Name,
-		Online:    !c.lastFrameTime.IsZero() && time.Since(c.lastFrameTime) < 10*time.Second,
+		Online:    online,
 		HasMotion: !c.lastMotion.IsZero() && time.Since(c.lastMotion) < 5*time.Second,
 		LastFrame: c.lastFrameTime,
 	}
