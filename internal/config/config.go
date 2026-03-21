@@ -43,10 +43,11 @@ type Zone struct {
 }
 
 type DetectConfig struct {
-	ModelPath       string  `yaml:"model_path"`
-	Backend         string  `yaml:"backend"`          // "auto" (default), "go", or "onnxruntime_c"
-	ScoreThreshold  float32 `yaml:"score_threshold"`
-	MotionThreshold float64 `yaml:"motion_threshold"`
+	ModelPath       string   `yaml:"model_path"`
+	Backend         string   `yaml:"backend"`          // "auto" (default), "go", or "onnxruntime_c"
+	ScoreThreshold  float32  `yaml:"score_threshold"`
+	MotionThreshold float64  `yaml:"motion_threshold"`
+	Labels          []string `yaml:"labels"`           // Only emit events for these labels; empty = all
 }
 
 type RecordingConfig struct {
@@ -100,6 +101,7 @@ func Load(path string) (*Config, error) {
 		Detect: DetectConfig{
 			ScoreThreshold:  0.5,
 			MotionThreshold: 0.02,
+			Labels:          []string{"person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "bird"},
 		},
 		Recording: RecordingConfig{
 			Path:          "./recordings",

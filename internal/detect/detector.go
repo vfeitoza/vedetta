@@ -21,16 +21,25 @@ type Detection struct {
 // It selects the best available backend automatically.
 // Safe for concurrent use by multiple camera goroutines.
 type Detector struct {
-	mu       sync.Mutex
-	config   config.DetectConfig
-	backend  Backend
-	enabled  bool
-	inputBuf []float32 // reusable preprocessing buffer [3*640*640], guarded by mu
+	mu            sync.Mutex
+	config        config.DetectConfig
+	backend       Backend
+	enabled       bool
+	inputBuf      []float32         // reusable preprocessing buffer [3*640*640], guarded by mu
+	labelAllowed  map[string]bool   // nil = allow all labels
 }
 
 func New(cfg config.DetectConfig) *Detector {
 	d := &Detector{
 		config: cfg,
+	}
+
+	if len(cfg.Labels) > 0 {
+		d.labelAllowed = make(map[string]bool, len(cfg.Labels))
+		for _, l := range cfg.Labels {
+			d.labelAllowed[l] = true
+		}
+		slog.Info("label filter active", "labels", cfg.Labels)
 	}
 
 	if err := d.init(cfg); err != nil {
@@ -44,6 +53,19 @@ func New(cfg config.DetectConfig) *Detector {
 	slog.Info("object detection initialized", "backend", d.backend.Name())
 
 	return d
+}
+
+func (d *Detector) filterLabels(dets []Detection) []Detection {
+	if d.labelAllowed == nil {
+		return dets
+	}
+	filtered := dets[:0]
+	for _, det := range dets {
+		if d.labelAllowed[det.Label] {
+			filtered = append(filtered, det)
+		}
+	}
+	return filtered
 }
 
 func (d *Detector) MotionThreshold() float64 {
@@ -79,7 +101,7 @@ func (d *Detector) Detect(img *image.RGBA) (result []Detection) {
 		return nil
 	}
 
-	return processOutput(output, d.config.ScoreThreshold, scale, padX, padY)
+	return d.filterLabels(processOutput(output, d.config.ScoreThreshold, scale, padX, padY))
 }
 
 // DetectRGB24 runs object detection directly on RGB24 frame data,
@@ -112,7 +134,7 @@ func (d *Detector) DetectRGB24(data []byte, w, h int) (result []Detection) {
 		return nil
 	}
 
-	return processOutput(output, d.config.ScoreThreshold, scale, padX, padY)
+	return d.filterLabels(processOutput(output, d.config.ScoreThreshold, scale, padX, padY))
 }
 
 func (d *Detector) Close() {
