@@ -16,18 +16,20 @@ import (
 
 // SnapshotConsumer decodes IDR frames from the main (high-res) stream
 // and caches the latest decoded frame for event snapshots.
-// It only decodes keyframes (~0.5-1 FPS) to keep CPU overhead minimal.
+// Decoding runs in a dedicated goroutine to avoid blocking RTP fan-out.
 type SnapshotConsumer struct {
 	camera string
 
 	h264Decoder *rtph264.Decoder
-	h264Dec     *H264Decoder
 	sps         []byte
 	pps         []byte
 
 	mu        sync.RWMutex
 	lastFrame *image.RGBA
 	lastTime  time.Time
+
+	decodeCh chan []byte
+	done     chan struct{}
 }
 
 // NewSnapshotConsumer creates a consumer that caches the latest full-resolution
@@ -38,10 +40,10 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 		return nil
 	}
 
-	sc := &SnapshotConsumer{
-		camera: camera,
-		sps:    track.SPS,
-		pps:    track.PPS,
+	// Verify OpenH264 is available before allocating
+	if !ensureOpenH264() {
+		slog.Warn("snapshot consumer: OpenH264 unavailable", "camera", camera)
+		return nil
 	}
 
 	h264Format := &format.H264{
@@ -55,16 +57,50 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 		slog.Warn("snapshot consumer: failed to create H264 RTP decoder", "camera", camera, "error", err)
 		return nil
 	}
-	sc.h264Decoder = dec
 
-	sc.h264Dec = NewH264Decoder()
-	if sc.h264Dec == nil {
-		slog.Warn("snapshot consumer: OpenH264 unavailable", "camera", camera)
-		return nil
+	sc := &SnapshotConsumer{
+		camera:      camera,
+		h264Decoder: dec,
+		sps:         track.SPS,
+		pps:         track.PPS,
+		decodeCh:    make(chan []byte, 1),
+		done:        make(chan struct{}),
 	}
+
+	go sc.decodeLoop()
 
 	slog.Info("snapshot consumer enabled for main stream", "camera", camera)
 	return sc
+}
+
+// decodeLoop runs in a dedicated goroutine, decoding NAL streams without
+// blocking the RTP fan-out callback.
+func (sc *SnapshotConsumer) decodeLoop() {
+	h264Dec := NewH264Decoder()
+	if h264Dec == nil {
+		return
+	}
+	defer h264Dec.Close()
+
+	for {
+		select {
+		case nalStream, ok := <-sc.decodeCh:
+			if !ok {
+				return
+			}
+			ycbcr := h264Dec.Decode(nalStream)
+			if ycbcr == nil {
+				continue
+			}
+			rgba := ycbcrToRGBA(ycbcr)
+			sc.mu.Lock()
+			sc.lastFrame = rgba
+			sc.lastTime = time.Now()
+			sc.mu.Unlock()
+		case <-sc.done:
+			return
+		}
+	}
 }
 
 // LastFrame returns the most recently decoded full-resolution frame, or nil.
@@ -76,15 +112,12 @@ func (sc *SnapshotConsumer) LastFrame() *image.RGBA {
 
 // Close releases decoder resources.
 func (sc *SnapshotConsumer) Close() {
-	if sc.h264Dec != nil {
-		sc.h264Dec.Close()
-		sc.h264Dec = nil
-	}
+	close(sc.done)
 }
 
-// OnVideoRTP decodes IDR frames and caches the result.
+// OnVideoRTP reassembles NAL units and queues IDR frames for async decode.
 func (sc *SnapshotConsumer) OnVideoRTP(pkt *rtp.Packet) {
-	if sc.h264Decoder == nil || sc.h264Dec == nil {
+	if sc.h264Decoder == nil {
 		return
 	}
 
@@ -151,17 +184,11 @@ func (sc *SnapshotConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		nalStream = append(nalStream, nalu...)
 	}
 
-	ycbcr := sc.h264Dec.Decode(nalStream)
-	if ycbcr == nil {
-		return
+	// Non-blocking send — drop frame if decode goroutine is busy
+	select {
+	case sc.decodeCh <- nalStream:
+	default:
 	}
-
-	rgba := ycbcrToRGBA(ycbcr)
-
-	sc.mu.Lock()
-	sc.lastFrame = rgba
-	sc.lastTime = time.Now()
-	sc.mu.Unlock()
 }
 
 // OnAudioRTP is a no-op.
