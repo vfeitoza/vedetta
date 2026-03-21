@@ -37,6 +37,7 @@ func (r *Recorder) runCleanup() {
 
 	r.cleanSegments(segmentCutoff)
 	r.cleanClips(eventCutoff)
+	r.cleanSnapshots(eventCutoff)
 	r.enforceStorageCap()
 	r.cleanEmptyDirs()
 }
@@ -148,11 +149,41 @@ func (r *Recorder) cleanClips(cutoff time.Time) {
 	}
 }
 
+func (r *Recorder) cleanSnapshots(cutoff time.Time) {
+	if r.snapshotPath == "" {
+		return
+	}
+
+	err := filepath.Walk(r.snapshotPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".jpg" {
+			return nil
+		}
+		if info.ModTime().Before(cutoff) {
+			slog.Debug("removing expired snapshot", "path", path)
+			_ = os.Remove(path)
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Error("error walking snapshots directory", "error", err)
+	}
+}
+
 // cleanEmptyDirs removes empty directories left after cleanup,
 // but preserves structural directories used by active recording (e.g. "segments").
 func (r *Recorder) cleanEmptyDirs() {
-	_ = filepath.Walk(r.config.Path, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() || path == r.config.Path {
+	r.removeEmptyDirsIn(r.config.Path)
+	if r.snapshotPath != "" {
+		r.removeEmptyDirsIn(r.snapshotPath)
+	}
+}
+
+func (r *Recorder) removeEmptyDirsIn(root string) {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.IsDir() || path == root {
 			return nil
 		}
 

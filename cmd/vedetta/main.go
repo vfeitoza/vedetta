@@ -70,7 +70,7 @@ func main() {
 
 	slog.Info("native Go media pipeline active (no ffmpeg required)")
 
-	recorder := recording.New(cfg.Recording, db, hub)
+	recorder := recording.New(cfg.Recording, db, hub, cfg.Events.SnapshotPath)
 
 	// Register cameras for recording
 	for _, cam := range cfg.Cameras {
@@ -101,7 +101,7 @@ func main() {
 
 	events := make(chan camera.Event, 100)
 
-	manager := camera.NewManager(cfg.Cameras, detector, events, hub)
+	manager := camera.NewManager(cfg.Cameras, detector, events, hub, cfg.Events.SnapshotPath, cfg.Events.SnapshotQuality)
 	manager.Start(ctx)
 
 	// Periodically publish camera online/offline status to MQTT.

@@ -24,26 +24,28 @@ type StorageStats struct {
 
 // Recorder manages saving video clips for detected events.
 type Recorder struct {
-	config     config.RecordingConfig
-	db         *storage.DB
-	hub        *rtsp.Hub
-	segments   *SegmentRecorder
-	cameraURLs map[string]string // camera name → record RTSP URL
-	startTime  time.Time
+	config       config.RecordingConfig
+	db           *storage.DB
+	hub          *rtsp.Hub
+	segments     *SegmentRecorder
+	cameraURLs   map[string]string // camera name → record RTSP URL
+	startTime    time.Time
+	snapshotPath string
 }
 
-func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub) *Recorder {
+func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
 
 	return &Recorder{
-		config:     cfg,
-		db:         db,
-		hub:        hub,
-		segments:   NewSegmentRecorder(cfg, db, hub),
-		cameraURLs: make(map[string]string),
-		startTime:  time.Now(),
+		config:       cfg,
+		db:           db,
+		hub:          hub,
+		segments:     NewSegmentRecorder(cfg, db, hub),
+		cameraURLs:   make(map[string]string),
+		startTime:    time.Now(),
+		snapshotPath: snapshotPath,
 	}
 }
 

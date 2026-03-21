@@ -15,6 +15,7 @@ import (
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/rtsp"
+	"github.com/rvben/vedetta/internal/snapshot"
 )
 
 // Event represents a detected object event from a camera.
@@ -36,7 +37,10 @@ type Camera struct {
 	tracker        *detect.Tracker
 	motionDetector *detect.MotionDetector
 	events         chan<- Event
-	hub            *rtsp.Hub
+	hub             *rtsp.Hub
+	eventSnapDir    string
+	eventSnapQuality int
+	snapConsumer    *media.SnapshotConsumer
 
 	mu               sync.RWMutex
 	rawFrame         []byte // RGB24 frame data, guarded by mu
@@ -55,7 +59,10 @@ type CameraStatus struct {
 	LastFrame time.Time `json:"last_frame"`
 }
 
-func NewCamera(cfg config.CameraConfig, detector *detect.Detector, events chan<- Event, hub *rtsp.Hub) *Camera {
+func NewCamera(cfg config.CameraConfig, detector *detect.Detector, events chan<- Event, hub *rtsp.Hub, snapshotPath string, snapshotQuality int) *Camera {
+	if snapshotQuality <= 0 {
+		snapshotQuality = 85
+	}
 	return &Camera{
 		config:          cfg,
 		detector:        detector,
@@ -63,6 +70,8 @@ func NewCamera(cfg config.CameraConfig, detector *detect.Detector, events chan<-
 		motionDetector:  detect.NewMotionDetector(25, 200, 0.05),
 		events:          events,
 		hub:             hub,
+		eventSnapDir:     snapshotPath,
+		eventSnapQuality: snapshotQuality,
 		confirmedTracks: make(map[int]bool),
 	}
 }
@@ -200,6 +209,9 @@ func (c *Camera) readFrames(ctx context.Context) {
 	source.AddConsumer(consumer)
 	defer source.RemoveConsumer(consumer)
 
+	// Attach snapshot consumer to the main (high-res) stream for event snapshots
+	c.startSnapshotConsumer(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -208,6 +220,50 @@ func (c *Camera) readFrames(ctx context.Context) {
 			c.processFrame(frame.Data, frame.Width, frame.Height)
 		}
 	}
+}
+
+// startSnapshotConsumer attaches a decoder to the main stream that caches
+// the latest full-resolution frame for use in event snapshots.
+func (c *Camera) startSnapshotConsumer(ctx context.Context) {
+	recordURL := c.RecordURL()
+	if recordURL == c.config.URL {
+		// Same stream for detect and record — no benefit from a separate consumer
+		return
+	}
+
+	mainSource := c.hub.GetOrCreate(recordURL)
+
+	// Wait briefly for track info (main stream may already be connected for recording)
+	var videoTrack *rtsp.TrackInfo
+	for i := 0; i < 10; i++ {
+		videoTrack = mainSource.VideoTrack()
+		if videoTrack != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	if videoTrack == nil {
+		slog.Warn("snapshot consumer: main stream not available", "camera", c.config.Name)
+		return
+	}
+
+	sc := media.NewSnapshotConsumer(c.config.Name, videoTrack)
+	if sc == nil {
+		return
+	}
+
+	c.snapConsumer = sc
+	mainSource.AddConsumer(sc)
+
+	go func() {
+		<-ctx.Done()
+		mainSource.RemoveConsumer(sc)
+		sc.Close()
+	}()
 }
 
 // processFrame handles a decoded RGB24 frame — motion detection + YOLO.
@@ -238,18 +294,87 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 		detections := c.detector.DetectRGB24(buf, w, h)
 		tracked := c.tracker.Update(detections)
 
+		// Collect all current detections for annotation
+		allDetections := make([]detect.Detection, len(tracked))
+		for i, obj := range tracked {
+			allDetections[i] = detect.Detection{
+				Label: obj.Label,
+				Score: obj.Score,
+				Box:   obj.Box,
+			}
+		}
+
+		// Generate one annotated frame with ALL bounding boxes (reused for all new events).
+		// Prefer the full-resolution main stream frame; fall back to the detection frame.
+		var annotatedFrame *image.RGBA
+		if c.eventSnapDir != "" {
+			hasNewTrack := false
+			for _, obj := range tracked {
+				if !c.confirmedTracks[obj.TrackID] {
+					hasNewTrack = true
+					break
+				}
+			}
+			if hasNewTrack {
+				var fullRes *image.RGBA
+				if sc := c.snapConsumer; sc != nil {
+					fullRes = sc.LastFrame()
+				}
+				if fullRes != nil {
+					// Copy so we don't mutate the snapshot consumer's cached frame
+					annotatedFrame = image.NewRGBA(fullRes.Bounds())
+					copy(annotatedFrame.Pix, fullRes.Pix)
+					// Scale detection boxes from detect resolution to full resolution
+					frameW := annotatedFrame.Bounds().Dx()
+					frameH := annotatedFrame.Bounds().Dy()
+					scaled := make([]detect.Detection, len(allDetections))
+					for i, d := range allDetections {
+						scaled[i] = detect.Detection{
+							Label: d.Label,
+							Score: d.Score,
+							Box: [4]int{
+								d.Box[0] * frameW / w,
+								d.Box[1] * frameH / h,
+								d.Box[2] * frameW / w,
+								d.Box[3] * frameH / h,
+							},
+						}
+					}
+					snapshot.DrawDetectionsInPlace(annotatedFrame, scaled)
+				} else {
+					// No full-res frame available, use detection frame
+					annotatedFrame = rawToRGBA(buf, w, h)
+					snapshot.DrawDetectionsInPlace(annotatedFrame, allDetections)
+				}
+			}
+		}
+
 		// Emit events for newly confirmed tracks
 		for _, obj := range tracked {
 			if !c.confirmedTracks[obj.TrackID] {
 				c.confirmedTracks[obj.TrackID] = true
-				c.events <- Event{
-					ID:         fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli()),
+				eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
+				ev := Event{
+					ID:         eventID,
 					CameraName: c.config.Name,
 					Label:      obj.Label,
 					Score:      obj.Score,
 					Box:        obj.Box,
 					Timestamp:  time.Now(),
 				}
+
+				if annotatedFrame != nil {
+					snapFile := filepath.Join(c.eventSnapDir, c.config.Name, eventID+".jpg")
+					ev.SnapshotPath = snapFile
+					quality := c.eventSnapQuality
+					go func() {
+						if err := snapshot.SaveSnapshot(annotatedFrame, snapFile, quality); err != nil {
+							slog.Error("failed to save event snapshot", "event", eventID, "error", err)
+						}
+					}()
+				}
+
+				c.events <- ev
 			}
 		}
 

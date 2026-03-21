@@ -293,8 +293,11 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
 		return
 	}
+	// Use inline disposition for <img> tags; download param triggers attachment
 	filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if r.URL.Query().Get("download") != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
 	http.ServeFile(w, r, event.SnapshotPath)
 }
 
@@ -728,7 +731,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`{{if .ClipPath}}<a href="/api/events/{{.ID}}/clip" download class="download-row">` +
 			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>` +
 			` Download Clip</a>{{end}}` +
-			`{{if .SnapshotPath}}<a href="/api/events/{{.ID}}/snapshot" download class="download-row">` +
+			`{{if .SnapshotPath}}<a href="/api/events/{{.ID}}/snapshot?download=1" download class="download-row">` +
 			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>` +
 			` Download Snapshot</a>{{end}}` +
 			`{{if not .ClipPath}}{{if not .SnapshotPath}}<div class="download-row disabled">No media available</div>{{end}}{{end}}` +

@@ -12,7 +12,7 @@ func TestSnapshotRGB24_NoFrame(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		Detect: config.StreamConfig{Width: 64, Height: 64, FPS: 5},
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	dst := make([]byte, 64*64*3)
 	_, _, ok := cam.SnapshotRGB24(dst)
@@ -25,7 +25,7 @@ func TestSnapshotRGB24_CopiesFrame(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		Detect: config.StreamConfig{Width: 4, Height: 4, FPS: 5},
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	frameSize := 4 * 4 * 3
 	frame := make([]byte, frameSize)
@@ -59,7 +59,7 @@ func TestSnapshotRGB24_DstTooSmall(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		Detect: config.StreamConfig{Width: 4, Height: 4, FPS: 5},
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	frameSize := 4 * 4 * 3
 	cam.mu.Lock()
@@ -79,7 +79,7 @@ func TestFrameSize(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		Detect: config.StreamConfig{Width: 320, Height: 240, FPS: 5},
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	expected := 320 * 240 * 3
 	if got := cam.FrameSize(); got != expected {
@@ -91,7 +91,7 @@ func TestIsOnline_NoHub(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	if cam.IsOnline() {
 		t.Error("expected IsOnline=false with nil hub")
@@ -107,7 +107,7 @@ func TestIsOnline_NoSource(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), hub)
+	}, nil, make(chan<- Event, 1), hub, "", 85)
 
 	// No source created for this URL yet
 	if cam.IsOnline() {
@@ -119,7 +119,7 @@ func TestStatus_NoHub(t *testing.T) {
 	cam := NewCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), nil)
+	}, nil, make(chan<- Event, 1), nil, "", 85)
 
 	st := cam.Status()
 	if st.Online {

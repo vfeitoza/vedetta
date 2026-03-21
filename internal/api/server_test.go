@@ -24,10 +24,10 @@ func newTestServer(t *testing.T) (*Server, *storage.DB) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mgr := camera.NewManager(nil, nil, nil, nil)
+	mgr := camera.NewManager(nil, nil, nil, nil, "", 85)
 	rec := recording.New(config.RecordingConfig{
 		Path: t.TempDir(),
-	}, db, nil)
+	}, db, nil, "")
 
 	apiCfg := config.APIConfig{Host: "127.0.0.1", Port: 0}
 	srv := New(apiCfg, db, mgr, rec, nil)

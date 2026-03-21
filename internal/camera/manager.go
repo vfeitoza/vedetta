@@ -20,7 +20,7 @@ type Manager struct {
 	mu       sync.RWMutex
 }
 
-func NewManager(configs []config.CameraConfig, detector *detect.Detector, events chan<- Event, hub *rtsp.Hub) *Manager {
+func NewManager(configs []config.CameraConfig, detector *detect.Detector, events chan<- Event, hub *rtsp.Hub, snapshotPath string, snapshotQuality int) *Manager {
 	m := &Manager{
 		cameras:  make(map[string]*Camera),
 		detector: detector,
@@ -30,7 +30,7 @@ func NewManager(configs []config.CameraConfig, detector *detect.Detector, events
 
 	for _, cfg := range configs {
 		if cfg.Enabled {
-			cam := NewCamera(cfg, detector, events, hub)
+			cam := NewCamera(cfg, detector, events, hub, snapshotPath, snapshotQuality)
 			m.cameras[cfg.Name] = cam
 		}
 	}

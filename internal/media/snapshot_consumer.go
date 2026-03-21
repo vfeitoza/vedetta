@@ -1,0 +1,221 @@
+package media
+
+import (
+	"image"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+	"github.com/pion/rtp"
+
+	"github.com/rvben/vedetta/internal/rtsp"
+)
+
+// SnapshotConsumer decodes IDR frames from the main (high-res) stream
+// and caches the latest decoded frame for event snapshots.
+// It only decodes keyframes (~0.5-1 FPS) to keep CPU overhead minimal.
+type SnapshotConsumer struct {
+	camera string
+
+	h264Decoder *rtph264.Decoder
+	h264Dec     *H264Decoder
+	sps         []byte
+	pps         []byte
+
+	mu        sync.RWMutex
+	lastFrame *image.RGBA
+	lastTime  time.Time
+}
+
+// NewSnapshotConsumer creates a consumer that caches the latest full-resolution
+// decoded frame from the main stream. Returns nil if the track is not H264
+// or OpenH264 is unavailable.
+func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer {
+	if track == nil || track.Codec != "H264" {
+		return nil
+	}
+
+	sc := &SnapshotConsumer{
+		camera: camera,
+		sps:    track.SPS,
+		pps:    track.PPS,
+	}
+
+	h264Format := &format.H264{
+		PayloadTyp:        96,
+		PacketizationMode: 1,
+		SPS:               track.SPS,
+		PPS:               track.PPS,
+	}
+	dec, err := h264Format.CreateDecoder()
+	if err != nil {
+		slog.Warn("snapshot consumer: failed to create H264 RTP decoder", "camera", camera, "error", err)
+		return nil
+	}
+	sc.h264Decoder = dec
+
+	sc.h264Dec = NewH264Decoder()
+	if sc.h264Dec == nil {
+		slog.Warn("snapshot consumer: OpenH264 unavailable", "camera", camera)
+		return nil
+	}
+
+	slog.Info("snapshot consumer enabled for main stream", "camera", camera)
+	return sc
+}
+
+// LastFrame returns the most recently decoded full-resolution frame, or nil.
+func (sc *SnapshotConsumer) LastFrame() *image.RGBA {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.lastFrame
+}
+
+// Close releases decoder resources.
+func (sc *SnapshotConsumer) Close() {
+	if sc.h264Dec != nil {
+		sc.h264Dec.Close()
+		sc.h264Dec = nil
+	}
+}
+
+// OnVideoRTP decodes IDR frames and caches the result.
+func (sc *SnapshotConsumer) OnVideoRTP(pkt *rtp.Packet) {
+	if sc.h264Decoder == nil || sc.h264Dec == nil {
+		return
+	}
+
+	au, err := sc.h264Decoder.Decode(pkt)
+	if err != nil {
+		return
+	}
+
+	// Rate limit: at most 1 decode per second
+	sc.mu.RLock()
+	tooSoon := time.Since(sc.lastTime) < time.Second
+	sc.mu.RUnlock()
+	if tooSoon {
+		return
+	}
+
+	if !h264.IsRandomAccess(au) {
+		return
+	}
+
+	// Update SPS/PPS from in-band parameters
+	for _, nalu := range au {
+		if len(nalu) == 0 {
+			continue
+		}
+		typ := h264.NALUType(nalu[0] & 0x1F)
+		switch typ {
+		case h264.NALUTypeSPS:
+			sc.sps = nalu
+		case h264.NALUTypePPS:
+			sc.pps = nalu
+		}
+	}
+
+	if sc.sps == nil {
+		return
+	}
+
+	// Build NAL stream with start codes, prepend SPS/PPS if needed
+	var nalStream []byte
+	startCode := []byte{0, 0, 0, 1}
+
+	hasSPS := false
+	for _, nalu := range au {
+		if len(nalu) > 0 && h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeSPS {
+			hasSPS = true
+			break
+		}
+	}
+	if !hasSPS && sc.sps != nil {
+		nalStream = append(nalStream, startCode...)
+		nalStream = append(nalStream, sc.sps...)
+		if sc.pps != nil {
+			nalStream = append(nalStream, startCode...)
+			nalStream = append(nalStream, sc.pps...)
+		}
+	}
+
+	for _, nalu := range au {
+		if len(nalu) == 0 {
+			continue
+		}
+		nalStream = append(nalStream, startCode...)
+		nalStream = append(nalStream, nalu...)
+	}
+
+	ycbcr := sc.h264Dec.Decode(nalStream)
+	if ycbcr == nil {
+		return
+	}
+
+	rgba := ycbcrToRGBA(ycbcr)
+
+	sc.mu.Lock()
+	sc.lastFrame = rgba
+	sc.lastTime = time.Now()
+	sc.mu.Unlock()
+}
+
+// OnAudioRTP is a no-op.
+func (sc *SnapshotConsumer) OnAudioRTP(_ *rtp.Packet) {}
+
+// OnDisconnect is called when the source disconnects.
+func (sc *SnapshotConsumer) OnDisconnect() {}
+
+// ycbcrToRGBA converts a YCbCr image to RGBA at native resolution.
+func ycbcrToRGBA(img *image.YCbCr) *image.RGBA {
+	bounds := img.Rect
+	w := bounds.Dx()
+	h := bounds.Dy()
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+
+	for dy := 0; dy < h; dy++ {
+		for dx := 0; dx < w; dx++ {
+			sy := dy + bounds.Min.Y
+			sx := dx + bounds.Min.X
+
+			yi := sy*img.YStride + sx
+			ci := (sy/2)*img.CStride + (sx / 2)
+
+			yy := int(img.Y[yi])
+			cbb := int(img.Cb[ci]) - 128
+			crr := int(img.Cr[ci]) - 128
+
+			r := yy + ((91881*crr + 32768) >> 16)
+			g := yy - ((22554*cbb + 46802*crr + 32768) >> 16)
+			b := yy + ((116130*cbb + 32768) >> 16)
+
+			if r < 0 {
+				r = 0
+			} else if r > 255 {
+				r = 255
+			}
+			if g < 0 {
+				g = 0
+			} else if g > 255 {
+				g = 255
+			}
+			if b < 0 {
+				b = 0
+			} else if b > 255 {
+				b = 255
+			}
+
+			off := dy*rgba.Stride + dx*4
+			rgba.Pix[off] = byte(r)
+			rgba.Pix[off+1] = byte(g)
+			rgba.Pix[off+2] = byte(b)
+			rgba.Pix[off+3] = 255
+		}
+	}
+
+	return rgba
+}
