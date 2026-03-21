@@ -787,14 +787,16 @@ function renderCalendar() {
 
 function loadRecordingsForDate(date) {
   const camera = el('rec-camera')?.value || '';
-  const dateStr = date.toISOString().split('T')[0];
+  const dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
   const detail = el('recordings-detail');
   if (!detail) return;
 
   let url = '/partials/recordings?date=' + dateStr;
   if (camera) url += '&camera=' + encodeURIComponent(camera);
 
-  htmx.ajax('GET', url, { target: '#recordings-detail', swap: 'innerHTML' });
+  fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+    detail.innerHTML = html;
+  }).catch(function(err) { console.error('Failed to load recordings:', err); });
 }
 
 function loadRecordings() {

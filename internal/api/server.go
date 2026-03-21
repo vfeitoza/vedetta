@@ -939,14 +939,7 @@ func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	if cameraFilter == "" {
-		names := s.cameras.ListCameras()
-		if len(names) > 0 {
-			cameraFilter = names[0]
-		}
-	}
-
-	if cameraFilter == "" {
+	if cameraFilter == "" && len(s.cameras.ListCameras()) == 0 {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No cameras configured.</p></div>`)
 		return

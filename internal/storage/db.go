@@ -317,17 +317,30 @@ func (d *DB) TotalStorageBytes() (int64, error) {
 }
 
 // GetSegmentsForDate returns segments for a camera where start_time falls on the given date.
+// If cameraName is empty, returns segments for all cameras.
 func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRecord, error) {
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
-	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes
-		FROM segments
-		WHERE camera = ? AND start_time >= ? AND start_time < ?
-		ORDER BY start_time`,
-		cameraName, dayStart, dayEnd,
-	)
+	var rows *sql.Rows
+	var err error
+	if cameraName != "" {
+		rows, err = d.db.Query(`
+			SELECT id, camera, path, start_time, end_time, size_bytes
+			FROM segments
+			WHERE camera = ? AND start_time >= ? AND start_time < ?
+			ORDER BY start_time`,
+			cameraName, dayStart, dayEnd,
+		)
+	} else {
+		rows, err = d.db.Query(`
+			SELECT id, camera, path, start_time, end_time, size_bytes
+			FROM segments
+			WHERE start_time >= ? AND start_time < ?
+			ORDER BY start_time`,
+			dayStart, dayEnd,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
