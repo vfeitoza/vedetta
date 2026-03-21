@@ -305,17 +305,15 @@ input, select { font-family: inherit; }
   left: 0;
   right: 0;
   z-index: 200;
-  height: var(--mobile-tab-h);
   background: var(--surface-1);
   border-top: 1px solid var(--border-subtle);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .bottom-tabs-inner {
   display: flex;
-  height: 100%;
+  width: 100%;
+  height: var(--mobile-tab-h);
 }
 
 .bottom-tab {
