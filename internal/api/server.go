@@ -72,6 +72,19 @@ func New(cfg config.APIConfig, db *storage.DB, cameras *camera.Manager, recorder
 		},
 		"formatBytes": formatBytes,
 		"displayName": displayName,
+		"eventDuration": func(e camera.Event) string {
+			if e.EndTime.IsZero() {
+				return ""
+			}
+			d := e.EndTime.Sub(e.Timestamp)
+			if d < time.Second {
+				return ""
+			}
+			if d < time.Minute {
+				return fmt.Sprintf("%ds", int(d.Seconds()))
+			}
+			return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+		},
 	}
 
 	// API endpoints
@@ -645,6 +658,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
 			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
 			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
+			`{{with eventDuration .}}<span class="event-duration-badge">{{.}}</span>{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
 			`<span class="event-camera-name">{{.CameraName}}</span>` +

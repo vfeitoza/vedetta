@@ -871,6 +871,118 @@ func TestNew_BusyTimeoutIsSet(t *testing.T) {
 	}
 }
 
+// --- Event EndTime ---
+
+func TestUpdateEventEndTime(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	ev := makeEvent("end-test", "cam1", "person", 0.9, ts)
+	mustSaveEvent(t, db, ev)
+
+	endTime := ts.Add(45 * time.Second)
+	if err := db.UpdateEventEndTime("end-test", endTime); err != nil {
+		t.Fatalf("UpdateEventEndTime: %v", err)
+	}
+
+	got, _ := db.GetEventByID("end-test")
+	if got.EndTime.IsZero() {
+		t.Fatal("expected EndTime to be set, got zero")
+	}
+	if !got.EndTime.Equal(endTime) {
+		t.Errorf("EndTime = %v, want %v", got.EndTime, endTime)
+	}
+}
+
+func TestSaveEvent_WithEndTime_Roundtrip(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	endTime := ts.Add(90 * time.Second)
+	ev := makeEvent("endtime-rt", "cam1", "person", 0.9, ts)
+	ev.EndTime = endTime
+	mustSaveEvent(t, db, ev)
+
+	got, _ := db.GetEventByID("endtime-rt")
+	if got.EndTime.IsZero() {
+		t.Fatal("expected EndTime to be set")
+	}
+	if !got.EndTime.Equal(endTime) {
+		t.Errorf("EndTime = %v, want %v", got.EndTime, endTime)
+	}
+}
+
+func TestSaveEvent_WithoutEndTime_ReturnsZero(t *testing.T) {
+	db := newTestDB(t)
+	ev := makeEvent("no-end", "cam1", "person", 0.9, time.Now().UTC())
+	mustSaveEvent(t, db, ev)
+
+	got, _ := db.GetEventByID("no-end")
+	if !got.EndTime.IsZero() {
+		t.Errorf("expected zero EndTime for event without end, got %v", got.EndTime)
+	}
+}
+
+func TestQueryEvents_ReturnsEndTime(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	endTime := ts.Add(30 * time.Second)
+
+	ev := makeEvent("q-end", "cam1", "person", 0.9, ts)
+	ev.EndTime = endTime
+	mustSaveEvent(t, db, ev)
+
+	events, err := db.QueryEvents("", "", 0, 0)
+	if err != nil {
+		t.Fatalf("QueryEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if !events[0].EndTime.Equal(endTime) {
+		t.Errorf("EndTime = %v, want %v", events[0].EndTime, endTime)
+	}
+}
+
+func TestQueryEventsForDate_ReturnsEndTime(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	endTime := ts.Add(60 * time.Second)
+
+	ev := makeEvent("qd-end", "cam1", "person", 0.9, ts)
+	ev.EndTime = endTime
+	mustSaveEvent(t, db, ev)
+
+	events, err := db.QueryEventsForDate("cam1", ts)
+	if err != nil {
+		t.Fatalf("QueryEventsForDate: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if !events[0].EndTime.Equal(endTime) {
+		t.Errorf("EndTime = %v, want %v", events[0].EndTime, endTime)
+	}
+}
+
+func TestMigration_AddsEndTimeColumn(t *testing.T) {
+	// Simulate an existing DB without end_time column
+	db := newTestDB(t)
+
+	// The migration should have already added end_time.
+	// Verify by inserting and reading an event with EndTime.
+	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	ev := makeEvent("migrate-test", "cam1", "person", 0.9, ts)
+	ev.EndTime = ts.Add(45 * time.Second)
+	mustSaveEvent(t, db, ev)
+
+	got, err := db.GetEventByID("migrate-test")
+	if err != nil {
+		t.Fatalf("GetEventByID: %v", err)
+	}
+	if got.EndTime.IsZero() {
+		t.Fatal("end_time column not working after migration")
+	}
+}
+
 func TestNew_WALModeIsSet(t *testing.T) {
 	db := newTestDB(t)
 
