@@ -201,6 +201,9 @@
           timelineDate = new Date(ts);
           setTimeout(function() { startPlayback(ts); }, 500);
         }
+      } else {
+        // Auto-start WebRTC live stream
+        startWebRTC();
       }
     })();
   </script>
