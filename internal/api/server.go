@@ -940,7 +940,9 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<div class="event-media">` +
 			`{{if .SnapshotPath}}<img id="event-snapshot" src="/api/events/{{.ID}}/snapshot" alt="event snapshot">` +
 			`{{else}}<img id="event-snapshot" src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
-			`{{if .ClipPath}}<div class="play-overlay" id="play-overlay" onclick="playEventClip(this, '{{.ID}}')">` +
+			`{{if .HasRecording}}<div class="play-overlay" id="play-overlay" onclick="playEventRecording(this, '{{.CameraName}}', '{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}')">` +
+			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
+			`</div>{{else if .ClipPath}}<div class="play-overlay" id="play-overlay" onclick="playEventClip(this, '{{.ID}}')">` +
 			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
 			`</div>{{end}}` +
 			`</div>` +

@@ -1997,3 +1997,16 @@ function playEventClip(overlay, eventId) {
   video.src = '/api/events/' + encodeURIComponent(eventId) + '/clip';
   media.appendChild(video);
 }
+
+function playEventRecording(overlay, cameraName, timestamp) {
+  var media = overlay.parentElement;
+  var img = media.querySelector('#event-snapshot');
+  if (img) img.style.display = 'none';
+  overlay.style.display = 'none';
+
+  var video = document.createElement('video');
+  video.controls = true;
+  video.autoplay = true;
+  video.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback?start=' + encodeURIComponent(timestamp);
+  media.appendChild(video);
+}
