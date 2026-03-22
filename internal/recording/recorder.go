@@ -215,6 +215,15 @@ func (r *Recorder) DiskAvailable() uint64 {
 	return r.segments.DiskAvailable()
 }
 
+// HasSegments returns true if there are any segments covering the given time for a camera.
+func (r *Recorder) HasSegments(cameraName string, t time.Time) bool {
+	// Check a small window around the timestamp
+	from := t.Add(-1 * time.Second)
+	to := t.Add(1 * time.Second)
+	segments := r.segments.FindSegments(cameraName, from, to)
+	return len(segments) > 0
+}
+
 // ExportResult holds a prepared export ready to be served via http.ServeContent.
 // The caller must call Close when done.
 type ExportResult struct {

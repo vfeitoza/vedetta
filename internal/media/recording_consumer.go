@@ -253,6 +253,19 @@ func (rc *RecordingConsumer) ensureSegment() error {
 	}
 
 	slog.Debug("started new segment", "camera", rc.camera, "path", rc.segPath)
+
+	// Register segment in DB immediately so it's queryable before rotation.
+	// Uses projected end time; closeCurrentSegment will update with actual values.
+	if rc.onSegment != nil {
+		rc.onSegment(SegmentInfo{
+			Camera:    rc.camera,
+			Path:      rc.segPath,
+			StartTime: rc.segStart,
+			EndTime:   rc.segStart.Add(rc.segLen),
+			SizeBytes: 0,
+		})
+	}
+
 	return nil
 }
 

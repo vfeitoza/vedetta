@@ -873,6 +873,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		PrevID       string
 		NextID       string
 		RecordingURL string
+		HasRecording bool
 		Duration     string
 	}
 
@@ -887,11 +888,14 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		duration = d.String()
 	}
 
+	hasRecording := s.recorder.HasSegments(event.CameraName, event.Timestamp)
+
 	data := eventDetailData{
 		Event:        *event,
 		PrevID:       prevID,
 		NextID:       nextID,
 		RecordingURL: recURL,
+		HasRecording: hasRecording,
 		Duration:     duration,
 	}
 
@@ -922,9 +926,9 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>` +
 			` Download Snapshot</a>{{end}}` +
 			`{{if not .ClipPath}}{{if not .SnapshotPath}}<div class="download-row disabled">No media available</div>{{end}}{{end}}` +
-			`<a href="{{.RecordingURL}}" class="download-row">` +
+			`{{if .HasRecording}}<a href="{{.RecordingURL}}" class="download-row">` +
 			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
-			` View in Recording</a>` +
+			` View in Recording</a>{{end}}` +
 			`</div>` +
 			`<div class="event-nav">` +
 			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
