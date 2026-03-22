@@ -272,8 +272,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleListCameras(w http.ResponseWriter, _ *http.Request) {
-	names := s.cameras.ListCameras()
-	writeJSON(w, http.StatusOK, map[string]any{"cameras": names})
+	statuses := s.cameraStatuses()
+	type cameraInfo struct {
+		Name   string `json:"name"`
+		Online bool   `json:"online"`
+	}
+	result := make([]cameraInfo, len(statuses))
+	for i, st := range statuses {
+		result[i] = cameraInfo{Name: st.Name, Online: st.Online}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {

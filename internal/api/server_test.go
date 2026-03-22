@@ -223,12 +223,12 @@ func TestHandleListCameras_Empty(t *testing.T) {
 		t.Fatalf("GET /api/cameras: status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var body map[string][]string
+	var body []map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(body["cameras"]) != 0 {
-		t.Errorf("cameras = %v, want empty", body["cameras"])
+	if len(body) != 0 {
+		t.Errorf("cameras = %v, want empty", body)
 	}
 }
 
