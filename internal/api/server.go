@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -146,6 +147,14 @@ func (s *Server) Start() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+
+	if s.config.TLSCert != "" && s.config.TLSKey != "" {
+		s.httpSrv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		slog.Info("API server listening (HTTPS)", "addr", addr)
+		return s.httpSrv.ListenAndServeTLS(s.config.TLSCert, s.config.TLSKey)
 	}
 
 	slog.Info("API server listening", "addr", addr)

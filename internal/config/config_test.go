@@ -349,6 +349,78 @@ cameras:
 	}
 }
 
+func TestLoadTLSConfigValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		yaml   string
+		errMsg string
+	}{
+		{
+			name: "cert without key",
+			yaml: `
+cameras:
+  - name: front
+    url: rtsp://localhost/stream
+api:
+  tls_cert: /path/to/cert.pem
+`,
+			errMsg: "both tls_cert and tls_key must be set",
+		},
+		{
+			name: "key without cert",
+			yaml: `
+cameras:
+  - name: front
+    url: rtsp://localhost/stream
+api:
+  tls_key: /path/to/key.pem
+`,
+			errMsg: "both tls_cert and tls_key must be set",
+		},
+		{
+			name: "both set is valid",
+			yaml: `
+cameras:
+  - name: front
+    url: rtsp://localhost/stream
+api:
+  tls_cert: /path/to/cert.pem
+  tls_key: /path/to/key.pem
+`,
+			errMsg: "",
+		},
+		{
+			name: "neither set is valid",
+			yaml: `
+cameras:
+  - name: front
+    url: rtsp://localhost/stream
+`,
+			errMsg: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.yaml)
+			cfg, err := Load(path)
+			if tt.errMsg != "" {
+				if err == nil {
+					t.Fatal("Load() should return error")
+				}
+				if !contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Load() unexpected error: %v", err)
+				}
+				_ = cfg
+			}
+		})
+	}
+}
+
 func TestLoadRecordURL(t *testing.T) {
 	path := writeConfig(t, `
 cameras:

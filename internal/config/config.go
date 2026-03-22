@@ -90,8 +90,10 @@ type MQTTConfig struct {
 }
 
 type APIConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host    string `yaml:"host"`
+	Port    int    `yaml:"port"`
+	TLSCert string `yaml:"tls_cert"` // path to TLS certificate file (enables HTTPS)
+	TLSKey  string `yaml:"tls_key"`  // path to TLS private key file
 }
 
 type RTSPServerConfig struct {
@@ -158,6 +160,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("recording.max_storage: %w", err)
 		}
 		cfg.Recording.maxStorageBytes = bytes
+	}
+
+	// Validate TLS config: both cert and key must be set together
+	if (cfg.API.TLSCert != "") != (cfg.API.TLSKey != "") {
+		return nil, fmt.Errorf("api: both tls_cert and tls_key must be set")
 	}
 
 	if len(cfg.Cameras) == 0 {
