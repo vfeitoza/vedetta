@@ -880,6 +880,7 @@ input, select { font-family: inherit; }
 .live-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.375rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border-subtle);
@@ -1106,8 +1107,9 @@ input, select { font-family: inherit; }
   position: absolute;
   top: 0;
   height: 100%;
-  background: var(--cyan-ghost);
-  border-left: 1px solid var(--cyan-dim);
+  background: var(--cyan-dim);
+  border-radius: 2px;
+  pointer-events: none;
 }
 
 /* Event markers */
@@ -1578,6 +1580,11 @@ kbd {
   .cam-name { font-size: var(--text-xs); }
 
   .event-card-footer { padding: 0.375rem 0.5rem; }
+
+  .live-toolbar { gap: 0.25rem; padding: 0.375rem 0.5rem; }
+  .live-toolbar .btn-sm { padding: 0.25rem 0.375rem; }
+  .live-toolbar .stream-badge .badge-res { display: none; }
+  .live-toolbar .stream-badge { font-size: 0.625rem; padding: 0.125rem 0.375rem; }
 }
 
 @media (max-width: 480px) {
@@ -1591,6 +1598,23 @@ kbd {
   .stat-card:first-child { border-radius: var(--radius-md) var(--radius-md) 0 0 !important; }
   .stat-card:last-child { border-radius: 0 0 var(--radius-md) var(--radius-md) !important; }
 }
+
+/* ─── Disk Warning Banner ─── */
+.disk-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-md);
+  color: var(--amber);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.disk-warning svg { flex-shrink: 0; }
 
 /* ─── Transitions & Animations ─── */
 

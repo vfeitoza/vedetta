@@ -171,8 +171,8 @@ func NewStreamManager(hub *rtsp.Hub) *StreamManager {
 }
 
 // audioCodecForTrack returns the WebRTC codec parameters for a camera's audio track.
-// Returns nil if the audio codec is not directly supported by WebRTC browsers
-// (e.g. AAC requires transcoding to Opus which is not yet implemented).
+// Only G.711 codecs (PCMU/PCMA) are supported for WebRTC passthrough.
+// AAC cameras get audio via MSE streaming instead.
 func audioCodecForTrack(at *rtsp.TrackInfo) *webrtc.RTPCodecParameters {
 	if at == nil {
 		return nil
@@ -197,7 +197,7 @@ func audioCodecForTrack(at *rtsp.TrackInfo) *webrtc.RTPCodecParameters {
 			PayloadType: 8,
 		}
 	default:
-		slog.Info("audio codec not supported for WebRTC passthrough, audio disabled", "codec", at.Codec)
+		slog.Info("audio codec not supported for WebRTC passthrough, use MSE for audio", "codec", at.Codec)
 		return nil
 	}
 }
@@ -225,7 +225,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		return nil, fmt.Errorf("register video codec: %w", err)
 	}
 
-	// Register audio codec if the camera provides a supported one
+	// Register audio codec if the camera provides G.711
 	audioCodec := audioCodecForTrack(source.AudioTrack())
 	if audioCodec != nil {
 		if err := me.RegisterCodec(*audioCodec, webrtc.RTPCodecTypeAudio); err != nil {
@@ -275,7 +275,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		video: &trackState{track: videoTrack},
 	}
 
-	// Add audio track if supported
+	// Add audio track if G.711
 	if audioCodec != nil {
 		audioTrack, err := webrtc.NewTrackLocalStaticRTP(
 			audioCodec.RTPCodecCapability,
