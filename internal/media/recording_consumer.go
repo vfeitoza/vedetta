@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/rtp"
@@ -54,6 +55,7 @@ type RecordingConsumer struct {
 	segPath         string
 	segStart        time.Time
 	paused          bool
+	pausedAtomic    atomic.Bool // lock-free read for external status checks
 	pausedSince     time.Time
 	lastDiskWarning time.Time
 	writeErrors     int
@@ -84,10 +86,9 @@ func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, au
 }
 
 // Paused returns true if recording is paused due to low disk space.
+// Uses an atomic load to avoid blocking on the processing mutex.
 func (rc *RecordingConsumer) Paused() bool {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	return rc.paused
+	return rc.pausedAtomic.Load()
 }
 
 // OnVideoRTP enqueues a video RTP packet for async processing.
@@ -168,6 +169,7 @@ func (rc *RecordingConsumer) handlePaused() {
 		"available_mb", avail/(1024*1024),
 	)
 	rc.paused = false
+	rc.pausedAtomic.Store(false)
 	rc.writeErrors = 0
 }
 
@@ -208,6 +210,7 @@ func (rc *RecordingConsumer) handleWriteError(err error) {
 		)
 		rc.closeCurrentSegment()
 		rc.paused = true
+		rc.pausedAtomic.Store(true)
 		rc.pausedSince = time.Now()
 		rc.lastDiskWarning = time.Now()
 		return
@@ -233,6 +236,7 @@ func (rc *RecordingConsumer) ensureSegment() error {
 			rc.lastDiskWarning = time.Now()
 		}
 		rc.paused = true
+		rc.pausedAtomic.Store(true)
 		rc.pausedSince = time.Now()
 		return fmt.Errorf("insufficient disk space: %d MB available", avail/(1024*1024))
 	}

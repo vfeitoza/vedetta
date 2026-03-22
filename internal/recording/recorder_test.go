@@ -270,6 +270,7 @@ func TestStorageStats_WithSegments(t *testing.T) {
 		SizeBytes: 3000,
 	})
 
+	rec.RefreshStats()
 	stats := rec.StorageStats()
 	if stats.TotalBytes != 8000 {
 		t.Errorf("TotalBytes = %d, want 8000", stats.TotalBytes)

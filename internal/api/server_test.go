@@ -455,6 +455,7 @@ func TestHandleSystemAPI(t *testing.T) {
 	// Seed some segments to have storage data
 	now := time.Now().UTC()
 	seedSegment(t, db, "cam1", "/tmp/seg1.mp4", now.Add(-10*time.Minute), now, 1048576)
+	srv.recorder.RefreshStats()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/system", nil)
 	w := httptest.NewRecorder()
@@ -497,6 +498,7 @@ func TestHandleDashboardStatsPartial(t *testing.T) {
 	now := time.Now().UTC()
 	seedEvent(t, db, "today-1", "cam1", "person", 0.9, now)
 	seedSegment(t, db, "cam1", "/tmp/s1.mp4", now.Add(-5*time.Minute), now, 2048)
+	srv.recorder.RefreshStats()
 
 	req := httptest.NewRequest(http.MethodGet, "/partials/dashboard-stats", nil)
 	w := httptest.NewRecorder()
@@ -672,6 +674,7 @@ func TestHandleSystemPartial(t *testing.T) {
 	srv, db := newTestServer(t)
 	now := time.Now().UTC()
 	seedSegment(t, db, "cam1", "/tmp/sys-seg.mp4", now.Add(-5*time.Minute), now, 5242880)
+	srv.recorder.RefreshStats()
 
 	req := httptest.NewRequest(http.MethodGet, "/partials/system", nil)
 	w := httptest.NewRecorder()

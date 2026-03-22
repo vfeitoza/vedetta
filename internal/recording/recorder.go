@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
@@ -34,6 +35,10 @@ type Recorder struct {
 	cameraURLs   map[string]string // camera name → record RTSP URL
 	startTime    time.Time
 	snapshotPath string
+
+	// Cached storage stats refreshed in background
+	statsMu    sync.RWMutex
+	cachedStats StorageStats
 }
 
 func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
@@ -136,8 +141,29 @@ func (r *Recorder) Close() {
 	}
 }
 
-// StorageStats queries the database for aggregate storage information.
-func (r *Recorder) StorageStats() StorageStats {
+// StartStatsRefresh begins a background loop that periodically refreshes
+// cached storage stats. This prevents API handlers from blocking on DB queries.
+func (r *Recorder) StartStatsRefresh(ctx context.Context) {
+	go func() {
+		// Initial refresh in the goroutine to avoid blocking startup
+		// when segment scanning holds the DB connection.
+		r.RefreshStats()
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				r.RefreshStats()
+			}
+		}
+	}()
+}
+
+// RefreshStats queries the database and updates the cached stats.
+func (r *Recorder) RefreshStats() {
 	stats := StorageStats{
 		CameraStats: make(map[string]int64),
 	}
@@ -167,7 +193,17 @@ func (r *Recorder) StorageStats() StorageStats {
 	stats.DiskLow = stats.DiskAvailable < media.MinDiskSpace
 	stats.RecordingPaused = r.segments.AnyPaused()
 
-	return stats
+	r.statsMu.Lock()
+	r.cachedStats = stats
+	r.statsMu.Unlock()
+}
+
+// StorageStats returns cached aggregate storage information.
+// Updated in background every 10s by StartStatsRefresh.
+func (r *Recorder) StorageStats() StorageStats {
+	r.statsMu.RLock()
+	defer r.statsMu.RUnlock()
+	return r.cachedStats
 }
 
 // DiskAvailable returns the bytes available on the recording filesystem.

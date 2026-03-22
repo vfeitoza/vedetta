@@ -96,6 +96,7 @@ func main() {
 	// Start continuous segment recording
 	recorder.StartContinuousRecording(ctx)
 	recorder.StartRetentionCleanup(ctx)
+	recorder.StartStatsRefresh(ctx)
 
 	// Publish HA MQTT discovery for all enabled cameras
 	if mqttClient != nil {

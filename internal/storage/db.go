@@ -40,6 +40,12 @@ func New(path string) (*DB, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	// WAL mode permits one writer + multiple readers simultaneously.
+	// busy_timeout (5s in DSN) retries when the write lock is held.
+	// Default pool size is unlimited; the Go sql.DB pool handles reuse.
+	// We only set idle connection limits to avoid resource waste.
+	db.SetMaxIdleConns(4)
+
 	if err := migrate(db); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -163,8 +169,8 @@ func (d *DB) Close() error {
 
 // Ping checks database connectivity by executing a simple query.
 func (d *DB) Ping() error {
-	_, err := d.db.Exec("SELECT 1")
-	return err
+	var n int
+	return d.db.QueryRow("SELECT 1").Scan(&n)
 }
 
 func (d *DB) SaveEvent(event camera.Event) error {

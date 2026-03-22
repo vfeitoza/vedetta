@@ -224,14 +224,14 @@ func (s *Server) cameraStatuses() []camera.CameraStatus {
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	status := "ok"
 
-	// Database check
+	// Database check — read-only, should be fast even under load
 	dbStatus := "ok"
 	if err := s.db.Ping(); err != nil {
 		dbStatus = "error"
 		status = "degraded"
 	}
 
-	// Camera check
+	// Camera check — in-memory, never blocks
 	statuses := s.cameraStatuses()
 	onlineCount := 0
 	for _, st := range statuses {
@@ -240,8 +240,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	// Storage check
-	totalBytes, _ := s.db.TotalStorageBytes()
+	// Storage check — from background-refreshed cache, never blocks
 	storageStats := s.recorder.StorageStats()
 
 	if storageStats.DiskLow {
@@ -257,8 +256,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 				"online": onlineCount,
 			},
 			"storage": map[string]any{
-				"used_bytes":       totalBytes,
-				"used":             formatBytes(totalBytes),
+				"used_bytes":       storageStats.TotalBytes,
+				"used":             formatBytes(storageStats.TotalBytes),
 				"disk_available":   formatBytes(int64(storageStats.DiskAvailable)),
 				"disk_low":         storageStats.DiskLow,
 				"recording_paused": storageStats.RecordingPaused,
@@ -382,7 +381,7 @@ func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	totalBytes, _ := s.db.TotalStorageBytes()
+	stats := s.recorder.StorageStats()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":       "0.1.0",
@@ -390,8 +389,8 @@ func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
 		"decoder":       "native Go",
 		"cameras":       len(statuses),
 		"online":        onlineCount,
-		"storage_bytes": totalBytes,
-		"storage":       formatBytes(totalBytes),
+		"storage_bytes": stats.TotalBytes,
+		"storage":       formatBytes(stats.TotalBytes),
 	})
 }
 
@@ -663,7 +662,7 @@ func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Requ
 	}
 
 	eventsToday, _ := s.db.CountEventsToday()
-	totalBytes, _ := s.db.TotalStorageBytes()
+	stats := s.recorder.StorageStats()
 
 	type dashData struct {
 		CameraCount int
@@ -676,7 +675,7 @@ func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Requ
 		CameraCount: len(statuses),
 		OnlineCount: onlineCount,
 		EventsToday: eventsToday,
-		Storage:     formatBytes(totalBytes),
+		Storage:     formatBytes(stats.TotalBytes),
 	}
 
 	tmpl := template.Must(template.New("stats").Parse(
@@ -892,9 +891,8 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 	uptime := time.Since(startTime)
 	uptimeStr := formatDuration(uptime)
 
-	totalBytes, _ := s.db.TotalStorageBytes()
-	segCount, _ := s.db.CountSegments()
-	byCamera, _ := s.db.SegmentBytesByCamera()
+	stats := s.recorder.StorageStats()
+	totalBytes := stats.TotalBytes
 
 	type storageEntry struct {
 		Camera  string
@@ -903,8 +901,8 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		Percent float64
 	}
 
-	storageEntries := make([]storageEntry, 0, len(byCamera))
-	for cam, bytes := range byCamera {
+	storageEntries := make([]storageEntry, 0, len(stats.CameraStats))
+	for cam, bytes := range stats.CameraStats {
 		pct := float64(0)
 		if totalBytes > 0 {
 			pct = float64(bytes) / float64(totalBytes) * 100
@@ -941,7 +939,7 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		Statuses:    statuses,
 		TotalBytes:  totalBytes,
 		TotalStr:    formatBytes(totalBytes),
-		SegCount:    segCount,
+		SegCount:    stats.SegmentCount,
 		Storage:     storageEntries,
 	}
 
