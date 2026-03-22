@@ -1131,7 +1131,7 @@ function startPlayback(timestamp) {
       };
 
       video.onended = function() {
-        returnToLive();
+        playNextSegment();
       };
 
       playbackMode = true;
@@ -1140,6 +1140,45 @@ function startPlayback(timestamp) {
     })
     .catch(function(err) {
       toast('Playback failed: ' + err.message, 'error');
+    });
+}
+
+function playNextSegment() {
+  if (!playbackStartTime || !playbackMode) {
+    returnToLive();
+    return;
+  }
+
+  var video = el('live-video');
+  if (!video) { returnToLive(); return; }
+
+  // Calculate where the current segment ended in wall-clock time
+  var elapsed = video.duration || 0;
+  var nextTime = new Date(playbackStartTime.getTime() + elapsed * 1000);
+
+  // Don't play past current time
+  if (nextTime >= new Date()) {
+    returnToLive();
+    return;
+  }
+
+  var name = getCameraName();
+  var nextISO = nextTime.toISOString();
+  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback?start=' + encodeURIComponent(nextISO);
+
+  fetch(url, { method: 'HEAD' })
+    .then(function(resp) {
+      if (!resp.ok) {
+        returnToLive();
+        return;
+      }
+
+      playbackStartTime = nextTime;
+      video.src = url;
+      video.play().catch(function() {});
+    })
+    .catch(function() {
+      returnToLive();
     });
 }
 
