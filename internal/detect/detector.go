@@ -186,15 +186,15 @@ func selectBackend(preference string, modelData []byte) (Backend, error) {
 	}
 }
 
-// loadModelData resolves model bytes from config path, embedded data, or common locations.
+// loadModelData resolves model bytes from config path, embedded data, common locations, or auto-download.
 func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 	if modelPath != "" {
 		slog.Info("loading model from path", "path", modelPath)
 		data, err := os.ReadFile(modelPath)
-		if err != nil {
-			return nil, fmt.Errorf("read model file %q: %w", modelPath, err)
+		if err == nil {
+			return data, nil
 		}
-		return data, nil
+		slog.Warn("configured model not found, will try cache/download", "path", modelPath, "error", err)
 	}
 
 	if len(embeddedModel) > 0 {
@@ -202,9 +202,10 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 		return embeddedModel, nil
 	}
 
+	// Check common local paths
 	candidates := []string{
 		"yolov8n.onnx",
-		"/tmp/yolov8n.onnx",
+		cachedModelPath(),
 	}
 	for _, path := range candidates {
 		if data, err := os.ReadFile(path); err == nil {
@@ -213,5 +214,15 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no model found: set detect.model_path in config, embed with build tag, or place yolov8n.onnx in working directory")
+	// Auto-download as last resort
+	path, err := downloadModel()
+	if err != nil {
+		return nil, fmt.Errorf("auto-download model: %w", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read downloaded model: %w", err)
+	}
+	return data, nil
 }
