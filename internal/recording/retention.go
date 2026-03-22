@@ -6,24 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/rvben/vedetta/internal/media"
 )
 
 // StartRetentionCleanup runs a background goroutine that periodically
 // removes recordings older than the configured retention period.
+// When disk space is critically low, cleanup runs every 30 seconds
+// instead of every hour to recover space as quickly as possible.
 func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 	go func() {
-		// Run cleanup on startup, then every hour
 		r.runCleanup()
 
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
+		normalTicker := time.NewTicker(1 * time.Hour)
+		urgentTicker := time.NewTicker(30 * time.Second)
+		defer normalTicker.Stop()
+		defer urgentTicker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-normalTicker.C:
 				r.runCleanup()
+			case <-urgentTicker.C:
+				if r.segments.DiskAvailable() < media.MinDiskSpace {
+					slog.Warn("urgent retention cleanup triggered by low disk space")
+					r.runCleanup()
+				}
 			}
 		}
 	}()

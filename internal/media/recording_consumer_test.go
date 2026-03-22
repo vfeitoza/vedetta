@@ -10,6 +10,10 @@ import (
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
+func testDisk(t *testing.T) *DiskSpace {
+	return NewDiskSpace(t.TempDir())
+}
+
 func TestRecordingConsumer_SegmentCallback(t *testing.T) {
 	dir := t.TempDir()
 
@@ -24,7 +28,7 @@ func TestRecordingConsumer_SegmentCallback(t *testing.T) {
 	var mu sync.Mutex
 	var segments []SegmentInfo
 
-	rc := NewRecordingConsumer(dir, "test-cam", time.Second, video, nil, func(info SegmentInfo) {
+	rc := NewRecordingConsumer(dir, "test-cam", time.Second, video, nil, testDisk(t), func(info SegmentInfo) {
 		mu.Lock()
 		segments = append(segments, info)
 		mu.Unlock()
@@ -43,7 +47,7 @@ func TestRecordingConsumer_SegmentCallback(t *testing.T) {
 func TestRecordingConsumer_Close_NilWriter(t *testing.T) {
 	dir := t.TempDir()
 
-	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, nil, nil, nil)
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, nil, nil, testDisk(t), nil)
 	rc.Close() // should not panic
 }
 
@@ -53,7 +57,7 @@ func TestRecordingConsumer_OnDisconnect_ClosesSegment(t *testing.T) {
 	var mu sync.Mutex
 	var segments []SegmentInfo
 
-	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, nil, nil, func(info SegmentInfo) {
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, nil, nil, testDisk(t), func(info SegmentInfo) {
 		mu.Lock()
 		segments = append(segments, info)
 		mu.Unlock()
@@ -68,9 +72,22 @@ func TestRecordingConsumer_SegmentDir_Created(t *testing.T) {
 	base := t.TempDir()
 	segDir := filepath.Join(base, "nested", "segments")
 
-	_ = NewRecordingConsumer(segDir, "test-cam", time.Minute, nil, nil, nil)
+	rc := NewRecordingConsumer(segDir, "test-cam", time.Minute, nil, nil, testDisk(t), nil)
+	rc.Close()
 
 	if _, err := os.Stat(segDir); os.IsNotExist(err) {
 		t.Error("segment directory was not created")
+	}
+}
+
+func TestRecordingConsumer_PausedState(t *testing.T) {
+	dir := t.TempDir()
+	disk := testDisk(t)
+
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, nil, nil, disk, nil)
+	defer rc.Close()
+
+	if rc.Paused() {
+		t.Error("consumer should not be paused on start with available disk space")
 	}
 }

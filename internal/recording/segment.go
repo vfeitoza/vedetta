@@ -27,11 +27,14 @@ type Segment struct {
 // SegmentRecorder continuously records RTSP streams into fixed-length segments
 // using the native Go media pipeline (no ffmpeg).
 type SegmentRecorder struct {
-	config  config.RecordingConfig
-	baseDir string
-	db      *storage.DB
-	hub     *rtsp.Hub
-	wg      sync.WaitGroup
+	config    config.RecordingConfig
+	baseDir   string
+	db        *storage.DB
+	hub       *rtsp.Hub
+	disk      *media.DiskSpace
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	consumers []*media.RecordingConsumer
 }
 
 func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub) *SegmentRecorder {
@@ -44,6 +47,7 @@ func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hu
 		baseDir: baseDir,
 		db:      db,
 		hub:     hub,
+		disk:    media.NewDiskSpace(baseDir),
 	}
 }
 
@@ -66,6 +70,26 @@ func (sr *SegmentRecorder) StartRecording(ctx context.Context, cameraName, rtspU
 // Wait blocks until all recording goroutines have finished and finalized their segments.
 func (sr *SegmentRecorder) Wait() {
 	sr.wg.Wait()
+}
+
+// DiskAvailable returns the bytes available on the recording filesystem.
+func (sr *SegmentRecorder) DiskAvailable() uint64 {
+	if sr.disk == nil {
+		return 0
+	}
+	return sr.disk.Available()
+}
+
+// AnyPaused returns true if any recording consumer is paused due to low disk space.
+func (sr *SegmentRecorder) AnyPaused() bool {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	for _, c := range sr.consumers {
+		if c.Paused() {
+			return true
+		}
+	}
+	return false
 }
 
 func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, segDir string) {
@@ -98,7 +122,7 @@ func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, 
 	}
 
 	db := sr.db
-	consumer := media.NewRecordingConsumer(segDir, cameraName, segmentLen, videoTrack, audioTrack, func(info media.SegmentInfo) {
+	consumer := media.NewRecordingConsumer(segDir, cameraName, segmentLen, videoTrack, audioTrack, sr.disk, func(info media.SegmentInfo) {
 		rec := storage.SegmentRecord{
 			Camera:    info.Camera,
 			Path:      info.Path,
@@ -111,9 +135,23 @@ func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, 
 		}
 	})
 
+	sr.mu.Lock()
+	sr.consumers = append(sr.consumers, consumer)
+	sr.mu.Unlock()
+
 	source.AddConsumer(consumer)
 	defer source.RemoveConsumer(consumer)
 	defer consumer.Close()
+	defer func() {
+		sr.mu.Lock()
+		for i, c := range sr.consumers {
+			if c == consumer {
+				sr.consumers = append(sr.consumers[:i], sr.consumers[i+1:]...)
+				break
+			}
+		}
+		sr.mu.Unlock()
+	}()
 
 	// Block until context is cancelled — the Hub handles reconnection
 	<-ctx.Done()

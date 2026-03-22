@@ -13,6 +13,14 @@ import (
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
+// MinDiskSpace is the minimum free space required to start or continue recording.
+// Below this threshold, recording pauses to prevent filesystem corruption,
+// incomplete segments, and cascading write errors.
+const MinDiskSpace = 256 * 1024 * 1024 // 256 MB
+
+// diskPauseRetryInterval is how often a paused consumer retries the disk check.
+const diskPauseRetryInterval = 30 * time.Second
+
 // SegmentInfo is passed to the OnSegmentDone callback when a segment is completed.
 type SegmentInfo struct {
 	Camera    string
@@ -36,19 +44,24 @@ type RecordingConsumer struct {
 	audioTrack *rtsp.TrackInfo
 	onSegment  func(SegmentInfo)
 	segDir     string
+	disk       *DiskSpace
 
-	pktCh  chan rtpMsg
-	done   chan struct{}
+	pktCh chan rtpMsg
+	done  chan struct{}
 
-	mu       sync.Mutex
-	writer   *SegmentWriter
-	segPath  string
-	segStart time.Time
+	mu              sync.Mutex
+	writer          *SegmentWriter
+	segPath         string
+	segStart        time.Time
+	paused          bool
+	pausedSince     time.Time
+	lastDiskWarning time.Time
+	writeErrors     int
 }
 
 // NewRecordingConsumer creates a consumer that records to rotating fMP4 segments.
 // onSegment is called when each segment completes (for DB registration).
-func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, audio *rtsp.TrackInfo, onSegment func(SegmentInfo)) *RecordingConsumer {
+func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, audio *rtsp.TrackInfo, disk *DiskSpace, onSegment func(SegmentInfo)) *RecordingConsumer {
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
 		slog.Error("failed to create segment directory", "camera", camera, "error", err)
 	}
@@ -60,6 +73,7 @@ func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, au
 		audioTrack: audio,
 		onSegment:  onSegment,
 		segDir:     segDir,
+		disk:       disk,
 		pktCh:      make(chan rtpMsg, 512),
 		done:       make(chan struct{}),
 	}
@@ -67,6 +81,13 @@ func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, au
 	go rc.processLoop()
 
 	return rc
+}
+
+// Paused returns true if recording is paused due to low disk space.
+func (rc *RecordingConsumer) Paused() bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.paused
 }
 
 // OnVideoRTP enqueues a video RTP packet for async processing.
@@ -108,6 +129,11 @@ func (rc *RecordingConsumer) processLoop() {
 
 	for msg := range rc.pktCh {
 		rc.mu.Lock()
+		if rc.paused {
+			rc.handlePaused()
+			rc.mu.Unlock()
+			continue
+		}
 		if msg.video {
 			rc.processVideo(msg.pkt)
 		} else {
@@ -117,16 +143,45 @@ func (rc *RecordingConsumer) processLoop() {
 	}
 }
 
+// handlePaused checks if disk space has recovered. Called with mu held.
+func (rc *RecordingConsumer) handlePaused() {
+	if time.Since(rc.pausedSince) < diskPauseRetryInterval {
+		return
+	}
+
+	avail := rc.disk.Available()
+	if avail < MinDiskSpace {
+		rc.pausedSince = time.Now()
+		if time.Since(rc.lastDiskWarning) > time.Minute {
+			slog.Warn("recording still paused, disk space low",
+				"camera", rc.camera,
+				"available_mb", avail/(1024*1024),
+				"required_mb", MinDiskSpace/(1024*1024),
+			)
+			rc.lastDiskWarning = time.Now()
+		}
+		return
+	}
+
+	slog.Info("recording resumed, disk space recovered",
+		"camera", rc.camera,
+		"available_mb", avail/(1024*1024),
+	)
+	rc.paused = false
+	rc.writeErrors = 0
+}
+
 func (rc *RecordingConsumer) processVideo(pkt *rtp.Packet) {
 	if err := rc.ensureSegment(); err != nil {
-		slog.Error("ensure segment failed", "camera", rc.camera, "error", err)
 		return
 	}
 
 	if err := rc.writer.WriteVideo(pkt); err != nil {
-		slog.Error("write video failed", "camera", rc.camera, "error", err)
+		rc.handleWriteError(err)
+		return
 	}
 
+	rc.writeErrors = 0
 	rc.maybeRotate()
 }
 
@@ -136,13 +191,50 @@ func (rc *RecordingConsumer) processAudio(pkt *rtp.Packet) {
 	}
 
 	if err := rc.writer.WriteAudio(pkt); err != nil {
-		slog.Error("write audio failed", "camera", rc.camera, "error", err)
+		rc.handleWriteError(err)
 	}
+}
+
+// handleWriteError handles write failures. On repeated errors (likely disk full),
+// it closes the segment and pauses recording. Called with mu held.
+func (rc *RecordingConsumer) handleWriteError(err error) {
+	rc.writeErrors++
+
+	if rc.writeErrors >= 3 {
+		slog.Error("repeated write failures, pausing recording",
+			"camera", rc.camera,
+			"error", err,
+			"consecutive_errors", rc.writeErrors,
+		)
+		rc.closeCurrentSegment()
+		rc.paused = true
+		rc.pausedSince = time.Now()
+		rc.lastDiskWarning = time.Now()
+		return
+	}
+
+	slog.Error("write failed", "camera", rc.camera, "error", err)
 }
 
 func (rc *RecordingConsumer) ensureSegment() error {
 	if rc.writer != nil {
 		return nil
+	}
+
+	// Check disk space before creating a new segment
+	avail := rc.disk.Available()
+	if avail < MinDiskSpace {
+		if time.Since(rc.lastDiskWarning) > time.Minute {
+			slog.Warn("recording paused, insufficient disk space",
+				"camera", rc.camera,
+				"available_mb", avail/(1024*1024),
+				"required_mb", MinDiskSpace/(1024*1024),
+			)
+			rc.lastDiskWarning = time.Now()
+		}
+		rc.paused = true
+		rc.pausedSince = time.Now()
+		return fmt.Errorf("insufficient disk space: %d MB available", avail/(1024*1024))
 	}
 
 	now := time.Now()
