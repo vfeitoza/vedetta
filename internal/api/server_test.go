@@ -1194,6 +1194,101 @@ func TestHandleEventDetailPartial_LastEvent_NoNext(t *testing.T) {
 	}
 }
 
+// --- Recording export tests ---
+
+func TestHandleRecordingExport_MissingParams(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"no params", "/api/recordings/export/cam1"},
+		{"missing end", "/api/recordings/export/cam1?start=2025-01-01T00:00:00Z"},
+		{"missing start", "/api/recordings/export/cam1?end=2025-01-01T01:00:00Z"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			w := httptest.NewRecorder()
+			srv.mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestHandleRecordingExport_InvalidTimeFormat(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/recordings/export/cam1?start=not-a-time&end=2025-01-01T01:00:00Z", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRecordingExport_EndBeforeStart(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/recordings/export/cam1?start=2025-01-01T02:00:00Z&end=2025-01-01T01:00:00Z", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRecordingExport_RangeExceeds24h(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/recordings/export/cam1?start=2025-01-01T00:00:00Z&end=2025-01-03T00:00:00Z", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "export range limited to 24 hours" {
+		t.Fatalf("unexpected error: %s", body["error"])
+	}
+}
+
+func TestHandleRecordingExport_NoSegments(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/recordings/export/cam1?start=2025-01-01T00:00:00Z&end=2025-01-01T01:00:00Z", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] == "" {
+		t.Fatal("expected error message in response body")
+	}
+}
+
 // contains checks if substr is present in s.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)

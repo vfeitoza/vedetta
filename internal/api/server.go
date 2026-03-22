@@ -112,6 +112,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB, camera
 	s.mux.HandleFunc("GET /api/cameras/{name}/timeline", s.handleCameraTimeline)
 	s.mux.HandleFunc("GET /api/cameras/{name}/playback", s.handlePlayback)
 	s.mux.HandleFunc("GET /api/recordings/segments/{camera}", s.handleListSegments)
+	s.mux.HandleFunc("GET /api/recordings/export/{camera}", s.handleRecordingExport)
 
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
@@ -557,6 +558,65 @@ func (s *Server) handleListSegments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"segments": result})
+}
+
+func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
+	cameraName := r.PathValue("camera")
+
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+	if startStr == "" || endStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start and end parameters required (RFC3339)"})
+		return
+	}
+
+	start, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid start time, use RFC3339"})
+		return
+	}
+	end, err := time.Parse(time.RFC3339, endStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid end time, use RFC3339"})
+		return
+	}
+
+	if !end.After(start) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "end must be after start"})
+		return
+	}
+
+	if end.Sub(start) > 24*time.Hour {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "export range limited to 24 hours"})
+		return
+	}
+
+	// Prepare the export (concat/trim to temp file) before sending headers.
+	// This lets us return proper HTTP errors if preparation fails.
+	result, err := s.recorder.PrepareExport(cameraName, start, end)
+	if err != nil {
+		slog.Error("recording export failed",
+			"camera", cameraName,
+			"start", start.Format(time.RFC3339),
+			"end", end.Format(time.RFC3339),
+			"error", err,
+		)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	defer result.Close()
+
+	filename := fmt.Sprintf("%s_%s_%s.mp4",
+		cameraName,
+		start.Format("2006-01-02_15-04-05"),
+		end.Format("15-04-05"),
+	)
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	// ServeContent handles Content-Type, Content-Length, Range requests,
+	// and uses sendfile(2) for zero-copy streaming when possible.
+	http.ServeContent(w, r, filename, time.Now(), result.File)
 }
 
 // --- Streaming handlers ---

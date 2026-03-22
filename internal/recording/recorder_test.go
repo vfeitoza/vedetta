@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,44 @@ func TestSaveClip_ZeroEndTime_FallsBackToTimestamp(t *testing.T) {
 	}
 	if err.Error() == `extract clip: no segments available for camera "cam1"` {
 		t.Error("segments should have been found with zero EndTime fallback")
+	}
+}
+
+func TestPrepareExport_NoSegments(t *testing.T) {
+	rec, _ := newTestRecorder(t)
+
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+
+	result, err := rec.PrepareExport("cam1", from, to)
+	if err == nil {
+		result.Close()
+		t.Fatal("expected error for no segments, got nil")
+	}
+	if !strings.Contains(err.Error(), "no segments found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPrepareExport_DeletedSegment(t *testing.T) {
+	rec, db := newTestRecorder(t)
+
+	now := time.Now()
+	db.SaveSegment(storage.SegmentRecord{
+		Camera:    "cam1",
+		Path:      "/nonexistent/path.mp4",
+		StartTime: now.Add(-10 * time.Minute),
+		EndTime:   now,
+		SizeBytes: 1024,
+	})
+
+	result, err := rec.PrepareExport("cam1", now.Add(-5*time.Minute), now)
+	if err == nil {
+		result.Close()
+		t.Fatal("expected error for deleted segment, got nil")
+	}
+	if !strings.Contains(err.Error(), "segments deleted") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

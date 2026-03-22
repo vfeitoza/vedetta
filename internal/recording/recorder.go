@@ -46,6 +46,10 @@ func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
 
+	// Clean up stale export temp files from previous runs
+	exportDir := filepath.Join(cfg.Path, ".exports")
+	os.RemoveAll(exportDir)
+
 	return &Recorder{
 		config:       cfg,
 		db:           db,
@@ -209,6 +213,97 @@ func (r *Recorder) StorageStats() StorageStats {
 // DiskAvailable returns the bytes available on the recording filesystem.
 func (r *Recorder) DiskAvailable() uint64 {
 	return r.segments.DiskAvailable()
+}
+
+// ExportResult holds a prepared export ready to be served via http.ServeContent.
+// The caller must call Close when done.
+type ExportResult struct {
+	File    *os.File
+	tmpPath string
+}
+
+// Close cleans up the file handle and temporary export file.
+func (er *ExportResult) Close() {
+	er.File.Close()
+	os.Remove(er.tmpPath)
+}
+
+// PrepareExport builds an MP4 covering [from, to) for a camera and returns
+// a result that can be streamed. This separates validation/preparation
+// (which can fail with a proper error) from streaming (which happens after
+// HTTP headers are sent).
+func (r *Recorder) PrepareExport(cameraName string, from, to time.Time) (*ExportResult, error) {
+	segments := r.segments.FindSegments(cameraName, from, to)
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("no segments found for camera %q in range %s–%s", cameraName, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	}
+
+	// Filter out segments whose files no longer exist
+	valid := segments[:0]
+	for _, seg := range segments {
+		if _, err := os.Stat(seg.Path); err == nil {
+			valid = append(valid, seg)
+		}
+	}
+	segments = valid
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("segments deleted before export for camera %q", cameraName)
+	}
+
+	startOffset := from.Sub(segments[0].StartTime)
+	if startOffset < 0 {
+		startOffset = 0
+	}
+	duration := to.Sub(from)
+
+	exportDir := filepath.Join(r.config.Path, ".exports")
+	if err := os.MkdirAll(exportDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create export dir: %w", err)
+	}
+	tmpFile, err := os.CreateTemp(exportDir, "export-*.mp4")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	inputs := make([]string, len(segments))
+	for i, seg := range segments {
+		inputs[i] = seg.Path
+	}
+
+	if len(inputs) == 1 {
+		if err := media.TrimMP4(inputs[0], tmpPath, startOffset, duration); err != nil {
+			os.Remove(tmpPath)
+			return nil, fmt.Errorf("trim segment: %w", err)
+		}
+	} else {
+		if err := media.ConcatMP4(inputs, tmpPath, startOffset, duration); err != nil {
+			os.Remove(tmpPath)
+			return nil, fmt.Errorf("concat segments: %w", err)
+		}
+	}
+
+	info, err := os.Stat(tmpPath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("stat export: %w", err)
+	}
+	if info.Size() == 0 {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("no video data in the requested range for camera %q", cameraName)
+	}
+
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("open export result: %w", err)
+	}
+
+	return &ExportResult{
+		File:    f,
+		tmpPath: tmpPath,
+	}, nil
 }
 
 // ListSegmentsForDate returns segments for a camera on a specific date.
