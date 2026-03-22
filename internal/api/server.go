@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -105,6 +106,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB, camera
 	s.mux.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
 	s.mux.HandleFunc("GET /api/events/{id}/snapshot", s.handleEventSnapshot)
 	s.mux.HandleFunc("GET /api/events/{id}/clip", s.handleEventClip)
+	s.mux.HandleFunc("POST /api/events/{id}/clip", s.handleReextractClip)
 	s.mux.HandleFunc("GET /api/events/counts", s.handleEventCounts)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/system", s.handleSystemAPI)
@@ -380,6 +382,31 @@ func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("%s_%s.mp4", event.ID, event.Label)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	http.ServeFile(w, r, event.ClipPath)
+}
+
+func (s *Server) handleReextractClip(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	event, err := s.db.GetEventByID(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if event == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+		return
+	}
+
+	// Remove old clip if it exists
+	if event.ClipPath != "" {
+		os.Remove(event.ClipPath)
+	}
+
+	if err := s.recorder.SaveClip(r.Context(), *event); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "event": id})
 }
 
 func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
