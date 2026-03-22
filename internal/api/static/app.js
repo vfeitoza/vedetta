@@ -1617,6 +1617,26 @@ document.addEventListener('htmx:afterSwap', function(e) {
   });
 });
 
+// ─── Localize <time> Elements ───
+// Server renders <time datetime="ISO"> with UTC display text.
+// This converts them to the user's local timezone in the browser.
+function localizeTimeElements(root) {
+  (root || document).querySelectorAll('time[datetime]').forEach(function(el) {
+    var d = new Date(el.getAttribute('datetime'));
+    if (isNaN(d)) return;
+    el.textContent = d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0') + ' ' +
+      String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0') + ':' +
+      String(d.getSeconds()).padStart(2, '0');
+  });
+}
+
+document.addEventListener('htmx:afterSwap', function(e) {
+  localizeTimeElements(e.detail.target);
+});
+
 // ─── Keyboard Shortcut Modal ───
 function toggleShortcutModal() {
   var backdrop = el('shortcut-backdrop');
