@@ -594,6 +594,24 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 	return events, rows.Err()
 }
 
+// DeleteEvent removes an event by ID.
+func (d *DB) DeleteEvent(id string) error {
+	_, err := d.db.Exec("DELETE FROM events WHERE id = ?", id)
+	return err
+}
+
+// EventsWithSnapshots returns all events that have a non-empty snapshot_path.
+func (d *DB) EventsWithSnapshots() ([]camera.Event, error) {
+	rows, err := d.db.Query(`
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path
+		FROM events WHERE snapshot_path != '' AND snapshot_path IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEvents(rows)
+}
+
 func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {
 	var segments []SegmentRecord
 	for rows.Next() {

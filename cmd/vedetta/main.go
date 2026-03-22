@@ -60,6 +60,9 @@ func main() {
 	}
 	defer func() { _ = db.Close() }()
 
+	// Purge events whose snapshot files no longer exist on disk
+	go purgeOrphanedEvents(db)
+
 	var mqttClient *mqtt.Client
 	if cfg.MQTT.Enabled {
 		mqttClient, err = mqtt.New(cfg.MQTT)
@@ -329,4 +332,27 @@ func main() {
 
 	// Wait for recording goroutines to finalize segments before closing DB
 	recorder.Close()
+}
+
+// purgeOrphanedEvents removes events whose snapshot files no longer exist on disk.
+func purgeOrphanedEvents(db *storage.DB) {
+	events, err := db.EventsWithSnapshots()
+	if err != nil {
+		slog.Error("failed to query events for orphan check", "error", err)
+		return
+	}
+
+	var purged int
+	for _, ev := range events {
+		if _, err := os.Stat(ev.SnapshotPath); err != nil {
+			if err := db.DeleteEvent(ev.ID); err != nil {
+				slog.Error("failed to delete orphaned event", "id", ev.ID, "error", err)
+				continue
+			}
+			purged++
+		}
+	}
+	if purged > 0 {
+		slog.Info("purged orphaned events with missing snapshots", "count", purged)
+	}
 }

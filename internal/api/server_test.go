@@ -399,22 +399,18 @@ func TestHandleEventClip_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandleEventSnapshot_NoPath_FallsBackToCamera(t *testing.T) {
+func TestHandleEventSnapshot_NoPath(t *testing.T) {
 	srv, db := newTestServer(t)
 	now := time.Now().UTC().Truncate(time.Second)
-	// Event exists but has no snapshot_path — should redirect to camera snapshot
+	// Event exists but has no snapshot_path
 	seedEvent(t, db, "evt-nosnap", "cam1", "person", 0.9, now)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events/evt-nosnap/snapshot", nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusTemporaryRedirect {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusTemporaryRedirect)
-	}
-	loc := w.Header().Get("Location")
-	if loc != "/api/cameras/cam1/snapshot" {
-		t.Errorf("redirect location = %q, want /api/cameras/cam1/snapshot", loc)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
 

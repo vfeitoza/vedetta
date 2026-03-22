@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -348,26 +347,15 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if event == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+	if event == nil || event.SnapshotPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
 		return
 	}
-
-	// Serve event snapshot if it exists on disk, otherwise fall back to camera's live snapshot
-	if event.SnapshotPath != "" {
-		if f, err := os.Open(event.SnapshotPath); err == nil {
-			defer f.Close()
-			filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
-			if r.URL.Query().Get("download") != "" {
-				w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-			}
-			http.ServeFile(w, r, event.SnapshotPath)
-			return
-		}
+	filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
+	if r.URL.Query().Get("download") != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	}
-
-	// Fall back to camera's live snapshot
-	http.Redirect(w, r, "/api/cameras/"+event.CameraName+"/snapshot", http.StatusTemporaryRedirect)
+	http.ServeFile(w, r, event.SnapshotPath)
 }
 
 func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
