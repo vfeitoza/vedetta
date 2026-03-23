@@ -702,19 +702,64 @@ func TestHandleSystemPartial(t *testing.T) {
 	}
 }
 
-func TestHandleRecordingsPartial_NoCameras(t *testing.T) {
+func TestHandleRecordingsSummary_Empty(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/partials/recordings", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/recordings/summary?date=2026-03-23", nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	body := w.Body.String()
-	if !contains(body, "No cameras configured") {
-		t.Errorf("expected empty state for no cameras, got %q", body)
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	cameras, ok := body["cameras"].([]any)
+	if !ok {
+		t.Fatalf("cameras field missing or wrong type")
+	}
+	if len(cameras) != 0 {
+		t.Errorf("cameras = %v, want empty", cameras)
+	}
+}
+
+func TestHandleRecordingsSummary_WithData(t *testing.T) {
+	srv, db := newTestServer(t)
+
+	now := time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC)
+	seedSegment(t, db, "cam1", "/seg1.mp4", now, now.Add(10*time.Minute), 1024*1024)
+	seedSegment(t, db, "cam1", "/seg2.mp4", now.Add(10*time.Minute), now.Add(20*time.Minute), 2*1024*1024)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/recordings/summary?date=2026-03-23", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	cameras := body["cameras"].([]any)
+	if len(cameras) != 1 {
+		t.Fatalf("cameras count = %d, want 1", len(cameras))
+	}
+	cam := cameras[0].(map[string]any)
+	if cam["name"] != "cam1" {
+		t.Errorf("camera name = %v, want cam1", cam["name"])
+	}
+	segs := cam["segments"].([]any)
+	if len(segs) != 2 {
+		t.Errorf("segments count = %d, want 2", len(segs))
+	}
+	totalBytes := body["total_bytes"].(float64)
+	if totalBytes != 3*1024*1024 {
+		t.Errorf("total_bytes = %v, want %v", totalBytes, 3*1024*1024)
 	}
 }
 

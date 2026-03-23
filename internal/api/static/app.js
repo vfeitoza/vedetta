@@ -1267,7 +1267,7 @@ function reloadEvents() {
   htmx.ajax('GET', url, { target: '#events-gallery', swap: 'innerHTML' });
 }
 
-// ─── Calendar (Recordings page) ───
+// ─── Calendar & Recordings page ───
 function initCalendar() {
   calendarDate = new Date();
   renderCalendar();
@@ -1279,71 +1279,66 @@ function calendarNav(delta) {
 }
 
 function renderCalendar() {
-  const grid = el('calendar-grid');
-  const monthLabel = el('calendar-month');
+  var grid = el('calendar-grid');
+  var monthLabel = el('calendar-month');
   if (!grid || !monthLabel) return;
 
-  const year = calendarDate.getFullYear();
-  const month = calendarDate.getMonth();
+  var year = calendarDate.getFullYear();
+  var month = calendarDate.getMonth();
 
   monthLabel.textContent = calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-  // Clear existing day cells (keep the 7 day-label headers)
-  const labels = grid.querySelectorAll('.calendar-day-label');
+  var labels = grid.querySelectorAll('.calendar-day-label');
   grid.innerHTML = '';
-  labels.forEach(l => grid.appendChild(l));
+  labels.forEach(function(l) { grid.appendChild(l); });
 
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
+  var firstDay = new Date(year, month, 1).getDay();
+  var daysInMonth = new Date(year, month + 1, 0).getDate();
+  var today = new Date();
 
-  // Empty cells before first day
-  for (let i = 0; i < firstDay; i++) {
-    const cell = document.createElement('span');
-    cell.className = 'calendar-day empty';
-    grid.appendChild(cell);
+  for (var i = 0; i < firstDay; i++) {
+    var empty = document.createElement('span');
+    empty.className = 'calendar-day empty';
+    grid.appendChild(empty);
   }
 
-  for (let d = 1; d <= daysInMonth; d++) {
-    const cell = document.createElement('button');
+  for (var d = 1; d <= daysInMonth; d++) {
+    var cell = document.createElement('button');
     cell.className = 'calendar-day';
     cell.textContent = d;
     cell.dataset.day = d;
 
-    const cellDate = new Date(year, month, d);
+    var cellDate = new Date(year, month, d);
     if (cellDate.toDateString() === today.toDateString()) {
       cell.classList.add('today');
     }
 
-    cell.onclick = function() {
-      grid.querySelectorAll('.calendar-day.selected').forEach(s => s.classList.remove('selected'));
-      cell.classList.add('selected');
-      loadRecordingsForDate(cellDate);
-    };
+    cell.onclick = (function(cd, c) {
+      return function() {
+        grid.querySelectorAll('.calendar-day.selected').forEach(function(s) { s.classList.remove('selected'); });
+        c.classList.add('selected');
+        loadRecordingsSummary(cd);
+      };
+    })(cellDate, cell);
 
     grid.appendChild(cell);
   }
 
-  // Fetch real recording days from API
-  const monthStr = year + '-' + String(month + 1).padStart(2, '0');
-  const camera = el('rec-camera')?.value || '';
-  let url = '/api/recordings/calendar?month=' + monthStr;
-  if (camera) url += '&camera=' + encodeURIComponent(camera);
+  var monthStr = year + '-' + String(month + 1).padStart(2, '0');
+  var url = '/api/recordings/calendar?month=' + monthStr;
 
   fetch(url)
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
-      const daysWithData = new Set(data.days || []);
+      var daysWithData = new Set(data.days || []);
       grid.querySelectorAll('.calendar-day[data-day]').forEach(function(cell) {
-        const day = parseInt(cell.dataset.day, 10);
-        if (daysWithData.has(day)) {
+        if (daysWithData.has(parseInt(cell.dataset.day, 10))) {
           cell.classList.add('has-data');
         }
       });
 
-      // Auto-select: today if it has data, otherwise most recent day with data
-      const todayDay = (today.getFullYear() === year && today.getMonth() === month) ? today.getDate() : null;
-      let selectDay = null;
+      var todayDay = (today.getFullYear() === year && today.getMonth() === month) ? today.getDate() : null;
+      var selectDay = null;
       if (todayDay && daysWithData.has(todayDay)) {
         selectDay = todayDay;
       } else if (daysWithData.size > 0) {
@@ -1351,29 +1346,208 @@ function renderCalendar() {
       }
 
       if (selectDay) {
-        const btn = grid.querySelector('.calendar-day[data-day="' + selectDay + '"]');
+        var btn = grid.querySelector('.calendar-day[data-day="' + selectDay + '"]');
         if (btn) btn.click();
+      } else {
+        renderEmptyRecordings();
       }
     })
     .catch(function(err) { console.error('Failed to load calendar data:', err); });
 }
 
-function loadRecordingsForDate(date) {
-  const camera = el('rec-camera')?.value || '';
-  const dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
-  const detail = el('recordings-detail');
-  if (!detail) return;
-
-  let url = '/partials/recordings?date=' + dateStr;
-  if (camera) url += '&camera=' + encodeURIComponent(camera);
-
-  fetch(url).then(function(r) { return r.text(); }).then(function(html) {
-    detail.innerHTML = html;
-  }).catch(function(err) { console.error('Failed to load recordings:', err); });
+function formatBytesJS(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
 }
 
-function loadRecordings() {
-  renderCalendar();
+function humanizeName(name) {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
+function renderEmptyRecordings() {
+  var summary = el('day-summary');
+  var cards = el('camera-cards');
+  if (summary) summary.innerHTML = '';
+  if (cards) cards.innerHTML = '<div class="empty-state"><p>No recordings for this date.</p></div>';
+}
+
+function loadRecordingsSummary(date) {
+  var dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+
+  fetch('/api/recordings/summary?date=' + dateStr)
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      renderRecordingsSummary(data, date);
+    })
+    .catch(function(err) {
+      console.error('Failed to load recordings summary:', err);
+    });
+}
+
+function renderRecordingsSummary(data, date) {
+  var summary = el('day-summary');
+  var cardsContainer = el('camera-cards');
+  if (!summary || !cardsContainer) return;
+
+  var cameras = data.cameras || [];
+  var totalBytes = data.total_bytes || 0;
+
+  if (cameras.length === 0) {
+    summary.innerHTML = '';
+    cardsContainer.innerHTML = '<div class="empty-state"><p>No recordings for this date.</p></div>';
+    return;
+  }
+
+  // Day summary bar
+  var dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  summary.innerHTML =
+    '<div class="day-summary-bar">' +
+      '<span class="day-summary-date">' + dateLabel + '</span>' +
+      '<span class="day-summary-stats">' +
+        '<span>' + cameras.length + ' camera' + (cameras.length !== 1 ? 's' : '') + '</span>' +
+        '<span class="day-summary-dot"></span>' +
+        '<span>' + formatBytesJS(totalBytes) + '</span>' +
+      '</span>' +
+    '</div>';
+
+  // Camera cards
+  cardsContainer.innerHTML = '';
+  cameras.forEach(function(cam) {
+    var card = document.createElement('div');
+    card.className = 'rec-camera-card';
+
+    // Header row
+    var header = document.createElement('div');
+    header.className = 'rec-camera-header';
+    header.innerHTML =
+      '<a href="/camera.html?name=' + encodeURIComponent(cam.name) + '" class="rec-camera-name">' + humanizeName(cam.name) + '</a>' +
+      '<span class="rec-camera-size">' + formatBytesJS(cam.total_bytes) + '</span>';
+    card.appendChild(header);
+
+    // Coverage bar (24h)
+    var barWrap = document.createElement('div');
+    barWrap.className = 'rec-coverage-bar';
+
+    // Merge adjacent segments (gap < 60s)
+    var blocks = [];
+    cam.segments.forEach(function(seg) {
+      var start = new Date(seg.start_time);
+      var end = new Date(seg.end_time);
+      var startSec = start.getHours() * 3600 + start.getMinutes() * 60 + start.getSeconds();
+      var endSec = end.getHours() * 3600 + end.getMinutes() * 60 + end.getSeconds();
+      if (endSec <= startSec) endSec = 86400;
+
+      if (blocks.length > 0 && startSec - blocks[blocks.length - 1].end <= 60) {
+        if (endSec > blocks[blocks.length - 1].end) {
+          blocks[blocks.length - 1].end = endSec;
+        }
+      } else {
+        blocks.push({ start: startSec, end: endSec });
+      }
+    });
+
+    blocks.forEach(function(block) {
+      var startPct = block.start / 86400 * 100;
+      var widthPct = (block.end - block.start) / 86400 * 100;
+      if (widthPct < 0.2) widthPct = 0.2;
+      var div = document.createElement('div');
+      div.className = 'rec-coverage-fill';
+      div.style.left = startPct + '%';
+      div.style.width = widthPct + '%';
+      barWrap.appendChild(div);
+    });
+
+    // Click on bar to navigate to camera playback
+    barWrap.addEventListener('click', function(e) {
+      var rect = barWrap.getBoundingClientRect();
+      var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      var totalSec = pct * 86400;
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = Math.floor(totalSec % 60);
+      var ts = date.getFullYear() + '-' +
+        String(date.getMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getDate()).padStart(2, '0') + 'T' +
+        String(h).padStart(2, '0') + ':' +
+        String(m).padStart(2, '0') + ':' +
+        String(s).padStart(2, '0') + 'Z';
+      location.href = '/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(ts);
+    });
+
+    // Hover cursor
+    var cursor = document.createElement('div');
+    cursor.className = 'rec-coverage-cursor';
+    var cursorTime = document.createElement('span');
+    cursorTime.className = 'rec-coverage-cursor-time';
+    cursor.appendChild(cursorTime);
+    barWrap.appendChild(cursor);
+
+    barWrap.addEventListener('mousemove', function(e) {
+      var rect = barWrap.getBoundingClientRect();
+      var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      cursor.style.left = (pct * 100) + '%';
+      cursor.style.display = '';
+      var totalSec = pct * 86400;
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      cursorTime.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    });
+
+    barWrap.addEventListener('mouseleave', function() {
+      cursor.style.display = 'none';
+    });
+
+    card.appendChild(barWrap);
+
+    // Time labels
+    var labels = document.createElement('div');
+    labels.className = 'rec-coverage-labels';
+    labels.innerHTML = '<span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>';
+    card.appendChild(labels);
+
+    // Expandable segment list
+    var toggle = document.createElement('button');
+    toggle.className = 'btn btn-sm rec-segments-toggle';
+    toggle.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>' +
+      cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '');
+
+    var segList = document.createElement('div');
+    segList.className = 'rec-segment-list hidden';
+
+    cam.segments.forEach(function(seg) {
+      var start = new Date(seg.start_time);
+      var end = new Date(seg.end_time);
+      var startLocal = String(start.getHours()).padStart(2, '0') + ':' + String(start.getMinutes()).padStart(2, '0');
+      var endLocal = String(end.getHours()).padStart(2, '0') + ':' + String(end.getMinutes()).padStart(2, '0');
+      var durMin = Math.round((end - start) / 60000);
+      var durStr = durMin >= 60 ? Math.floor(durMin / 60) + 'h' + (durMin % 60 ? durMin % 60 + 'm' : '') : durMin + 'm';
+
+      var row = document.createElement('div');
+      row.className = 'rec-segment-row';
+      row.innerHTML =
+        '<span class="rec-seg-time">' + startLocal + ' – ' + endLocal + '</span>' +
+        '<span class="rec-seg-dur">' + durStr + '</span>' +
+        '<span class="rec-seg-size">' + formatBytesJS(seg.size_bytes) + '</span>' +
+        '<span class="rec-seg-actions">' +
+          '<a href="/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(seg.start_time) + '" class="btn btn-sm" title="Play">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>' +
+        '</span>';
+      segList.appendChild(row);
+    });
+
+    toggle.onclick = function() {
+      var isHidden = segList.classList.contains('hidden');
+      segList.classList.toggle('hidden');
+      toggle.classList.toggle('active');
+    };
+
+    card.appendChild(toggle);
+    card.appendChild(segList);
+    cardsContainer.appendChild(card);
+  });
 }
 
 // ─── Keyboard Shortcuts ───

@@ -112,6 +112,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB, camera
 	s.mux.HandleFunc("GET /api/system", s.handleSystemAPI)
 
 	s.mux.HandleFunc("GET /api/recordings/calendar", s.handleRecordingsCalendar)
+	s.mux.HandleFunc("GET /api/recordings/summary", s.handleRecordingsSummary)
 
 	s.mux.HandleFunc("GET /api/cameras/{name}/timeline", s.handleCameraTimeline)
 	s.mux.HandleFunc("GET /api/cameras/{name}/playback", s.handlePlayback)
@@ -130,7 +131,6 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB, camera
 	s.mux.HandleFunc("GET /partials/event/{id}", s.handleEventDetailPartial)
 	s.mux.HandleFunc("GET /partials/system-status", s.handleSystemStatusPartial)
 	s.mux.HandleFunc("GET /partials/system", s.handleSystemPartial)
-	s.mux.HandleFunc("GET /partials/recordings", s.handleRecordingsPartial)
 
 	// Serve static files at root
 	staticSub, err := fs.Sub(staticFiles, "static")
@@ -1127,62 +1127,6 @@ const systemPartialTemplate = `<div class="sys-card">
   </div>
 </div>`
 
-func (s *Server) handleRecordingsPartial(w http.ResponseWriter, r *http.Request) {
-	cameraFilter := r.URL.Query().Get("camera")
-	dateStr := r.URL.Query().Get("date")
-
-	date := time.Now().UTC()
-	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			date = parsed
-		}
-	}
-
-	if cameraFilter == "" && len(s.cameras.ListCameras()) == 0 {
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No cameras configured.</p></div>`)
-		return
-	}
-
-	segments, err := s.db.GetSegmentsForDate(cameraFilter, date)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if len(segments) == 0 {
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = fmt.Fprint(w, `<div class="empty-state"><p>No recordings for this date.</p></div>`)
-		return
-	}
-
-	funcs := template.FuncMap{
-		"formatTime":  s.funcMap["formatTime"],
-		"formatBytes": formatBytes,
-		"segDuration": func(start, end time.Time) string {
-			return formatDuration(end.Sub(start))
-		},
-	}
-
-	tmpl := template.Must(template.New("recordings").Funcs(funcs).Parse(
-		`{{range .}}<div class="segment-row" data-camera="{{.Camera}}" data-start="{{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}">` +
-			`<span class="segment-time">{{formatTime .StartTime}} - {{formatTime .EndTime}}</span>` +
-			`<span class="segment-duration">{{segDuration .StartTime .EndTime}}</span>` +
-			`<span class="segment-size">{{formatBytes .SizeBytes}}</span>` +
-			`<span class="segment-actions">` +
-			`<a href="/camera.html?name={{.Camera}}&t={{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}" class="btn btn-sm" title="Play in camera view">` +
-			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>` +
-			`<a href="/api/cameras/{{.Camera}}/playback?start={{.StartTime.Format "2006-01-02T15:04:05Z07:00"}}" download class="btn btn-sm" title="Download segment">` +
-			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>` +
-			`</span>` +
-			`</div>{{end}}`))
-
-	w.Header().Set("Content-Type", "text/html")
-	if err := tmpl.Execute(w, segments); err != nil {
-		slog.Error("template error", "error", err)
-	}
-}
-
 func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request) {
 	cameraFilter := r.URL.Query().Get("camera")
 	monthStr := r.URL.Query().Get("month")
@@ -1205,6 +1149,74 @@ func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"days": days})
+}
+
+func (s *Server) handleRecordingsSummary(w http.ResponseWriter, r *http.Request) {
+	dateStr := r.URL.Query().Get("date")
+
+	date := time.Now().UTC()
+	if dateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+			date = parsed
+		}
+	}
+
+	// Get all segments for the date across all cameras.
+	segments, err := s.db.GetSegmentsForDate("", date)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type segmentInfo struct {
+		StartTime time.Time `json:"start_time"`
+		EndTime   time.Time `json:"end_time"`
+		SizeBytes int64     `json:"size_bytes"`
+	}
+
+	type cameraSummary struct {
+		Name       string        `json:"name"`
+		Segments   []segmentInfo `json:"segments"`
+		TotalBytes int64         `json:"total_bytes"`
+	}
+
+	// Group by camera, preserving config order.
+	cameraOrder := s.cameras.ListCameras()
+	grouped := make(map[string]*cameraSummary, len(cameraOrder))
+	for _, name := range cameraOrder {
+		grouped[name] = &cameraSummary{Name: name, Segments: []segmentInfo{}}
+	}
+
+	var totalBytes int64
+	for _, seg := range segments {
+		cs, ok := grouped[seg.Camera]
+		if !ok {
+			cs = &cameraSummary{Name: seg.Camera, Segments: []segmentInfo{}}
+			grouped[seg.Camera] = cs
+			cameraOrder = append(cameraOrder, seg.Camera)
+		}
+		cs.Segments = append(cs.Segments, segmentInfo{
+			StartTime: seg.StartTime,
+			EndTime:   seg.EndTime,
+			SizeBytes: seg.SizeBytes,
+		})
+		cs.TotalBytes += seg.SizeBytes
+		totalBytes += seg.SizeBytes
+	}
+
+	// Build ordered result, skip cameras with no data.
+	result := make([]cameraSummary, 0, len(cameraOrder))
+	for _, name := range cameraOrder {
+		cs := grouped[name]
+		if len(cs.Segments) > 0 {
+			result = append(result, *cs)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cameras":     result,
+		"total_bytes": totalBytes,
+	})
 }
 
 // formatDuration returns a human-readable duration string.

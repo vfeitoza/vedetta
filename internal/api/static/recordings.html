@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Recordings - Vedetta</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
   <meta name="theme-color" content="#0a0e14">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="apple-touch-icon" href="/favicon.svg">
@@ -58,17 +57,11 @@
             <span class="calendar-day-label">S</span>
           </div>
         </div>
-
-        <div class="camera-select">
-          <label for="rec-camera">Camera</label>
-          <select id="rec-camera" onchange="loadRecordings()">
-            <option value="">All Cameras</option>
-          </select>
-        </div>
       </aside>
 
       <div class="recordings-detail" id="recordings-detail">
-        <div class="loading-state">Loading recordings…</div>
+        <div class="day-summary" id="day-summary"></div>
+        <div id="camera-cards"></div>
       </div>
     </div>
   </main>
@@ -110,17 +103,6 @@
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
-    // Populate camera select
-    fetch('/api/cameras').then(r => r.json()).then(data => {
-      const sel = document.getElementById('rec-camera');
-      (data.cameras || []).forEach(name => {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name.replace(/_/g, ' ');
-        sel.appendChild(opt);
-      });
-    });
-
     initCalendar();
   </script>
 </body>
