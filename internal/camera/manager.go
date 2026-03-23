@@ -20,7 +20,7 @@ type Manager struct {
 	mu       sync.RWMutex
 }
 
-func NewManager(configs []config.CameraConfig, detector *detect.Detector, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string) *Manager {
+func NewManager(configs []config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string) *Manager {
 	m := &Manager{
 		cameras:  make(map[string]*Camera),
 		detector: detector,
@@ -29,8 +29,8 @@ func NewManager(configs []config.CameraConfig, detector *detect.Detector, events
 	}
 
 	for _, cfg := range configs {
-		if cfg.Enabled {
-			cam := NewCamera(cfg, detector, events, eventEnds, presenceEvents, hub, snapshotPath, snapshotQuality, faceRecognizer, faceEvents, faceCropDir)
+		if cfg.IsEnabled() {
+			cam := NewCamera(cfg, detector, motion, events, eventEnds, presenceEvents, hub, snapshotPath, snapshotQuality, recordingPath, faceRecognizer, faceEvents, faceCropDir)
 			m.cameras[cfg.Name] = cam
 			m.order = append(m.order, cfg.Name)
 		}

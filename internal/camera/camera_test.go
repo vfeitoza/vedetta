@@ -8,11 +8,29 @@ import (
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
+func newTestCamera(cfg config.CameraConfig, hub *rtsp.Hub) *Camera {
+	return NewCamera(
+		cfg,
+		nil,
+		config.MotionConfig{PixelThreshold: 25, MinArea: 200, BackgroundAlpha: 0.05, MinRegionScore: 0.02},
+		make(chan Event, 1),
+		make(chan EventEnd, 1),
+		nil,
+		hub,
+		"",
+		85,
+		"",
+		nil,
+		nil,
+		"",
+	)
+}
+
 func TestSnapshotRGB24_NoFrame(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
-		Name: "test",
-		Detect: config.StreamConfig{Width: 64, Height: 64, FPS: 5},
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		Detect: config.DetectStreamConfig{Width: 64, Height: 64, FPS: 5},
+	}, nil)
 
 	dst := make([]byte, 64*64*3)
 	_, _, ok := cam.SnapshotRGB24(dst)
@@ -22,10 +40,10 @@ func TestSnapshotRGB24_NoFrame(t *testing.T) {
 }
 
 func TestSnapshotRGB24_CopiesFrame(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
-		Name: "test",
-		Detect: config.StreamConfig{Width: 4, Height: 4, FPS: 5},
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		Detect: config.DetectStreamConfig{Width: 4, Height: 4, FPS: 5},
+	}, nil)
 
 	frameSize := 4 * 4 * 3
 	frame := make([]byte, frameSize)
@@ -56,10 +74,10 @@ func TestSnapshotRGB24_CopiesFrame(t *testing.T) {
 }
 
 func TestSnapshotRGB24_DstTooSmall(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
-		Name: "test",
-		Detect: config.StreamConfig{Width: 4, Height: 4, FPS: 5},
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		Detect: config.DetectStreamConfig{Width: 4, Height: 4, FPS: 5},
+	}, nil)
 
 	frameSize := 4 * 4 * 3
 	cam.mu.Lock()
@@ -76,10 +94,10 @@ func TestSnapshotRGB24_DstTooSmall(t *testing.T) {
 }
 
 func TestFrameSize(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
-		Name: "test",
-		Detect: config.StreamConfig{Width: 320, Height: 240, FPS: 5},
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		Detect: config.DetectStreamConfig{Width: 320, Height: 240, FPS: 5},
+	}, nil)
 
 	expected := 320 * 240 * 3
 	if got := cam.FrameSize(); got != expected {
@@ -88,10 +106,10 @@ func TestFrameSize(t *testing.T) {
 }
 
 func TestIsOnline_NoHub(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
+	cam := newTestCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	}, nil)
 
 	if cam.IsOnline() {
 		t.Error("expected IsOnline=false with nil hub")
@@ -104,10 +122,10 @@ func TestIsOnline_NoSource(t *testing.T) {
 	hub := rtsp.NewHub(ctx)
 	defer hub.Close()
 
-	cam := NewCamera(config.CameraConfig{
+	cam := newTestCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, hub, "", 85, nil, nil, "")
+	}, hub)
 
 	// No source created for this URL yet
 	if cam.IsOnline() {
@@ -116,10 +134,10 @@ func TestIsOnline_NoSource(t *testing.T) {
 }
 
 func TestStatus_NoHub(t *testing.T) {
-	cam := NewCamera(config.CameraConfig{
+	cam := newTestCamera(config.CameraConfig{
 		Name: "test",
 		URL:  "rtsp://localhost/test",
-	}, nil, make(chan<- Event, 1), make(chan<- EventEnd, 1), nil, nil, "", 85, nil, nil, "")
+	}, nil)
 
 	st := cam.Status()
 	if st.Online {
@@ -127,5 +145,23 @@ func TestStatus_NoHub(t *testing.T) {
 	}
 	if st.Name != "test" {
 		t.Errorf("Name = %q, want %q", st.Name, "test")
+	}
+}
+
+func TestProcessFrame_PreservesDetectorDegradedState(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		URL:    "rtsp://localhost/test",
+		Detect: config.DetectStreamConfig{Width: 4, Height: 4, FPS: 5},
+	}, nil)
+
+	if st := cam.Status(); !st.Degraded || st.DegradedReason != "object detector unavailable" {
+		t.Fatalf("initial status = %+v, want degraded object detector unavailable", st)
+	}
+
+	cam.processFrame(make([]byte, 4*4*3), 4, 4)
+
+	if st := cam.Status(); !st.Degraded || st.DegradedReason != "object detector unavailable" {
+		t.Fatalf("status after frame = %+v, want degraded object detector unavailable", st)
 	}
 }

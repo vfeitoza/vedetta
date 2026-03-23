@@ -6,9 +6,15 @@ import (
 
 func makeTestZone(name string, x1, y1, x2, y2 float64, labels []string) Zone {
 	return Zone{
-		ID:      1,
-		Camera:  "test",
-		Name:    name,
+		ID:     1,
+		Camera: "test",
+		Name:   name,
+		Points: [][]float64{
+			{x1, y1},
+			{x2, y1},
+			{x2, y2},
+			{x1, y2},
+		},
 		X1:      x1,
 		Y1:      y1,
 		X2:      x2,
@@ -63,7 +69,7 @@ func TestMatchZones_PartialOverlap_Above50Percent(t *testing.T) {
 
 	// Detection: x from 20-100 out of 200 = 10%-50%
 	// Fully inside zone (zone goes to 60%), overlap = 100% > 50%
-	matched := MatchZones(zones, [4]int{20, 0, 100, 200}, "person", 200, 200)
+	matched := MatchZones(zones, [4]int{20, 0, 100, 199}, "person", 200, 200)
 	if len(matched) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(matched))
 	}

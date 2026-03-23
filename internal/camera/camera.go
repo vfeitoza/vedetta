@@ -20,16 +20,19 @@ import (
 
 // Event represents a detected object event from a camera.
 type Event struct {
-	ID           string    `json:"id"`
-	CameraName   string    `json:"camera"`
-	Label        string    `json:"label"`
-	Score        float32   `json:"score"`
-	Box          [4]int    `json:"box"` // x1, y1, x2, y2
-	Timestamp    time.Time `json:"timestamp"`
-	EndTime      time.Time `json:"end_time,omitempty"`      // when the tracked object left the frame
-	SnapshotPath string    `json:"snapshot_path,omitempty"`
-	ClipPath     string    `json:"clip_path,omitempty"`
-	ZoneName     string    `json:"zone_name,omitempty"`
+	ID                string      `json:"id"`
+	CameraName        string      `json:"camera"`
+	Label             string      `json:"label"`
+	Score             float32     `json:"score"`
+	Box               [4]int      `json:"box"` // x1, y1, x2, y2
+	Timestamp         time.Time   `json:"timestamp"`
+	EndTime           time.Time   `json:"end_time,omitempty"` // when the tracked object left the frame
+	SnapshotPath      string      `json:"snapshot_path,omitempty"`
+	SnapshotAvailable bool        `json:"snapshot_available"`
+	ClipPath          string      `json:"clip_path,omitempty"`
+	ClipAvailable     bool        `json:"clip_available"`
+	ZoneName          string      `json:"zone_name,omitempty"`
+	SnapshotImage     *image.RGBA `json:"-"`
 }
 
 // EventEnd signals that a tracked object has left the frame.
@@ -48,17 +51,20 @@ type FaceEvent struct {
 
 // Camera manages a single RTSP camera stream.
 type Camera struct {
-	config         config.CameraConfig
-	detector       *detect.Detector
-	tracker        *detect.Tracker
-	motionDetector *detect.MotionDetector
-	events          chan<- Event
-	eventEnds       chan<- EventEnd
-	presenceEvents  chan<- PresenceEvent
-	hub             *rtsp.Hub
-	eventSnapDir    string
-	eventSnapQuality int
-	snapConsumer    *media.SnapshotConsumer
+	config               config.CameraConfig
+	detector             *detect.Detector
+	tracker              *detect.Tracker
+	motionDetector       *detect.MotionDetector
+	events               chan<- Event
+	eventEnds            chan<- EventEnd
+	presenceEvents       chan<- PresenceEvent
+	hub                  *rtsp.Hub
+	eventSnapDir         string
+	eventSnapQuality     int
+	latestSnapshotPath   string
+	snapConsumer         *media.SnapshotConsumer
+	detectEnabled        bool
+	motionMinRegionScore float64
 
 	mu               sync.RWMutex
 	rawFrame         []byte // RGB24 frame data, guarded by mu
@@ -68,45 +74,55 @@ type Camera struct {
 	lastSnapshotSave time.Time
 	confirmedTracks  map[int]string // trackID → eventID
 
-	zones            []Zone
-	presenceTracker  *PresenceTracker
+	zones           []Zone
+	presenceTracker *PresenceTracker
 
-	faceRecognizer  *detect.FaceRecognizer
-	faceEvents      chan<- FaceEvent
-	faceCropDir     string
-	faceProcessed   map[int]time.Time
+	faceRecognizer *detect.FaceRecognizer
+	faceEvents     chan<- FaceEvent
+	faceCropDir    string
+	faceProcessed  map[int]time.Time
+	degradedReason string
 }
 
 // CameraStatus represents the current status of a camera.
 type CameraStatus struct {
-	Name      string    `json:"name"`
-	Online    bool      `json:"online"`
-	HasMotion bool      `json:"has_motion"`
-	LastFrame time.Time `json:"last_frame"`
+	Name           string    `json:"name"`
+	Online         bool      `json:"online"`
+	HasMotion      bool      `json:"has_motion"`
+	LastFrame      time.Time `json:"last_frame"`
+	Degraded       bool      `json:"degraded"`
+	DegradedReason string    `json:"degraded_reason,omitempty"`
 }
 
-func NewCamera(cfg config.CameraConfig, detector *detect.Detector, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string) *Camera {
+func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string) *Camera {
 	if snapshotQuality <= 0 {
 		snapshotQuality = 85
 	}
-	return &Camera{
-		config:          cfg,
-		detector:        detector,
-		tracker:         detect.NewTracker(30, 3),
-		motionDetector:  detect.NewMotionDetector(25, 200, 0.05),
-		events:          events,
-		eventEnds:       eventEnds,
-		presenceEvents:  presenceEvents,
-		hub:             hub,
-		eventSnapDir:     snapshotPath,
-		eventSnapQuality: snapshotQuality,
-		confirmedTracks: make(map[int]string),
-		presenceTracker: NewPresenceTracker(),
-		faceRecognizer:  faceRecognizer,
-		faceEvents:      faceEvents,
-		faceCropDir:     faceCropDir,
-		faceProcessed:   make(map[int]time.Time),
+	cam := &Camera{
+		config:               cfg,
+		detector:             detector,
+		tracker:              detect.NewTracker(30, 3),
+		motionDetector:       detect.NewMotionDetector(motion.PixelThreshold, motion.MinArea, motion.BackgroundAlpha),
+		events:               events,
+		eventEnds:            eventEnds,
+		presenceEvents:       presenceEvents,
+		hub:                  hub,
+		eventSnapDir:         snapshotPath,
+		eventSnapQuality:     snapshotQuality,
+		latestSnapshotPath:   filepath.Join(recordingPath, cfg.Name, "latest.jpg"),
+		detectEnabled:        cfg.DetectEnabled(),
+		motionMinRegionScore: motion.MinRegionScore,
+		confirmedTracks:      make(map[int]string),
+		presenceTracker:      NewPresenceTracker(),
+		faceRecognizer:       faceRecognizer,
+		faceEvents:           faceEvents,
+		faceCropDir:          faceCropDir,
+		faceProcessed:        make(map[int]time.Time),
 	}
+	if cam.detectEnabled && !detector.Available() {
+		cam.degradedReason = "object detector unavailable"
+	}
+	return cam
 }
 
 // SetZones replaces the camera's zone list and returns the old zones.
@@ -151,7 +167,7 @@ func (c *Camera) LastSnapshot() *image.RGBA {
 
 // snapshotPath returns the path for the cached latest snapshot.
 func (c *Camera) snapshotPath() string {
-	return filepath.Join("recordings", c.config.Name, "latest.jpg")
+	return c.latestSnapshotPath
 }
 
 // loadCachedSnapshot loads the last saved snapshot from disk so offline cameras
@@ -258,8 +274,13 @@ func (c *Camera) readFrames(ctx context.Context) {
 	}
 
 	consumer := media.NewDetectConsumer(c.config.Name, w, h, fps, videoTrack)
+	if !consumer.Available() {
+		c.setDegraded("detect decoder unavailable")
+		return
+	}
 	source.AddConsumer(consumer)
 	defer source.RemoveConsumer(consumer)
+	defer consumer.Close()
 
 	// Attach snapshot consumer to the main (high-res) stream for event snapshots
 	c.startSnapshotConsumer(ctx)
@@ -336,9 +357,20 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 	// Periodically save snapshot to disk for offline display
 	c.saveCachedSnapshot()
 
+	if !c.detectEnabled {
+		return
+	}
+
 	// Contour-based motion detection
 	motionRegions := c.motionDetector.Detect(buf, w, h)
-	if len(motionRegions) > 0 {
+	qualifiedMotion := false
+	for _, region := range motionRegions {
+		if region.Score >= c.motionMinRegionScore {
+			qualifiedMotion = true
+			break
+		}
+	}
+	if qualifiedMotion {
 		c.mu.Lock()
 		c.lastMotion = time.Now()
 		c.mu.Unlock()
@@ -434,7 +466,47 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 			}
 		}
 
-		// Face recognition for person detections in face_recognition zones
+		// Emit events for newly confirmed tracks
+		for _, obj := range tracked {
+			if _, active := c.confirmedTracks[obj.TrackID]; !active {
+				// If zones are configured, only emit events for objects in at least one zone
+				if len(zones) > 0 && len(trackZones[obj.TrackID]) == 0 {
+					continue
+				}
+
+				eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
+				c.confirmedTracks[obj.TrackID] = eventID
+
+				// Pick the first matched zone name for the event
+				var zoneName string
+				if matched := trackZones[obj.TrackID]; len(matched) > 0 {
+					zoneName = matched[0].Name
+				}
+
+				ev := Event{
+					ID:                eventID,
+					CameraName:        c.config.Name,
+					Label:             obj.Label,
+					Score:             obj.Score,
+					Box:               obj.Box,
+					Timestamp:         time.Now(),
+					ZoneName:          zoneName,
+					SnapshotAvailable: false,
+					ClipAvailable:     false,
+				}
+
+				if annotatedFrame != nil {
+					snapFile := filepath.Join(c.eventSnapDir, c.config.Name, eventID+".jpg")
+					ev.SnapshotPath = snapFile
+					ev.SnapshotImage = annotatedFrame
+				}
+
+				c.events <- ev
+			}
+		}
+
+		// Face recognition for person detections in face_recognition zones.
+		// Runs after event IDs are assigned so every saved face can point at a real event row.
 		if c.faceRecognizer != nil {
 			now := time.Now()
 			var rgbaFrame *image.RGBA
@@ -457,13 +529,16 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 				if !inFaceZone {
 					continue
 				}
+				eventID, ok := c.confirmedTracks[obj.TrackID]
+				if !ok {
+					continue
+				}
 				if rgbaFrame == nil {
 					rgbaFrame = rawToRGBA(buf, w, h)
 				}
 				results := c.faceRecognizer.DetectAndEmbed(rgbaFrame, obj.Box, c.faceCropDir)
 				c.faceProcessed[obj.TrackID] = now
 				if len(results) > 0 {
-					eventID := c.confirmedTracks[obj.TrackID]
 					select {
 					case c.faceEvents <- FaceEvent{
 						Camera:  c.config.Name,
@@ -479,48 +554,6 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 				if now.Sub(t) > 2*time.Minute {
 					delete(c.faceProcessed, id)
 				}
-			}
-		}
-
-		// Emit events for newly confirmed tracks
-		for _, obj := range tracked {
-			if _, active := c.confirmedTracks[obj.TrackID]; !active {
-				// If zones are configured, only emit events for objects in at least one zone
-				if len(zones) > 0 && len(trackZones[obj.TrackID]) == 0 {
-					continue
-				}
-
-				eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
-				c.confirmedTracks[obj.TrackID] = eventID
-
-				// Pick the first matched zone name for the event
-				var zoneName string
-				if matched := trackZones[obj.TrackID]; len(matched) > 0 {
-					zoneName = matched[0].Name
-				}
-
-				ev := Event{
-					ID:         eventID,
-					CameraName: c.config.Name,
-					Label:      obj.Label,
-					Score:      obj.Score,
-					Box:        obj.Box,
-					Timestamp:  time.Now(),
-					ZoneName:   zoneName,
-				}
-
-				if annotatedFrame != nil {
-					snapFile := filepath.Join(c.eventSnapDir, c.config.Name, eventID+".jpg")
-					ev.SnapshotPath = snapFile
-					quality := c.eventSnapQuality
-					go func() {
-						if err := snapshot.SaveSnapshot(annotatedFrame, snapFile, quality); err != nil {
-							slog.Error("failed to save event snapshot", "event", eventID, "error", err)
-						}
-					}()
-				}
-
-				c.events <- ev
 			}
 		}
 
@@ -567,10 +600,12 @@ func (c *Camera) Status() CameraStatus {
 		}
 	}
 	return CameraStatus{
-		Name:      c.config.Name,
-		Online:    online,
-		HasMotion: !c.lastMotion.IsZero() && time.Since(c.lastMotion) < 5*time.Second,
-		LastFrame: c.lastFrameTime,
+		Name:           c.config.Name,
+		Online:         online,
+		HasMotion:      !c.lastMotion.IsZero() && time.Since(c.lastMotion) < 5*time.Second,
+		LastFrame:      c.lastFrameTime,
+		Degraded:       c.degradedReason != "",
+		DegradedReason: c.degradedReason,
 	}
 }
 
@@ -607,4 +642,10 @@ func rawToRGBA(data []byte, w, h int) *image.RGBA {
 		pix[di+3] = 255
 	}
 	return img
+}
+
+func (c *Camera) setDegraded(reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.degradedReason = reason
 }
