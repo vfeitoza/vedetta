@@ -2024,7 +2024,8 @@ func (s *Server) handleFaceBackfill(w http.ResponseWriter, r *http.Request) {
 				face.Similarity = &similarity
 			}
 
-			if _, saveErr := s.db.SaveFace(face); saveErr != nil {
+			faceID, saveErr := s.db.SaveFace(face)
+			if saveErr != nil {
 				slog.Error("backfill: failed to save face", "error", saveErr)
 				continue
 			}
@@ -2035,7 +2036,9 @@ func (s *Server) handleFaceBackfill(w http.ResponseWriter, r *http.Request) {
 				s.updatePersonCentroid(personID, result.Embedding)
 				totalMatched++
 			} else {
-				totalNewPeople++
+				if s.clusterUnmatchedFace(faceID, result.Embedding) {
+					totalNewPeople++
+				}
 			}
 		}
 
@@ -2132,6 +2135,64 @@ func (s *Server) updatePersonCentroid(personID int64, newEmbedding []float32) {
 	}
 
 	_ = s.db.UpdatePersonCentroid(personID, detect.Float32ToBytes(merged))
+}
+
+const clusterThreshold = 0.62
+
+func (s *Server) clusterUnmatchedFace(newFaceID int64, embedding []float32) bool {
+	unmatched, err := s.db.ListUnmatchedFaces(200)
+	if err != nil || len(unmatched) == 0 {
+		return false
+	}
+
+	var bestFace *storage.Face
+	var bestSim float64
+	for i := range unmatched {
+		if unmatched[i].ID == newFaceID {
+			continue
+		}
+		other := detect.BytesToFloat32(unmatched[i].Embedding)
+		if len(other) == 0 {
+			continue
+		}
+		sim := detect.CosineSimilarity(embedding, other)
+		if sim > bestSim {
+			bestSim = sim
+			bestFace = &unmatched[i]
+		}
+	}
+
+	if bestFace == nil || bestSim < clusterThreshold {
+		return false
+	}
+
+	centroid := averageEmbeddings(embedding, detect.BytesToFloat32(bestFace.Embedding))
+	personID, err := s.db.SavePerson("", false, detect.Float32ToBytes(centroid))
+	if err != nil {
+		return false
+	}
+	_ = s.db.UpdateFacePerson(bestFace.ID, personID, bestSim)
+	_ = s.db.UpdateFacePerson(newFaceID, personID, 1.0)
+	return true
+}
+
+func averageEmbeddings(a, b []float32) []float32 {
+	if len(a) != len(b) {
+		return a
+	}
+	out := make([]float32, len(a))
+	var norm float64
+	for i := range out {
+		out[i] = (a[i] + b[i]) / 2
+		norm += float64(out[i]) * float64(out[i])
+	}
+	if norm > 1e-10 {
+		invNorm := float32(1.0 / math.Sqrt(norm))
+		for i := range out {
+			out[i] *= invNorm
+		}
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

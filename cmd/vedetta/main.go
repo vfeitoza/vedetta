@@ -362,7 +362,8 @@ func main() {
 						face.Similarity = &similarity
 					}
 
-					if _, saveErr := db.SaveFace(face); saveErr != nil {
+					faceID, saveErr := db.SaveFace(face)
+					if saveErr != nil {
 						slog.Error("failed to save face", "error", saveErr)
 						continue
 					}
@@ -371,7 +372,7 @@ func main() {
 						updatePersonCentroid(db, personID, result.Embedding)
 						slog.Info("face matched to person", "person_id", personID, "similarity", fmt.Sprintf("%.3f", similarity), "camera", fe.Camera)
 					} else {
-						slog.Info("unmatched face saved", "camera", fe.Camera, "event", fe.EventID)
+						clusterUnmatchedFace(db, faceID, result.Embedding, fe.Camera)
 					}
 				}
 			}
@@ -532,6 +533,65 @@ func updatePersonCentroid(db *storage.DB, personID int64, newEmbedding []float32
 	}
 
 	_ = db.UpdatePersonCentroid(personID, detect.Float32ToBytes(merged))
+}
+
+const clusterThreshold = 0.62
+
+func clusterUnmatchedFace(db *storage.DB, newFaceID int64, embedding []float32, camera string) {
+	unmatched, err := db.ListUnmatchedFaces(200)
+	if err != nil || len(unmatched) == 0 {
+		return
+	}
+
+	var bestFace *storage.Face
+	var bestSim float64
+	for i := range unmatched {
+		if unmatched[i].ID == newFaceID {
+			continue
+		}
+		other := detect.BytesToFloat32(unmatched[i].Embedding)
+		if len(other) == 0 {
+			continue
+		}
+		sim := detect.CosineSimilarity(embedding, other)
+		if sim > bestSim {
+			bestSim = sim
+			bestFace = &unmatched[i]
+		}
+	}
+
+	if bestFace == nil || bestSim < clusterThreshold {
+		return
+	}
+
+	centroid := averageEmbeddings(embedding, detect.BytesToFloat32(bestFace.Embedding))
+	personID, err := db.SavePerson("", false, detect.Float32ToBytes(centroid))
+	if err != nil {
+		slog.Error("failed to create person from cluster", "error", err)
+		return
+	}
+	_ = db.UpdateFacePerson(bestFace.ID, personID, bestSim)
+	_ = db.UpdateFacePerson(newFaceID, personID, 1.0)
+	slog.Info("auto-clustered faces into new person", "person_id", personID, "similarity", fmt.Sprintf("%.3f", bestSim), "camera", camera)
+}
+
+func averageEmbeddings(a, b []float32) []float32 {
+	if len(a) != len(b) {
+		return a
+	}
+	out := make([]float32, len(a))
+	var norm float64
+	for i := range out {
+		out[i] = (a[i] + b[i]) / 2
+		norm += float64(out[i]) * float64(out[i])
+	}
+	if norm > 1e-10 {
+		invNorm := float32(1.0 / math.Sqrt(norm))
+		for i := range out {
+			out[i] *= invNorm
+		}
+	}
+	return out
 }
 
 func reconcileEventMediaAvailability(db *storage.DB) {
