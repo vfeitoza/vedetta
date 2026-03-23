@@ -107,6 +107,24 @@ func (c *Client) PublishSnapshot(cameraName, label string, jpegData []byte) {
 	token.Wait()
 }
 
+func (c *Client) PublishDoorbell(cameraName, person string, jpegData []byte) {
+	payload, _ := json.Marshal(map[string]string{
+		"camera": cameraName,
+		"person": person,
+		"type":   "doorbell",
+	})
+	topic := fmt.Sprintf("%s/%s/doorbell", c.topic, cameraName)
+	token := c.client.Publish(topic, 1, false, payload)
+	token.Wait()
+
+	// Also publish snapshot on the doorbell snapshot topic (retained)
+	if len(jpegData) > 0 {
+		snapTopic := fmt.Sprintf("%s/%s/doorbell/snapshot", c.topic, cameraName)
+		token = c.client.Publish(snapTopic, 0, true, jpegData)
+		token.Wait()
+	}
+}
+
 func (c *Client) PublishPresence(pe camera.PresenceEvent, objectName string) {
 	state := "entered"
 	if pe.Type == "zone_leave" {

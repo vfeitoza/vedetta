@@ -463,6 +463,9 @@ func main() {
 	// Wire subsystems into the API server now that everything is initialized
 	server.SetSubsystems(manager, recorder, hub, faceRecognizer, objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras)
 	server.ObjectMatchThreshold = cfg.Detect.ObjectMatchThreshold
+	if mqttClient != nil {
+		server.SetMQTT(mqttClient)
+	}
 
 	slog.Info("vedetta started", "cameras", len(cfg.Cameras))
 

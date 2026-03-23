@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"embed"
@@ -40,6 +41,12 @@ var staticFiles embed.FS
 
 var startTime = time.Now()
 
+// MQTTPublisher is the subset of mqtt.Client used by the API server.
+type MQTTPublisher interface {
+	PublishSnapshot(cameraName, label string, jpegData []byte)
+	PublishDoorbell(cameraName, person string, jpegData []byte)
+}
+
 type Server struct {
 	config         config.APIConfig
 	auth           *auth.Checker
@@ -52,6 +59,7 @@ type Server struct {
 	faceRecognizer *detect.FaceRecognizer
 	objectEmbedder       *detect.ObjectEmbedder
 	ObjectMatchThreshold float64
+	mqttClient           MQTTPublisher
 	snapshotPath         string
 	faceCropDir    string
 	cameraConfigs  []config.CameraConfig
@@ -172,6 +180,9 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 	s.mux.HandleFunc("DELETE /api/objects/sightings/{id}", s.handleDismissSighting)
 	s.mux.HandleFunc("POST /api/events/{id}/identify", s.handleIdentifyEvent)
 
+	// Doorbell
+	s.mux.HandleFunc("POST /api/cameras/{name}/doorbell", s.handleDoorbellPress)
+
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
 	s.mux.HandleFunc("GET /api/cameras/{name}/mse/ws", s.handleMSEWebSocket)
@@ -220,6 +231,10 @@ func (s *Server) Start() error {
 }
 
 // Shutdown gracefully stops the HTTP server.
+func (s *Server) SetMQTT(publisher MQTTPublisher) {
+	s.mqttClient = publisher
+}
+
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpSrv == nil {
 		return nil
@@ -402,6 +417,95 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if err := jpeg.Encode(w, img, &jpeg.Options{Quality: 85}); err != nil {
 		slog.Error("failed to encode snapshot", "error", err)
 	}
+}
+
+func (s *Server) handleDoorbellPress(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	// Capture current snapshot
+	img := cam.LastSnapshot()
+	if img == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no snapshot available"})
+		return
+	}
+
+	// Create doorbell event
+	eventID := fmt.Sprintf("%s-doorbell-%d", name, time.Now().UnixMilli())
+	ev := camera.Event{
+		ID:                eventID,
+		CameraName:        name,
+		Label:             "doorbell",
+		Score:             1.0,
+		Box:               [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()},
+		Timestamp:         time.Now(),
+		SnapshotAvailable: true,
+	}
+
+	// Save snapshot
+	snapDir := filepath.Join(s.snapshotPath, name)
+	snapPath := filepath.Join(snapDir, eventID+".jpg")
+	if err := os.MkdirAll(snapDir, 0o755); err == nil {
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil {
+			if err := os.WriteFile(snapPath, buf.Bytes(), 0o644); err == nil {
+				ev.SnapshotPath = snapPath
+
+				// Publish snapshot to MQTT
+				if s.mqttClient != nil {
+					s.mqttClient.PublishSnapshot(name, "doorbell", buf.Bytes())
+				}
+			}
+		}
+	}
+
+	// Run face recognition on the snapshot
+	if s.faceRecognizer != nil {
+		fullBox := [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()}
+		results := s.faceRecognizer.DetectAndEmbed(img, fullBox, s.faceCropDir)
+		if len(results) > 0 {
+			bestResult := results[0]
+			personID, similarity := s.matchFaceToPerson(bestResult.Embedding)
+			if personID > 0 {
+				if p, err := s.db.GetPerson(personID); err == nil && p != nil && p.Name != "" {
+					ev.SubLabel = p.Name
+				}
+			}
+			_ = similarity
+		}
+	}
+
+	// Save event to DB
+	if err := s.db.SaveEvent(ev); err != nil {
+		slog.Error("failed to save doorbell event", "error", err)
+	}
+	if ev.SnapshotPath != "" {
+		_ = s.db.UpdateEventSnapshotPath(ev.ID, ev.SnapshotPath)
+	}
+	if ev.SubLabel != "" {
+		_ = s.db.UpdateEventSubLabel(ev.ID, ev.SubLabel)
+	}
+
+	// Publish doorbell event to MQTT
+	if s.mqttClient != nil {
+		var jpegData []byte
+		if ev.SnapshotPath != "" {
+			jpegData, _ = os.ReadFile(ev.SnapshotPath)
+		}
+		s.mqttClient.PublishDoorbell(name, ev.SubLabel, jpegData)
+	}
+
+	slog.Info("doorbell pressed", "camera", name, "event", eventID, "person", ev.SubLabel)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"event_id": eventID,
+		"camera":   name,
+		"person":   ev.SubLabel,
+	})
 }
 
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {

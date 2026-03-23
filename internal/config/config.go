@@ -32,6 +32,12 @@ type CameraConfig struct {
 	Record    StreamConfig       `yaml:"record"`
 	Zones     []Zone             `yaml:"zones"`
 	Enabled   *bool              `yaml:"enabled"`
+	Doorbell  DoorbellConfig     `yaml:"doorbell"`
+}
+
+type DoorbellConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	WebhookURL string `yaml:"webhook_url"` // external webhook to call on press (optional)
 }
 
 func (c CameraConfig) IsEnabled() bool {
