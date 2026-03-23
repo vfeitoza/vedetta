@@ -9,6 +9,7 @@ func init() {
 	Register("Div", opDiv)
 	Register("MatMul", opMatMul)
 	Register("Gemm", opGemm)
+	Register("ReduceMean", opReduceMean)
 }
 
 // shapesEqual returns true if two shapes are identical.
@@ -358,4 +359,106 @@ func opMatMul(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	}
 
 	return []*Tensor{out}, nil
+}
+
+func opReduceMean(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
+	if len(inputs) < 1 || inputs[0] == nil {
+		return nil, fmt.Errorf("reducemean: need at least 1 input")
+	}
+	data := inputs[0]
+	keepdims := attrs.GetInt("keepdims", 1)
+
+	// Resolve axes: opset 18+ uses second input, older uses attribute
+	var axes []int
+	if len(inputs) > 1 && inputs[1] != nil && len(inputs[1].Data) > 0 {
+		for _, v := range inputs[1].Data {
+			ax := int(v)
+			if ax < 0 {
+				ax += len(data.Shape)
+			}
+			axes = append(axes, ax)
+		}
+	} else if axesAttr := attrs.GetIntList("axes"); len(axesAttr) > 0 {
+		for _, v := range axesAttr {
+			ax := int(v)
+			if ax < 0 {
+				ax += len(data.Shape)
+			}
+			axes = append(axes, ax)
+		}
+	} else {
+		for i := range data.Shape {
+			axes = append(axes, i)
+		}
+	}
+
+	// Build a set of axes to reduce
+	reduceSet := make(map[int]bool, len(axes))
+	for _, ax := range axes {
+		reduceSet[ax] = true
+	}
+
+	// Compute output shape
+	ndim := len(data.Shape)
+	var outShape []int64
+	for d := 0; d < ndim; d++ {
+		if reduceSet[d] {
+			if keepdims != 0 {
+				outShape = append(outShape, 1)
+			}
+		} else {
+			outShape = append(outShape, data.Shape[d])
+		}
+	}
+	if len(outShape) == 0 {
+		outShape = []int64{1}
+	}
+
+	outSize := int64(1)
+	for _, s := range outShape {
+		outSize *= s
+	}
+	out := make([]float32, outSize)
+	counts := make([]float32, outSize)
+
+	// Compute strides for input
+	strides := make([]int64, ndim)
+	strides[ndim-1] = 1
+	for d := ndim - 2; d >= 0; d-- {
+		strides[d] = strides[d+1] * data.Shape[d+1]
+	}
+
+	// Compute strides for output (in terms of the non-reduced dims)
+	outStrides := make([]int64, ndim)
+	outDim := int64(1)
+	for d := ndim - 1; d >= 0; d-- {
+		if reduceSet[d] {
+			outStrides[d] = 0
+		} else {
+			outStrides[d] = outDim
+			outDim *= data.Shape[d]
+		}
+	}
+
+	// Accumulate
+	totalElems := int64(len(data.Data))
+	for i := int64(0); i < totalElems; i++ {
+		rem := i
+		outIdx := int64(0)
+		for d := 0; d < ndim; d++ {
+			coord := rem / strides[d]
+			rem %= strides[d]
+			outIdx += coord * outStrides[d]
+		}
+		out[outIdx] += data.Data[i]
+		counts[outIdx]++
+	}
+
+	for i := range out {
+		if counts[i] > 0 {
+			out[i] /= counts[i]
+		}
+	}
+
+	return []*Tensor{{Data: out, Shape: outShape}}, nil
 }
