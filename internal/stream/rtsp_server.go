@@ -111,10 +111,11 @@ func NewRTSPServer(hub *rtsp.Hub, cfg config.RTSPServerConfig, authChecker *auth
 			name:    cam.Name,
 			rtspURL: mainURL,
 		}
-		// Sub stream: publish at /<name>/sub when a separate sub-stream URL exists.
+		// Sub stream: publish at /<name>_sub when a separate sub-stream URL exists.
+		// Uses _sub suffix (not /sub path) to match go2rtc ecosystem convention.
 		if cam.RecordURL != "" && cam.URL != cam.RecordURL {
-			rs.cameras[cam.Name+"/sub"] = &cameraStream{
-				name:    cam.Name + "/sub",
+			rs.cameras[cam.Name+"_sub"] = &cameraStream{
+				name:    cam.Name + "_sub",
 				rtspURL: cam.URL,
 			}
 		}
@@ -321,9 +322,10 @@ func buildDescription(source *rtsp.Source) (*description.Session, *description.M
 }
 
 // parseStreamKey extracts the stream key from an RTSP path.
-// Returns keys like "front_door" or "front_door/sub".
-// Handles DESCRIBE paths ("/front_door", "/front_door/sub") and
-// SETUP paths ("/front_door/trackID=0", "/front_door/sub/trackID=0").
+// Returns keys like "front_door" or "front_door_sub".
+// Uses _sub suffix convention (matching go2rtc ecosystem) instead of /sub path segments.
+// Handles DESCRIBE paths ("/front_door", "/front_door_sub") and
+// SETUP paths ("/front_door/trackID=0", "/front_door_sub/trackID=0").
 func parseStreamKey(path string) string {
 	path = strings.TrimPrefix(path, "/")
 	parts := strings.Split(path, "/")
@@ -331,13 +333,7 @@ func parseStreamKey(path string) string {
 	if len(parts) == 0 || parts[0] == "" {
 		return ""
 	}
-	name := parts[0]
-
-	// Check if second segment is "sub" (not a trackID suffix)
-	if len(parts) >= 2 && parts[1] == "sub" {
-		return name + "/sub"
-	}
-	return name
+	return parts[0]
 }
 
 // --- gortsplib ServerHandler interface ---

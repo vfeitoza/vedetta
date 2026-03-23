@@ -22,11 +22,11 @@ func TestParseStreamKey(t *testing.T) {
 		{"garage", "garage"},
 		{"/", ""},
 		{"", ""},
-		// Sub-stream paths
-		{"/front_door/sub", "front_door/sub"},
-		{"/front_door/sub/trackID=0", "front_door/sub"},
-		{"/garage/sub", "garage/sub"},
-		{"/garage/sub/trackID=1", "garage/sub"},
+		// Sub-stream paths (_sub suffix, matching go2rtc convention)
+		{"/front_door_sub", "front_door_sub"},
+		{"/front_door_sub/trackID=0", "front_door_sub"},
+		{"/garage_sub", "garage_sub"},
+		{"/garage_sub/trackID=1", "garage_sub"},
 	}
 	for _, tt := range tests {
 		got := parseStreamKey(tt.path)
