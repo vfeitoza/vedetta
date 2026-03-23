@@ -69,7 +69,10 @@ func migrate(db *sql.DB) error {
 			timestamp DATETIME NOT NULL,
 			end_time DATETIME,
 			snapshot_path TEXT,
+			snapshot_available BOOLEAN NOT NULL DEFAULT 0,
 			clip_path TEXT,
+			clip_available BOOLEAN NOT NULL DEFAULT 0,
+			zone_name TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -92,6 +95,7 @@ func migrate(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			camera TEXT NOT NULL,
 			name TEXT NOT NULL,
+			points TEXT NOT NULL DEFAULT '[]',
 			x1 REAL NOT NULL,
 			y1 REAL NOT NULL,
 			x2 REAL NOT NULL,
@@ -134,6 +138,31 @@ func migrate(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
 		CREATE INDEX IF NOT EXISTS idx_faces_timestamp ON faces(timestamp);
+
+		CREATE TABLE IF NOT EXISTS auth_sessions (
+			id TEXT PRIMARY KEY,
+			username TEXT NOT NULL,
+			csrf_token TEXT NOT NULL,
+			remote_ip TEXT,
+			user_agent TEXT,
+			created_at DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
+
+		CREATE TABLE IF NOT EXISTS api_tokens (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL,
+			name TEXT NOT NULL,
+			token_prefix TEXT NOT NULL,
+			token_hash BLOB NOT NULL UNIQUE,
+			scopes TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL,
+			last_used_at DATETIME,
+			revoked_at DATETIME
+		);
+		CREATE INDEX IF NOT EXISTS idx_api_tokens_username ON api_tokens(username);
 	`)
 	if err != nil {
 		return err
@@ -144,6 +173,9 @@ func migrate(db *sql.DB) error {
 
 	// Add zone_name column to existing databases
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN zone_name TEXT")
+	_, _ = db.Exec("ALTER TABLE events ADD COLUMN snapshot_available BOOLEAN NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE events ADD COLUMN clip_available BOOLEAN NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE zones ADD COLUMN points TEXT NOT NULL DEFAULT '[]'")
 
 	// Normalize timestamps to UTC RFC3339 format for consistent SQLite comparisons.
 	// The modernc.org/sqlite driver stores time.Time using Go's String() which includes
@@ -236,11 +268,11 @@ func (d *DB) SaveEvent(event camera.Event) error {
 		zoneName = &event.ZoneName
 	}
 	_, err := d.db.Exec(`
-		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path, zone_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.CameraName, event.Label, event.Score,
 		event.Box[0], event.Box[1], event.Box[2], event.Box[3],
-		utc(event.Timestamp), endTime, event.SnapshotPath, event.ClipPath, zoneName,
+		utc(event.Timestamp), endTime, event.SnapshotPath, event.SnapshotAvailable, event.ClipPath, event.ClipAvailable, zoneName,
 	)
 	return err
 }
@@ -251,12 +283,22 @@ func (d *DB) UpdateEventEndTime(eventID string, endTime time.Time) error {
 }
 
 func (d *DB) UpdateEventClipPath(eventID, clipPath string) error {
-	_, err := d.db.Exec("UPDATE events SET clip_path = ? WHERE id = ?", clipPath, eventID)
+	_, err := d.db.Exec("UPDATE events SET clip_path = ?, clip_available = ? WHERE id = ?", clipPath, clipPath != "", eventID)
 	return err
 }
 
 func (d *DB) UpdateEventSnapshotPath(eventID, snapshotPath string) error {
-	_, err := d.db.Exec("UPDATE events SET snapshot_path = ? WHERE id = ?", snapshotPath, eventID)
+	_, err := d.db.Exec("UPDATE events SET snapshot_path = ?, snapshot_available = ? WHERE id = ?", snapshotPath, snapshotPath != "", eventID)
+	return err
+}
+
+func (d *DB) UpdateEventSnapshotAvailability(eventID string, available bool) error {
+	_, err := d.db.Exec("UPDATE events SET snapshot_available = ? WHERE id = ?", available, eventID)
+	return err
+}
+
+func (d *DB) UpdateEventClipAvailability(eventID string, available bool) error {
+	_, err := d.db.Exec("UPDATE events SET clip_available = ? WHERE id = ?", available, eventID)
 	return err
 }
 
@@ -267,7 +309,7 @@ func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.
 
 // QueryEventsFiltered returns events matching all given filters including zone.
 func (d *DB) QueryEventsFiltered(cameraName, label, zoneName string, limit, offset int) ([]camera.Event, error) {
-	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path, zone_name FROM events WHERE 1=1"
+	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name FROM events WHERE 1=1"
 	args := []any{}
 
 	if cameraName != "" {
@@ -435,15 +477,16 @@ func (d *DB) CountEventsToday() (int, error) {
 // GetEventByID returns a single event by ID, or nil if not found.
 func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 	row := d.db.QueryRow(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path, zone_name
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name
 		FROM events WHERE id = ?`, id)
 
 	var e camera.Event
 	var endTime sql.NullTime
 	var snapshot, clip, zoneName sql.NullString
+	var snapshotAvailable, clipAvailable bool
 	err := row.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 		&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-		&e.Timestamp, &endTime, &snapshot, &clip, &zoneName,
+		&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -455,7 +498,9 @@ func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 		e.EndTime = endTime.Time
 	}
 	e.SnapshotPath = snapshot.String
+	e.SnapshotAvailable = snapshotAvailable
 	e.ClipPath = clip.String
+	e.ClipAvailable = clipAvailable
 	e.ZoneName = zoneName.String
 	return &e, nil
 }
@@ -509,7 +554,7 @@ func (d *DB) QueryEventsForDate(cameraName string, date time.Time) ([]camera.Eve
 	dayEnd := dayStart.Add(24 * time.Hour)
 
 	rows, err := d.db.Query(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path, zone_name
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name
 		FROM events
 		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
 		ORDER BY timestamp`,
@@ -643,9 +688,10 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 		var e camera.Event
 		var endTime sql.NullTime
 		var snapshot, clip, zoneName sql.NullString
+		var snapshotAvailable, clipAvailable bool
 		err := rows.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 			&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-			&e.Timestamp, &endTime, &snapshot, &clip, &zoneName,
+			&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName,
 		)
 		if err != nil {
 			return nil, err
@@ -654,7 +700,9 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 			e.EndTime = endTime.Time
 		}
 		e.SnapshotPath = snapshot.String
+		e.SnapshotAvailable = snapshotAvailable
 		e.ClipPath = clip.String
+		e.ClipAvailable = clipAvailable
 		e.ZoneName = zoneName.String
 		events = append(events, e)
 	}
@@ -670,13 +718,28 @@ func (d *DB) DeleteEvent(id string) error {
 // EventsWithSnapshots returns all events that have a non-empty snapshot_path.
 func (d *DB) EventsWithSnapshots() ([]camera.Event, error) {
 	rows, err := d.db.Query(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, clip_path, zone_name
-		FROM events WHERE snapshot_path != '' AND snapshot_path IS NOT NULL`)
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name
+		FROM events WHERE (snapshot_path != '' AND snapshot_path IS NOT NULL) OR (clip_path != '' AND clip_path IS NOT NULL)`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	return scanEvents(rows)
+}
+
+func (d *DB) DeleteEventsOlderThan(cutoff time.Time) error {
+	_, err := d.db.Exec("DELETE FROM events WHERE timestamp < ?", utc(cutoff))
+	return err
+}
+
+func (d *DB) DeleteFacesOlderThan(cutoff time.Time) error {
+	_, err := d.db.Exec(`
+		DELETE FROM faces
+		WHERE timestamp < ?
+		   OR event_id IN (SELECT id FROM events WHERE timestamp < ?)`,
+		utc(cutoff), utc(cutoff),
+	)
+	return err
 }
 
 func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {
@@ -696,7 +759,7 @@ func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {
 // ListZones returns all zones for a camera.
 func (d *DB) ListZones(cameraName string) ([]camera.Zone, error) {
 	rows, err := d.db.Query(`
-		SELECT id, camera, name, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled
+		SELECT id, camera, name, points, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled
 		FROM zones WHERE camera = ? ORDER BY name`, cameraName)
 	if err != nil {
 		return nil, err
@@ -709,7 +772,7 @@ func (d *DB) ListZones(cameraName string) ([]camera.Zone, error) {
 // GetZone returns a single zone by camera and name, or nil if not found.
 func (d *DB) GetZone(cameraName, name string) (*camera.Zone, error) {
 	row := d.db.QueryRow(`
-		SELECT id, camera, name, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled
+		SELECT id, camera, name, points, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled
 		FROM zones WHERE camera = ? AND name = ?`, cameraName, name)
 
 	z, err := scanZone(row)
@@ -724,15 +787,29 @@ func (d *DB) GetZone(cameraName, name string) (*camera.Zone, error) {
 
 // SaveZone upserts a zone by camera+name.
 func (d *DB) SaveZone(z camera.Zone) error {
+	if len(z.Points) == 0 {
+		z.Points = [][]float64{
+			{z.X1, z.Y1},
+			{z.X2, z.Y1},
+			{z.X2, z.Y2},
+			{z.X1, z.Y2},
+		}
+	}
 	labelsJSON, err := json.Marshal(z.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
+	pointsJSON, err := json.Marshal(z.Points)
+	if err != nil {
+		return fmt.Errorf("marshal points: %w", err)
+	}
+	x1, y1, x2, y2 := zoneBounds(z.Points)
 
 	_, err = d.db.Exec(`
-		INSERT INTO zones (camera, name, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO zones (camera, name, points, x1, y1, x2, y2, labels, track_presence, face_recognition, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(camera, name) DO UPDATE SET
+			points = excluded.points,
 			x1 = excluded.x1,
 			y1 = excluded.y1,
 			x2 = excluded.x2,
@@ -741,7 +818,7 @@ func (d *DB) SaveZone(z camera.Zone) error {
 			track_presence = excluded.track_presence,
 			face_recognition = excluded.face_recognition,
 			enabled = excluded.enabled`,
-		z.Camera, z.Name, z.X1, z.Y1, z.X2, z.Y2,
+		z.Camera, z.Name, string(pointsJSON), x1, y1, x2, y2,
 		string(labelsJSON), z.TrackPresence, z.FaceRecognition, z.Enabled,
 	)
 	return err
@@ -806,10 +883,13 @@ func scanZones(rows *sql.Rows) ([]camera.Zone, error) {
 	var zones []camera.Zone
 	for rows.Next() {
 		var z camera.Zone
-		var labelsJSON string
-		err := rows.Scan(&z.ID, &z.Camera, &z.Name, &z.X1, &z.Y1, &z.X2, &z.Y2,
+		var pointsJSON, labelsJSON string
+		err := rows.Scan(&z.ID, &z.Camera, &z.Name, &pointsJSON, &z.X1, &z.Y1, &z.X2, &z.Y2,
 			&labelsJSON, &z.TrackPresence, &z.FaceRecognition, &z.Enabled)
 		if err != nil {
+			return nil, err
+		}
+		if err := decodeZonePoints(&z, pointsJSON); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(labelsJSON), &z.Labels); err != nil {
@@ -823,10 +903,13 @@ func scanZones(rows *sql.Rows) ([]camera.Zone, error) {
 
 func scanZone(row *sql.Row) (*camera.Zone, error) {
 	var z camera.Zone
-	var labelsJSON string
-	err := row.Scan(&z.ID, &z.Camera, &z.Name, &z.X1, &z.Y1, &z.X2, &z.Y2,
+	var pointsJSON, labelsJSON string
+	err := row.Scan(&z.ID, &z.Camera, &z.Name, &pointsJSON, &z.X1, &z.Y1, &z.X2, &z.Y2,
 		&labelsJSON, &z.TrackPresence, &z.FaceRecognition, &z.Enabled)
 	if err != nil {
+		return nil, err
+	}
+	if err := decodeZonePoints(&z, pointsJSON); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(labelsJSON), &z.Labels); err != nil {
@@ -840,25 +923,25 @@ func scanZone(row *sql.Row) (*camera.Zone, error) {
 
 // Person represents a known or unknown person in the face recognition system.
 type Person struct {
-	ID        int64
-	Name      string
-	Ignore    bool
-	Centroid  []byte // 512 x float32 = 2048 bytes, L2-normalized
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Ignore    bool      `json:"ignore"`
+	Centroid  []byte    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Face represents a detected face with its embedding and metadata.
 type Face struct {
-	ID         int64
-	EventID    string
-	Camera     string
-	PersonID   *int64
-	Embedding  []byte // 512 x float32 = 2048 bytes
-	CropPath   string
-	Confidence float64
-	Similarity *float64
-	Timestamp  time.Time
-	CreatedAt  time.Time
+	ID         int64     `json:"id"`
+	EventID    string    `json:"event_id"`
+	Camera     string    `json:"camera"`
+	PersonID   *int64    `json:"person_id"`
+	Embedding  []byte    `json:"-"`
+	CropPath   string    `json:"crop_path,omitempty"`
+	Confidence float64   `json:"confidence"`
+	Similarity *float64  `json:"similarity"`
+	Timestamp  time.Time `json:"timestamp"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // SavePerson creates a new person record and returns the assigned ID.
@@ -1009,6 +1092,25 @@ func (d *DB) SetPersonIgnore(id int64, ignore bool) error {
 	return err
 }
 
+// MergePeople merges person sourceID into targetID: reassigns all faces and deletes the source person.
+func (d *DB) MergePeople(targetID, sourceID int64) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Reassign all faces from source to target
+	if _, err := tx.Exec("UPDATE faces SET person_id = ? WHERE person_id = ?", targetID, sourceID); err != nil {
+		return err
+	}
+	// Delete the source person
+	if _, err := tx.Exec("DELETE FROM people WHERE id = ?", sourceID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // GetFaceCropPath returns the crop_path for a face by ID.
 func (d *DB) GetFaceCropPath(id int64) (string, error) {
 	var path sql.NullString
@@ -1020,6 +1122,143 @@ func (d *DB) GetFaceCropPath(id int64) (string, error) {
 		return "", err
 	}
 	return path.String, nil
+}
+
+// FaceEventIDs returns the distinct event IDs that already have face records.
+func (d *DB) FaceEventIDs() ([]string, error) {
+	rows, err := d.db.Query("SELECT DISTINCT event_id FROM faces WHERE event_id IS NOT NULL AND event_id != ''")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+type AuthSession struct {
+	ID         string
+	Username   string
+	CSRFToken  string
+	RemoteIP   string
+	UserAgent  string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+}
+
+type APIToken struct {
+	ID          int64     `json:"id"`
+	Username    string    `json:"username"`
+	Name        string    `json:"name"`
+	TokenPrefix string    `json:"token_prefix"`
+	Scopes      []string  `json:"scopes"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastUsedAt  time.Time `json:"last_used_at,omitempty"`
+	RevokedAt   time.Time `json:"revoked_at,omitempty"`
+	TokenHash   []byte    `json:"-"`
+}
+
+func (d *DB) CreateSession(session AuthSession) error {
+	_, err := d.db.Exec(`
+		INSERT INTO auth_sessions (id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.Username, session.CSRFToken, nullString(session.RemoteIP), nullString(session.UserAgent),
+		utc(session.CreatedAt), utc(session.LastSeenAt), utc(session.ExpiresAt),
+	)
+	return err
+}
+
+func (d *DB) GetSession(id string) (*AuthSession, error) {
+	row := d.db.QueryRow(`
+		SELECT id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at
+		FROM auth_sessions WHERE id = ?`, id)
+	var session AuthSession
+	var remoteIP, userAgent sql.NullString
+	err := row.Scan(&session.ID, &session.Username, &session.CSRFToken, &remoteIP, &userAgent, &session.CreatedAt, &session.LastSeenAt, &session.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	session.RemoteIP = remoteIP.String
+	session.UserAgent = userAgent.String
+	return &session, nil
+}
+
+func (d *DB) TouchSession(id string, lastSeen time.Time) error {
+	_, err := d.db.Exec("UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?", utc(lastSeen), id)
+	return err
+}
+
+func (d *DB) DeleteSession(id string) error {
+	_, err := d.db.Exec("DELETE FROM auth_sessions WHERE id = ?", id)
+	return err
+}
+
+func (d *DB) DeleteExpiredSessions(now time.Time) error {
+	_, err := d.db.Exec("DELETE FROM auth_sessions WHERE expires_at <= ? OR last_seen_at <= ?", utc(now), utc(now.Add(-30*time.Minute)))
+	return err
+}
+
+func (d *DB) CreateAPIToken(token APIToken) (int64, error) {
+	scopesJSON, err := json.Marshal(token.Scopes)
+	if err != nil {
+		return 0, err
+	}
+	result, err := d.db.Exec(`
+		INSERT INTO api_tokens (username, name, token_prefix, token_hash, scopes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		token.Username, token.Name, token.TokenPrefix, token.TokenHash, string(scopesJSON), utc(token.CreatedAt),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (d *DB) GetAPITokenByHash(hash []byte) (*APIToken, error) {
+	row := d.db.QueryRow(`
+		SELECT id, username, name, token_prefix, token_hash, scopes, created_at, last_used_at, revoked_at
+		FROM api_tokens WHERE token_hash = ?`, hash)
+	var token APIToken
+	var scopesJSON string
+	var lastUsedAt, revokedAt sql.NullTime
+	err := row.Scan(&token.ID, &token.Username, &token.Name, &token.TokenPrefix, &token.TokenHash, &scopesJSON, &token.CreatedAt, &lastUsedAt, &revokedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(scopesJSON), &token.Scopes); err != nil {
+		return nil, err
+	}
+	if lastUsedAt.Valid {
+		token.LastUsedAt = lastUsedAt.Time
+	}
+	if revokedAt.Valid {
+		token.RevokedAt = revokedAt.Time
+	}
+	return &token, nil
+}
+
+func (d *DB) TouchAPIToken(id int64, lastUsed time.Time) error {
+	_, err := d.db.Exec("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", utc(lastUsed), id)
+	return err
+}
+
+func (d *DB) RevokeAPIToken(id int64, username string) error {
+	_, err := d.db.Exec("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND username = ?", utc(time.Now()), id, username)
+	return err
 }
 
 func scanFaces(rows *sql.Rows) ([]Face, error) {
@@ -1055,4 +1294,46 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func zoneBounds(points [][]float64) (x1, y1, x2, y2 float64) {
+	if len(points) == 0 {
+		return 0, 0, 0, 0
+	}
+	x1, y1 = points[0][0], points[0][1]
+	x2, y2 = x1, y1
+	for _, point := range points[1:] {
+		if len(point) != 2 {
+			continue
+		}
+		if point[0] < x1 {
+			x1 = point[0]
+		}
+		if point[1] < y1 {
+			y1 = point[1]
+		}
+		if point[0] > x2 {
+			x2 = point[0]
+		}
+		if point[1] > y2 {
+			y2 = point[1]
+		}
+	}
+	return x1, y1, x2, y2
+}
+
+func decodeZonePoints(z *camera.Zone, pointsJSON string) error {
+	if pointsJSON != "" && pointsJSON != "[]" {
+		if err := json.Unmarshal([]byte(pointsJSON), &z.Points); err != nil {
+			return fmt.Errorf("unmarshal zone points: %w", err)
+		}
+		return nil
+	}
+	z.Points = [][]float64{
+		{z.X1, z.Y1},
+		{z.X2, z.Y1},
+		{z.X2, z.Y2},
+		{z.X1, z.Y2},
+	}
+	return nil
 }

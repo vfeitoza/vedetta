@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -287,5 +288,56 @@ func TestForeignKey_DeletePersonNullsFaces(t *testing.T) {
 	unmatched, _ := db.ListUnmatchedFaces(10)
 	if len(unmatched) != 1 {
 		t.Fatalf("after person delete: unmatched = %d, want 1", len(unmatched))
+	}
+}
+
+func TestDeleteFacesOlderThan_RemovesFacesLinkedToExpiredEvents(t *testing.T) {
+	db := newTestDB(t)
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-24 * time.Hour)
+
+	oldEvent := makeEvent("old-event", "cam1", "person", 0.9, cutoff.Add(-time.Hour))
+	mustSaveEvent(t, db, oldEvent)
+	freshEvent := makeEvent("fresh-event", "cam1", "person", 0.9, now)
+	mustSaveEvent(t, db, freshEvent)
+
+	if _, err := db.SaveFace(Face{
+		EventID:    oldEvent.ID,
+		Camera:     "cam1",
+		Embedding:  makeEmbedding(1.0),
+		Confidence: 0.9,
+		Timestamp:  now,
+	}); err != nil {
+		t.Fatalf("SaveFace(old event): %v", err)
+	}
+	if _, err := db.SaveFace(Face{
+		EventID:    freshEvent.ID,
+		Camera:     "cam1",
+		Embedding:  makeEmbedding(2.0),
+		Confidence: 0.9,
+		Timestamp:  now,
+	}); err != nil {
+		t.Fatalf("SaveFace(fresh event): %v", err)
+	}
+
+	if err := db.DeleteFacesOlderThan(cutoff); err != nil {
+		t.Fatalf("DeleteFacesOlderThan: %v", err)
+	}
+
+	var count int
+	if err := db.db.QueryRow("SELECT COUNT(*) FROM faces").Scan(&count); err != nil {
+		t.Fatalf("count faces: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("face count = %d, want 1", count)
+	}
+
+	var remainingEventID sql.NullString
+	if err := db.db.QueryRow("SELECT event_id FROM faces LIMIT 1").Scan(&remainingEventID); err != nil {
+		t.Fatalf("remaining face event_id: %v", err)
+	}
+	if !remainingEventID.Valid || remainingEventID.String != freshEvent.ID {
+		t.Fatalf("remaining face event_id = %v, want %q", remainingEventID, freshEvent.ID)
 	}
 }
