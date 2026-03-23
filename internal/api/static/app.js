@@ -2305,20 +2305,70 @@ function hideDiskWarning() {
 
 // ─── Object Tracking ───
 function trackObject(eventId, label) {
-  var name = prompt('Name this ' + label + ':');
-  if (!name || !name.trim()) return;
-  fetch('/api/objects', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({event_id: eventId, name: name.trim()})
-  }).then(function(r) {
-    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error); });
-    return r.json();
-  }).then(function(obj) {
-    toast('"' + obj.name + '" is now being tracked');
-  }).catch(function(e) {
-    toast('Failed: ' + e.message);
+  showInputModal('Track ' + label, 'Name this ' + label + ':', '', function(name) {
+    fetch('/api/objects', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({event_id: eventId, name: name})
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error); });
+      return r.json();
+    }).then(function(obj) {
+      toast('"' + obj.name + '" is now being tracked');
+      // Reload the event detail to show updated tracking options
+      if (typeof htmx !== 'undefined') {
+        var detail = document.getElementById('event-detail');
+        if (detail) htmx.trigger(detail, 'htmx:load');
+      }
+    }).catch(function(e) {
+      toast('Failed: ' + e.message);
+    });
   });
+}
+
+// Generic input modal (replaces prompt())
+function showInputModal(title, message, defaultValue, onConfirm) {
+  var modal = document.getElementById('input-modal');
+  if (!modal) {
+    var html = '<div class="shortcut-backdrop" id="input-backdrop"></div>'
+      + '<div class="shortcut-modal" id="input-modal" role="dialog">'
+      + '<div class="shortcut-modal-header"><h2 id="input-title"></h2>'
+      + '<button class="btn btn-icon btn-ghost" onclick="closeInputModal()" aria-label="Close">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>'
+      + '<div class="shortcut-modal-body" style="grid-template-columns:1fr;gap:0.75rem;padding:1rem 1.25rem">'
+      + '<p id="input-message" style="margin:0;font-size:var(--text-sm);color:var(--text-secondary)"></p>'
+      + '<input type="text" id="input-field" class="person-name-input" style="width:100%;padding:0.6rem 0.8rem;font-size:1rem">'
+      + '<div style="display:flex;gap:0.5rem;justify-content:flex-end">'
+      + '<button class="btn btn-sm btn-ghost" onclick="closeInputModal()">Cancel</button>'
+      + '<button class="btn btn-sm btn-primary" id="input-confirm-btn">OK</button>'
+      + '</div></div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById('input-modal');
+    document.getElementById('input-backdrop').addEventListener('click', closeInputModal);
+  }
+  document.getElementById('input-title').textContent = title;
+  document.getElementById('input-message').textContent = message;
+  var field = document.getElementById('input-field');
+  field.value = defaultValue || '';
+  document.getElementById('input-confirm-btn').onclick = function() {
+    var val = field.value.trim();
+    if (!val) return;
+    closeInputModal();
+    onConfirm(val);
+  };
+  field.onkeydown = function(e) {
+    if (e.key === 'Enter') document.getElementById('input-confirm-btn').click();
+  };
+  document.getElementById('input-backdrop').classList.add('open');
+  modal.classList.add('open');
+  setTimeout(function() { field.focus(); field.select(); }, 100);
+}
+
+function closeInputModal() {
+  var modal = document.getElementById('input-modal');
+  var backdrop = document.getElementById('input-backdrop');
+  if (modal) modal.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('open');
 }
 
 function addObjectReference(objectId, objectName, eventId) {

@@ -161,6 +161,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 	// Object re-identification
 	s.mux.HandleFunc("GET /api/objects", s.handleListObjects)
 	s.mux.HandleFunc("POST /api/objects", s.handleCreateObject)
+	s.mux.HandleFunc("PUT /api/objects/{id}", s.handleUpdateObject)
 	s.mux.HandleFunc("DELETE /api/objects/{id}", s.handleDeleteObject)
 	s.mux.HandleFunc("GET /api/objects/{id}/sightings", s.handleObjectSightings)
 	s.mux.HandleFunc("GET /api/objects/{id}/crop", s.handleObjectCrop)
@@ -405,6 +406,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
 	zoneFilter := r.URL.Query().Get("zone")
+	objectFilter := r.URL.Query().Get("object")
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
@@ -419,7 +421,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, zoneFilter, limit, offset)
+	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, zoneFilter, objectFilter, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1242,6 +1244,7 @@ func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Requ
 func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Request) {
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
+	objectFilter := r.URL.Query().Get("object")
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
@@ -1255,7 +1258,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	events, err := s.db.QueryEvents(cameraFilter, labelFilter, limit, offset)
+	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, "", objectFilter, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2311,6 +2314,26 @@ func (s *Server) handleCreateObject(w http.ResponseWriter, r *http.Request) {
 	obj.ID = id
 	obj.CropPath = cropPath
 	writeJSON(w, http.StatusCreated, obj)
+}
+
+func (s *Server) handleUpdateObject(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if err := s.db.UpdateKnownObjectName(id, req.Name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {

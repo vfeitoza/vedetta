@@ -16,7 +16,7 @@
     .object-name { font-size:1.1rem; font-weight:600; }
     .object-meta { font-size:var(--text-sm); color:var(--text-tertiary); margin-top:0.25rem; }
     .object-refs { display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem; }
-    .ref-thumb { width:60px; height:60px; border-radius:var(--radius-sm); background:var(--surface); background-size:cover; background-position:center; border:2px solid transparent; cursor:pointer; position:relative; }
+    .ref-thumb { width:100px; height:80px; border-radius:var(--radius-sm); background:var(--surface); background-size:cover; background-position:center; border:2px solid transparent; cursor:pointer; position:relative; }
     .ref-thumb:hover { border-color:var(--accent); }
     .ref-delete { position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--danger); color:#fff; border:none; font-size:11px; line-height:18px; text-align:center; cursor:pointer; display:none; }
     .ref-thumb:hover .ref-delete { display:block; }
@@ -66,6 +66,24 @@
     <a href="/system.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
   </nav>
 
+  <!-- Confirm Modal -->
+  <div class="shortcut-backdrop" id="confirm-backdrop"></div>
+  <div class="shortcut-modal" id="confirm-modal" role="dialog">
+    <div class="shortcut-modal-header">
+      <h2 id="confirm-title">Confirm</h2>
+      <button class="btn btn-icon btn-ghost" onclick="closeConfirmModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="shortcut-modal-body" style="grid-template-columns:1fr;gap:0.75rem;padding:1rem 1.25rem">
+      <p id="confirm-message" style="margin:0;font-size:var(--text-sm);color:var(--text-secondary)"></p>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button class="btn btn-sm btn-ghost" onclick="closeConfirmModal()">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="confirm-btn" style="background:var(--danger)">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
   <script>
     var objectsData = [];
@@ -90,18 +108,22 @@
           + '<div class="object-header">'
           + '<div class="object-thumb" style="' + (obj.crop_path ? 'background-image:url(/api/objects/' + obj.id + '/crop)' : '') + '"></div>'
           + '<div class="object-info">'
-          + '<div class="object-name">' + escapeHtml(obj.name) + '</div>'
-          + '<div class="object-meta">' + obj.label + '</div>'
+          + '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
+          + 'onchange="renameObject(' + obj.id + ', this.value)" onfocus="this.select()" '
+          + 'style="font-size:1.1rem;font-weight:600">'
+          + '<div class="object-meta">' + obj.label + ' <span id="ref-count-' + obj.id + '"></span></div>'
           + '</div>'
           + '<button class="btn btn-sm btn-ghost" style="color:var(--danger)" onclick="deleteObject(' + obj.id + ', \'' + escapeAttr(obj.name) + '\')">Delete</button>'
           + '</div>'
           + '<div class="object-refs" id="refs-' + obj.id + '">Loading references...</div>'
+          + '<div class="object-sightings" id="sightings-' + obj.id + '" style="margin-top:0.75rem;font-size:var(--text-sm);color:var(--text-tertiary)"></div>'
           + '</div>';
       });
       grid.innerHTML = html;
 
       objectsData.forEach(function(obj) {
         loadReferences(obj.id);
+        loadSightings(obj.id);
       });
     }
 
@@ -122,16 +144,66 @@
             + '</div>';
         });
         container.innerHTML = html;
+        var countEl = document.getElementById('ref-count-' + objectId);
+        if (countEl) countEl.textContent = '· ' + refs.length + ' reference' + (refs.length !== 1 ? 's' : '');
+      });
+    }
+
+    function loadSightings(objectId) {
+      fetch('/api/objects/' + objectId + '/sightings?limit=10').then(function(r) { return r.json(); }).then(function(sightings) {
+        var el = document.getElementById('sightings-' + objectId);
+        if (!el) return;
+        if (!sightings || !sightings.length) {
+          el.innerHTML = '<span>No sightings yet</span>';
+          return;
+        }
+        var html = '<div style="margin-top:0.25rem;font-weight:600;color:var(--text-secondary)">Recent Sightings</div>';
+        sightings.forEach(function(s) {
+          var time = new Date(s.timestamp).toLocaleString();
+          var sim = Math.round(s.similarity * 100) + '%';
+          html += '<div style="display:flex;justify-content:space-between;padding:0.15rem 0">'
+            + '<a href="/event.html?id=' + s.event_id + '" style="color:var(--accent);text-decoration:none">' + s.camera + '</a>'
+            + '<span>' + sim + ' — ' + time + '</span>'
+            + '</div>';
+        });
+        el.innerHTML = html;
       });
     }
 
     function deleteObject(id, name) {
-      if (!confirm('Delete "' + name + '" and all its sightings?')) return;
-      fetch('/api/objects/' + id, { method: 'DELETE' }).then(function(r) {
+      document.getElementById('confirm-title').textContent = 'Delete Object';
+      document.getElementById('confirm-message').textContent = 'Delete "' + name + '" and all its sightings?';
+      var btn = document.getElementById('confirm-btn');
+      btn.textContent = 'Delete';
+      btn.style.background = 'var(--danger)';
+      btn.onclick = function() {
+        closeConfirmModal();
+        fetch('/api/objects/' + id, { method: 'DELETE' }).then(function(r) {
+          if (!r.ok) throw new Error('Failed');
+          loadObjects();
+        }).catch(function() {
+          if (typeof toast === 'function') toast('Delete failed');
+        });
+      };
+      document.getElementById('confirm-backdrop').classList.add('open');
+      document.getElementById('confirm-modal').classList.add('open');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirm-backdrop').classList.remove('open');
+      document.getElementById('confirm-modal').classList.remove('open');
+    }
+
+    function renameObject(id, name) {
+      fetch('/api/objects/' + id, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name.trim()})
+      }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
-        loadObjects();
+        if (typeof toast === 'function') toast('Renamed to ' + name);
       }).catch(function() {
-        if (typeof toast === 'function') toast('Delete failed');
+        if (typeof toast === 'function') toast('Rename failed');
       });
     }
 
@@ -149,6 +221,7 @@
       return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
     }
 
+    document.getElementById('confirm-backdrop').addEventListener('click', closeConfirmModal);
     loadObjects();
   </script>
 </body>
