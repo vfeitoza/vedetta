@@ -85,6 +85,24 @@
     <div id="snapshot-meta" style="margin-top:0.5rem;font-size:var(--text-sm);color:var(--text-tertiary)"></div>
   </div>
 
+  <!-- Merge Confirm Modal -->
+  <div class="shortcut-backdrop" id="merge-backdrop"></div>
+  <div class="shortcut-modal" id="merge-modal" role="dialog" aria-label="Merge people">
+    <div class="shortcut-modal-header">
+      <h2>Merge People</h2>
+      <button class="btn btn-icon btn-ghost" onclick="closeMergeModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="shortcut-modal-body" style="grid-template-columns:1fr;gap:0.75rem;padding:1rem 1.25rem">
+      <p id="merge-message" style="margin:0;font-size:var(--text-sm);color:var(--text-secondary)"></p>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button class="btn btn-sm btn-ghost" onclick="closeMergeModal()">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="merge-confirm-btn">Merge</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Assign Modal -->
   <div class="shortcut-backdrop" id="assign-backdrop"></div>
   <div class="shortcut-modal" id="assign-modal" role="dialog" aria-label="Assign face to person">
@@ -222,23 +240,38 @@
         return p.id !== id && p.name && p.name.toLowerCase() === name.trim().toLowerCase();
       });
       if (existing) {
-        if (confirm('A person named "' + existing.name + '" already exists (' + existing.face_count + ' faces). Merge into them?')) {
-          fetch('/api/people/merge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_id: existing.id, source_id: id })
-          }).then(function(r) {
-            if (!r.ok) throw new Error('Failed');
-            if (typeof showToast === 'function') showToast('Merged into ' + existing.name);
-            loadPeople();
-            loadUnmatched();
-          }).catch(function() {
-            if (typeof showToast === 'function') showToast('Merge failed');
-          });
-          return;
-        }
+        showMergeConfirm(existing, id);
+        return;
       }
       doRename(id, name);
+    }
+
+    function showMergeConfirm(target, sourceId) {
+      var msg = document.getElementById('merge-message');
+      msg.textContent = '"' + target.name + '" already exists with ' + target.face_count + ' face' + (target.face_count !== 1 ? 's' : '') + '. Merge into them?';
+      var btn = document.getElementById('merge-confirm-btn');
+      btn.onclick = function() {
+        closeMergeModal();
+        fetch('/api/people/merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_id: target.id, source_id: sourceId })
+        }).then(function(r) {
+          if (!r.ok) throw new Error('Failed');
+          if (typeof showToast === 'function') showToast('Merged into ' + target.name);
+          loadPeople();
+          loadUnmatched();
+        }).catch(function() {
+          if (typeof showToast === 'function') showToast('Merge failed');
+        });
+      };
+      document.getElementById('merge-backdrop').classList.add('open');
+      document.getElementById('merge-modal').classList.add('open');
+    }
+
+    function closeMergeModal() {
+      document.getElementById('merge-backdrop').classList.remove('open');
+      document.getElementById('merge-modal').classList.remove('open');
     }
 
     function doRename(id, name) {
@@ -269,7 +302,21 @@
     }
 
     function deletePerson(id, name) {
-      if (!confirm('Delete person "' + name + '"? Their faces will become unmatched.')) return;
+      var msg = document.getElementById('merge-message');
+      msg.textContent = 'Delete "' + (name || 'Unnamed') + '"? Their faces will become unmatched.';
+      var btn = document.getElementById('merge-confirm-btn');
+      btn.textContent = 'Delete';
+      btn.onclick = function() {
+        closeMergeModal();
+        btn.textContent = 'Merge';
+        doDeletePerson(id);
+      };
+      document.getElementById('merge-backdrop').classList.add('open');
+      document.getElementById('merge-modal').classList.add('open');
+      return;
+    }
+
+    function doDeletePerson(id) {
       fetch('/api/people/' + id, { method: 'DELETE' }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
         loadPeople();
@@ -435,6 +482,7 @@
     // Close modals on backdrop click
     document.getElementById('assign-backdrop').addEventListener('click', closeAssignModal);
     document.getElementById('snapshot-backdrop').addEventListener('click', closeSnapshotModal);
+    document.getElementById('merge-backdrop').addEventListener('click', closeMergeModal);
   </script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 # Binaries
 /vedetta
+vedetta-arm64
 *.test
 
 # Build
@@ -33,3 +34,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Test artifacts
+internal/camera/test/
