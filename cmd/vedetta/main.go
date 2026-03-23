@@ -150,6 +150,15 @@ func main() {
 			}
 		}
 		mqttClient.PublishDiscovery(cameraNames)
+
+		// Publish discovery for tracked objects
+		if knownObjects, err := db.ListKnownObjects(); err == nil {
+			var objInfos []mqtt.ObjectInfo
+			for _, obj := range knownObjects {
+				objInfos = append(objInfos, mqtt.ObjectInfo{Name: obj.Name, Label: obj.Label})
+			}
+			mqttClient.PublishObjectDiscovery(objInfos)
+		}
 	}
 
 	events := make(chan camera.Event, 100)
@@ -303,13 +312,17 @@ func main() {
 					}
 				}
 
+				var matchedObjects []string
 				if objectEmbedder != nil && event.SnapshotImage != nil {
-					matchEventToKnownObjects(db, objectEmbedder, event)
+					matchedObjects = matchEventToKnownObjects(db, objectEmbedder, event)
 				}
 
 				if mqttClient != nil {
-					if err := mqttClient.PublishEvent(event); err != nil {
+					if err := mqttClient.PublishEvent(event, matchedObjects); err != nil {
 						slog.Error("failed to publish event", "error", err)
+					}
+					for _, name := range matchedObjects {
+						mqttClient.PublishObjectSighting(name, event)
 					}
 				}
 
@@ -354,6 +367,9 @@ func main() {
 			case pe := <-presenceEvents:
 				if err := db.UpdateZonePresence(pe.ZoneID, pe.Label, pe.Type == "zone_enter"); err != nil {
 					slog.Error("failed to persist presence event", "zone", pe.ZoneName, "label", pe.Label, "error", err)
+				}
+				if mqttClient != nil {
+					mqttClient.PublishPresence(pe)
 				}
 
 			case fe := <-faceEvents:
@@ -607,18 +623,19 @@ func averageEmbeddings(a, b []float32) []float32 {
 
 const objectMatchThreshold = 0.65
 
-func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event camera.Event) {
+func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event camera.Event) []string {
 	knownObjects, err := db.ListKnownObjectsByLabel(event.Label)
 	if err != nil || len(knownObjects) == 0 {
-		return
+		return nil
 	}
 
 	embedding, err := oe.Embed(event.SnapshotImage, event.Box)
 	if err != nil {
 		slog.Error("object re-ID embed failed", "event", event.ID, "error", err)
-		return
+		return nil
 	}
 
+	var matched []string
 	for _, obj := range knownObjects {
 		centroid := detect.BytesToFloat32(obj.Centroid)
 		if len(centroid) == 0 {
@@ -635,11 +652,14 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 			}); err != nil {
 				slog.Error("failed to save object sighting", "error", err)
 			} else {
+				matched = append(matched, obj.Name)
+				_ = db.UpdateEventObjectName(event.ID, obj.Name)
 				slog.Info("object recognized", "object", obj.Name, "event", event.ID,
 					"similarity", fmt.Sprintf("%.3f", sim))
 			}
 		}
 	}
+	return matched
 }
 
 func reconcileEventMediaAvailability(db *storage.DB) {

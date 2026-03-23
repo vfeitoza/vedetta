@@ -13,7 +13,8 @@ import (
 
 // Publisher defines the interface for MQTT publishing operations.
 type Publisher interface {
-	PublishEvent(event camera.Event) error
+	PublishEvent(event camera.Event, matchedObjects []string) error
+	PublishPresence(pe camera.PresenceEvent)
 	PublishCameraStatus(cameraName string, online bool)
 	PublishDiscovery(cameraNames []string)
 	Close()
@@ -77,8 +78,12 @@ func (c *Client) publishAvailability(status string) {
 	}
 }
 
-func (c *Client) PublishEvent(event camera.Event) error {
-	payload, err := json.Marshal(event)
+func (c *Client) PublishEvent(event camera.Event, matchedObjects []string) error {
+	type eventPayload struct {
+		camera.Event
+		Objects []string `json:"objects,omitempty"`
+	}
+	payload, err := json.Marshal(eventPayload{Event: event, Objects: matchedObjects})
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
@@ -87,6 +92,48 @@ func (c *Client) PublishEvent(event camera.Event) error {
 	token := c.client.Publish(topic, 1, false, payload)
 	token.Wait()
 	return token.Error()
+}
+
+func (c *Client) PublishPresence(pe camera.PresenceEvent) {
+	state := "entered"
+	if pe.Type == "zone_leave" {
+		state = "left"
+	}
+	payload, err := json.Marshal(map[string]string{
+		"zone":  pe.ZoneName,
+		"label": pe.Label,
+		"state": state,
+	})
+	if err != nil {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/presence/%s/%s", c.topic, sanitizeName(pe.ZoneName), pe.Label)
+	token := c.client.Publish(topic, 1, true, payload)
+	token.Wait()
+	if token.Error() != nil {
+		slog.Error("failed to publish presence", "zone", pe.ZoneName, "error", token.Error())
+	}
+}
+
+func (c *Client) PublishObjectSighting(objectName string, event camera.Event) {
+	payload, err := json.Marshal(map[string]any{
+		"object":   objectName,
+		"camera":   event.CameraName,
+		"label":    event.Label,
+		"event_id": event.ID,
+		"zone":     event.ZoneName,
+	})
+	if err != nil {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/objects/%s/sighted", c.topic, sanitizeName(objectName))
+	token := c.client.Publish(topic, 1, false, payload)
+	token.Wait()
+	if token.Error() != nil {
+		slog.Error("failed to publish object sighting", "object", objectName, "error", token.Error())
+	}
 }
 
 func (c *Client) PublishCameraStatus(cameraName string, online bool) {
@@ -108,6 +155,47 @@ func (c *Client) PublishDiscovery(cameraNames []string) {
 	for _, name := range cameraNames {
 		c.publishCameraDiscovery(name)
 	}
+}
+
+// PublishObjectDiscovery publishes HA discovery for tracked objects as device triggers.
+func (c *Client) PublishObjectDiscovery(objects []ObjectInfo) {
+	for _, obj := range objects {
+		c.publishObjectTriggerDiscovery(obj)
+	}
+}
+
+// ObjectInfo carries the minimal info needed for MQTT discovery.
+type ObjectInfo struct {
+	Name  string
+	Label string
+}
+
+func (c *Client) publishObjectTriggerDiscovery(obj ObjectInfo) {
+	objectID := fmt.Sprintf("vedetta_object_%s", sanitizeName(obj.Name))
+
+	device := haDevice{
+		Identifiers:  []string{objectID},
+		Name:         "Vedetta " + obj.Name,
+		Manufacturer: "Vedetta",
+		Model:        "Tracked Object",
+	}
+
+	triggerConfig := haDeviceTriggerConfig{
+		AutomationType: "trigger",
+		Type:           "object_sighted",
+		Subtype:        sanitizeName(obj.Label),
+		Topic:          fmt.Sprintf("%s/objects/%s/sighted", c.topic, sanitizeName(obj.Name)),
+		Device:         device,
+	}
+
+	payload, err := json.Marshal(triggerConfig)
+	if err != nil {
+		return
+	}
+
+	topic := fmt.Sprintf("homeassistant/device_automation/%s_sighted/config", objectID)
+	token := c.client.Publish(topic, 1, true, payload)
+	token.Wait()
 }
 
 func (c *Client) publishCameraDiscovery(cameraName string) {

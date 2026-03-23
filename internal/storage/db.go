@@ -73,6 +73,7 @@ func migrate(db *sql.DB) error {
 			clip_path TEXT,
 			clip_available BOOLEAN NOT NULL DEFAULT 0,
 			zone_name TEXT,
+			object_name TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -207,6 +208,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN snapshot_available BOOLEAN NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN clip_available BOOLEAN NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE zones ADD COLUMN points TEXT NOT NULL DEFAULT '[]'")
+	_, _ = db.Exec("ALTER TABLE events ADD COLUMN object_name TEXT")
 
 	// Normalize timestamps to UTC RFC3339 format for consistent SQLite comparisons.
 	// The modernc.org/sqlite driver stores time.Time using Go's String() which includes
@@ -299,11 +301,11 @@ func (d *DB) SaveEvent(event camera.Event) error {
 		zoneName = &event.ZoneName
 	}
 	_, err := d.db.Exec(`
-		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.CameraName, event.Label, event.Score,
 		event.Box[0], event.Box[1], event.Box[2], event.Box[3],
-		utc(event.Timestamp), endTime, event.SnapshotPath, event.SnapshotAvailable, event.ClipPath, event.ClipAvailable, zoneName,
+		utc(event.Timestamp), endTime, event.SnapshotPath, event.SnapshotAvailable, event.ClipPath, event.ClipAvailable, zoneName, nullString(event.ObjectName),
 	)
 	return err
 }
@@ -340,7 +342,7 @@ func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.
 
 // QueryEventsFiltered returns events matching all given filters including zone.
 func (d *DB) QueryEventsFiltered(cameraName, label, zoneName string, limit, offset int) ([]camera.Event, error) {
-	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name FROM events WHERE 1=1"
+	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name FROM events WHERE 1=1"
 	args := []any{}
 
 	if cameraName != "" {
@@ -513,11 +515,11 @@ func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 
 	var e camera.Event
 	var endTime sql.NullTime
-	var snapshot, clip, zoneName sql.NullString
+	var snapshot, clip, zoneName, objectName sql.NullString
 	var snapshotAvailable, clipAvailable bool
 	err := row.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 		&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-		&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName,
+		&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -532,6 +534,7 @@ func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 	e.SnapshotAvailable = snapshotAvailable
 	e.ClipPath = clip.String
 	e.ClipAvailable = clipAvailable
+	e.ObjectName = objectName.String
 	e.ZoneName = zoneName.String
 	return &e, nil
 }
@@ -718,11 +721,11 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 	for rows.Next() {
 		var e camera.Event
 		var endTime sql.NullTime
-		var snapshot, clip, zoneName sql.NullString
+		var snapshot, clip, zoneName, objectName sql.NullString
 		var snapshotAvailable, clipAvailable bool
 		err := rows.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 			&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-			&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName,
+			&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName,
 		)
 		if err != nil {
 			return nil, err
@@ -735,6 +738,7 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 		e.ClipPath = clip.String
 		e.ClipAvailable = clipAvailable
 		e.ZoneName = zoneName.String
+		e.ObjectName = objectName.String
 		events = append(events, e)
 	}
 	return events, rows.Err()
@@ -1402,6 +1406,11 @@ func (d *DB) UpdateKnownObjectCrop(id int64, cropPath string) error {
 
 func (d *DB) UpdateKnownObjectCentroid(id int64, centroid []byte) error {
 	_, err := d.db.Exec("UPDATE known_objects SET centroid = ? WHERE id = ?", centroid, id)
+	return err
+}
+
+func (d *DB) UpdateEventObjectName(eventID, objectName string) error {
+	_, err := d.db.Exec("UPDATE events SET object_name = ? WHERE id = ?", objectName, eventID)
 	return err
 }
 

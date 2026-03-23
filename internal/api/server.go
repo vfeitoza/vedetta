@@ -1277,6 +1277,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
 			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
 			`{{with eventDuration .}}<span class="event-duration-badge">{{.}}</span>{{end}}` +
+			`{{if .ObjectName}}<span class="event-object-badge">{{.ObjectName}}</span>{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
 			`<span class="event-camera-name">{{.CameraName}}</span>` +
