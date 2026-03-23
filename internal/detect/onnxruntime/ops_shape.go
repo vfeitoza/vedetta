@@ -375,7 +375,7 @@ func opGather(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	return []*Tensor{out}, nil
 }
 
-func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
+func opSqueeze(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 	if len(inputs) < 1 {
 		return nil, fmt.Errorf("squeeze: need at least 1 input")
 	}
@@ -384,6 +384,7 @@ func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 
 	var axes []int
 	if len(inputs) > 1 && inputs[1] != nil && len(inputs[1].Data) > 0 {
+		// Opset >= 13: axes as second input
 		for _, v := range inputs[1].Data {
 			ax := int(v)
 			if ax < 0 {
@@ -391,8 +392,17 @@ func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 			}
 			axes = append(axes, ax)
 		}
+	} else if attrs != nil && len(attrs.IntLists["axes"]) > 0 {
+		// Opset < 13: axes as attribute
+		for _, v := range attrs.IntLists["axes"] {
+			ax := int(v)
+			if ax < 0 {
+				ax += ndim
+			}
+			axes = append(axes, ax)
+		}
 	} else {
-		// Squeeze all dimensions of size 1
+		// No axes specified: squeeze all dimensions of size 1
 		for d := 0; d < ndim; d++ {
 			if data.Shape[d] == 1 {
 				axes = append(axes, d)
@@ -415,17 +425,33 @@ func opSqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
 	return []*Tensor{{Data: data.Data, Shape: newShape}}, nil
 }
 
-func opUnsqueeze(inputs []*Tensor, _ *Attributes) ([]*Tensor, error) {
-	if len(inputs) < 2 {
-		return nil, fmt.Errorf("unsqueeze: need 2 inputs")
+func opUnsqueeze(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
+	if len(inputs) < 1 {
+		return nil, fmt.Errorf("unsqueeze: need at least 1 input")
 	}
 	data := inputs[0]
-	axesTensor := inputs[1]
 
-	axes := make([]int, len(axesTensor.Data))
+	// Opset >= 13: axes as second input tensor
+	// Opset < 13: axes as attribute
+	var axes []int
+	if len(inputs) >= 2 {
+		axesTensor := inputs[1]
+		axes = make([]int, len(axesTensor.Data))
+		for i, v := range axesTensor.Data {
+			axes[i] = int(v)
+		}
+	} else if attrs != nil {
+		axesAttr := attrs.IntLists["axes"]
+		axes = make([]int, len(axesAttr))
+		for i, v := range axesAttr {
+			axes[i] = int(v)
+		}
+	} else {
+		return nil, fmt.Errorf("unsqueeze: no axes provided (need 2 inputs or axes attribute)")
+	}
+
 	outRank := len(data.Shape) + len(axes)
-	for i, v := range axesTensor.Data {
-		ax := int(v)
+	for i, ax := range axes {
 		if ax < 0 {
 			ax += outRank
 		}

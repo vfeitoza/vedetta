@@ -205,8 +205,8 @@ func TestDetector_EndToEnd_GoBackend(t *testing.T) {
 		backend: b,
 		enabled: true,
 		config: config.DetectConfig{
-			ScoreThreshold:  0.5,
-			MotionThreshold: 0.02,
+			ScoreThreshold: 0.5,
+			Motion:         config.MotionConfig{MinRegionScore: 0.02},
 		},
 	}
 	defer d.Close()
@@ -228,8 +228,8 @@ func TestDetector_DetectRGB24(t *testing.T) {
 		backend: b,
 		enabled: true,
 		config: config.DetectConfig{
-			ScoreThreshold:  0.5,
-			MotionThreshold: 0.02,
+			ScoreThreshold: 0.5,
+			Motion:         config.MotionConfig{MinRegionScore: 0.02},
 		},
 	}
 	defer d.Close()
@@ -264,8 +264,8 @@ func TestDetector_BackendError(t *testing.T) {
 		backend: mock,
 		enabled: true,
 		config: config.DetectConfig{
-			ScoreThreshold:  0.5,
-			MotionThreshold: 0.02,
+			ScoreThreshold: 0.5,
+			Motion:         config.MotionConfig{MinRegionScore: 0.02},
 		},
 	}
 	defer d.Close()
@@ -305,8 +305,8 @@ func TestDetector_ConcurrentDetect(t *testing.T) {
 		backend: b,
 		enabled: true,
 		config: config.DetectConfig{
-			ScoreThreshold:  0.5,
-			MotionThreshold: 0.02,
+			ScoreThreshold: 0.5,
+			Motion:         config.MotionConfig{MinRegionScore: 0.02},
 		},
 	}
 	defer d.Close()
@@ -368,8 +368,8 @@ func BenchmarkDetector_Detect(b *testing.B) {
 		backend: backend,
 		enabled: true,
 		config: config.DetectConfig{
-			ScoreThreshold:  0.5,
-			MotionThreshold: 0.02,
+			ScoreThreshold: 0.5,
+			Motion:         config.MotionConfig{MinRegionScore: 0.02},
 		},
 	}
 	defer d.Close()

@@ -263,7 +263,7 @@ func (fr *FaceRecognizer) prepareSCRFDInput(img *image.RGBA) ([]float32, float64
 				srcX = bounds.Dx() - 1
 			}
 
-			srcIdx := (srcY-bounds.Min.Y)*img.Stride + (srcX-bounds.Min.X)*4
+			srcIdx := srcY*img.Stride + srcX*4
 			r := (float32(img.Pix[srcIdx+0]) - 127.5) / 128.0
 			g := (float32(img.Pix[srcIdx+1]) - 127.5) / 128.0
 			b := (float32(img.Pix[srcIdx+2]) - 127.5) / 128.0
@@ -319,7 +319,7 @@ func (fr *FaceRecognizer) postprocessSCRFD(outputs map[string]*onnxruntime.Tenso
 
 		featH := scrfdInputSize / stride
 		featW := scrfdInputSize / stride
-		numAnchors := int(scores.Shape[1])
+		numAnchors := int(scores.Shape[0])
 
 		// Verify anchor count matches feature map
 		expectedAnchors := featH * featW * 2 // 2 anchors per position for det_500m

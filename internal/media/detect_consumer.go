@@ -20,7 +20,7 @@ type RawFrame struct {
 	Height int
 }
 
-// DetectConsumer implements rtsp.Consumer and decodes H264 keyframes to RGB24.
+// DetectConsumer implements rtsp.Consumer and decodes H264 frames to RGB24.
 type DetectConsumer struct {
 	width  int
 	height int
@@ -40,10 +40,12 @@ type DetectConsumer struct {
 	rtpCount   uint64
 	auCount    uint64
 	idrCount   uint64
+	haveSync   bool
+	available  bool
 }
 
-// NewDetectConsumer creates a consumer that decodes H264 keyframes for detection.
-// Detection is disabled if OpenH264 is unavailable.
+// NewDetectConsumer creates a consumer that decodes H264 for detection.
+// Detection is disabled if the track cannot be decoded locally.
 func NewDetectConsumer(camera string, width, height, fps int, track *rtsp.TrackInfo) *DetectConsumer {
 	dc := &DetectConsumer{
 		width:      width,
@@ -77,12 +79,18 @@ func NewDetectConsumer(camera string, width, height, fps int, track *rtsp.TrackI
 
 	dc.h264Dec = NewH264Decoder()
 	if dc.h264Dec == nil {
-		slog.Warn("detection disabled: OpenH264 unavailable (auto-download may have failed)")
+		slog.Warn("detection disabled: OpenH264 unavailable")
 		return dc
 	}
 
+	dc.available = true
 	slog.Info("detection enabled with OpenH264 decode")
 	return dc
+}
+
+// Available reports whether detection decode is operational for this stream.
+func (dc *DetectConsumer) Available() bool {
+	return dc.available
 }
 
 // Frames returns the channel of decoded frames.
@@ -98,7 +106,8 @@ func (dc *DetectConsumer) Close() {
 	}
 }
 
-// OnVideoRTP processes a video RTP packet, decoding keyframes to RGB24.
+// OnVideoRTP processes a video RTP packet, decoding frames to RGB24 after the
+// first random-access unit has initialized decoder state.
 func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	if dc.h264Decoder == nil || dc.h264Dec == nil {
 		return
@@ -140,13 +149,21 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	}
 	dc.mu.Unlock()
 
-	if !h264.IsRandomAccess(au) {
-		return
-	}
+	isRandomAccess := h264.IsRandomAccess(au)
 
 	dc.mu.Lock()
-	dc.idrCount++
+	haveSync := dc.haveSync
 	dc.mu.Unlock()
+
+	if !haveSync && !isRandomAccess {
+		return
+	}
+	if isRandomAccess {
+		dc.mu.Lock()
+		dc.idrCount++
+		dc.haveSync = true
+		dc.mu.Unlock()
+	}
 
 	// Update SPS/PPS from in-band parameters
 	for _, nalu := range au {
