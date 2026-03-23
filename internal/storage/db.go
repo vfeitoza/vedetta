@@ -163,6 +163,27 @@ func migrate(db *sql.DB) error {
 			revoked_at DATETIME
 		);
 		CREATE INDEX IF NOT EXISTS idx_api_tokens_username ON api_tokens(username);
+
+		CREATE TABLE IF NOT EXISTS known_objects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			label TEXT NOT NULL,
+			centroid BLOB,
+			crop_path TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS object_sightings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+			camera TEXT NOT NULL,
+			object_id INTEGER NOT NULL REFERENCES known_objects(id) ON DELETE CASCADE,
+			similarity REAL NOT NULL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_object_sightings_object ON object_sightings(object_id);
+		CREATE INDEX IF NOT EXISTS idx_object_sightings_event ON object_sightings(event_id);
 	`)
 	if err != nil {
 		return err
@@ -1320,6 +1341,151 @@ func zoneBounds(points [][]float64) (x1, y1, x2, y2 float64) {
 		}
 	}
 	return x1, y1, x2, y2
+}
+
+// KnownObject represents a user-defined object to recognize (e.g. "Ruben's car").
+type KnownObject struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Label     string    `json:"label"`
+	Centroid  []byte    `json:"-"`
+	CropPath  string    `json:"crop_path,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ObjectSighting records when a known object was recognized in an event.
+type ObjectSighting struct {
+	ID         int64     `json:"id"`
+	EventID    string    `json:"event_id"`
+	Camera     string    `json:"camera"`
+	ObjectID   int64     `json:"object_id"`
+	ObjectName string    `json:"object_name,omitempty"`
+	Similarity float64   `json:"similarity"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+func (d *DB) SaveKnownObject(obj KnownObject) (int64, error) {
+	result, err := d.db.Exec(`
+		INSERT INTO known_objects (name, label, centroid, crop_path, created_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		obj.Name, obj.Label, obj.Centroid, nullString(obj.CropPath), utc(time.Now()),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (d *DB) UpdateKnownObjectCrop(id int64, cropPath string) error {
+	_, err := d.db.Exec("UPDATE known_objects SET crop_path = ? WHERE id = ?", cropPath, id)
+	return err
+}
+
+func (d *DB) ListKnownObjects() ([]KnownObject, error) {
+	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanKnownObjects(rows)
+}
+
+func (d *DB) ListKnownObjectsByLabel(label string) ([]KnownObject, error) {
+	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects WHERE label = ? ORDER BY name`, label)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanKnownObjects(rows)
+}
+
+func (d *DB) GetKnownObject(id int64) (*KnownObject, error) {
+	row := d.db.QueryRow(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects WHERE id = ?`, id)
+	var obj KnownObject
+	var cropPath sql.NullString
+	err := row.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &obj.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	obj.CropPath = cropPath.String
+	return &obj, nil
+}
+
+func (d *DB) DeleteKnownObject(id int64) error {
+	_, err := d.db.Exec("DELETE FROM known_objects WHERE id = ?", id)
+	return err
+}
+
+func (d *DB) SaveObjectSighting(s ObjectSighting) (int64, error) {
+	result, err := d.db.Exec(`
+		INSERT INTO object_sightings (event_id, camera, object_id, similarity, timestamp)
+		VALUES (?, ?, ?, ?, ?)`,
+		s.EventID, s.Camera, s.ObjectID, s.Similarity, utc(s.Timestamp),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (d *DB) ListObjectSightings(objectID int64, limit int) ([]ObjectSighting, error) {
+	query := `SELECT s.id, s.event_id, s.camera, s.object_id, o.name, s.similarity, s.timestamp
+		FROM object_sightings s JOIN known_objects o ON s.object_id = o.id
+		WHERE s.object_id = ? ORDER BY s.timestamp DESC`
+	args := []any{objectID}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanObjectSightings(rows)
+}
+
+func (d *DB) GetEventSightings(eventID string) ([]ObjectSighting, error) {
+	rows, err := d.db.Query(`
+		SELECT s.id, s.event_id, s.camera, s.object_id, o.name, s.similarity, s.timestamp
+		FROM object_sightings s JOIN known_objects o ON s.object_id = o.id
+		WHERE s.event_id = ? ORDER BY s.similarity DESC`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanObjectSightings(rows)
+}
+
+func scanKnownObjects(rows *sql.Rows) ([]KnownObject, error) {
+	var objects []KnownObject
+	for rows.Next() {
+		var obj KnownObject
+		var cropPath sql.NullString
+		if err := rows.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &obj.CreatedAt); err != nil {
+			return nil, err
+		}
+		obj.CropPath = cropPath.String
+		objects = append(objects, obj)
+	}
+	return objects, rows.Err()
+}
+
+func scanObjectSightings(rows *sql.Rows) ([]ObjectSighting, error) {
+	var sightings []ObjectSighting
+	for rows.Next() {
+		var s ObjectSighting
+		var eventID sql.NullString
+		if err := rows.Scan(&s.ID, &eventID, &s.Camera, &s.ObjectID, &s.ObjectName, &s.Similarity, &s.Timestamp); err != nil {
+			return nil, err
+		}
+		s.EventID = eventID.String
+		sightings = append(sightings, s)
+	}
+	return sightings, rows.Err()
 }
 
 func decodeZonePoints(z *camera.Zone, pointsJSON string) error {
