@@ -111,6 +111,29 @@ func migrate(db *sql.DB) error {
 			last_changed DATETIME,
 			PRIMARY KEY (zone_id, label)
 		);
+
+		CREATE TABLE IF NOT EXISTS people (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT,
+			ignore BOOLEAN NOT NULL DEFAULT 0,
+			centroid BLOB,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS faces (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+			camera TEXT NOT NULL,
+			person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+			embedding BLOB NOT NULL,
+			crop_path TEXT,
+			confidence REAL NOT NULL,
+			similarity REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
+		CREATE INDEX IF NOT EXISTS idx_faces_timestamp ON faces(timestamp);
 	`)
 	if err != nil {
 		return err
@@ -811,4 +834,200 @@ func scanZone(row *sql.Row) (*camera.Zone, error) {
 		z.Labels = nil
 	}
 	return &z, nil
+}
+
+// --- People & Face operations ---
+
+// Person represents a known or unknown person in the face recognition system.
+type Person struct {
+	ID        int64
+	Name      string
+	Ignore    bool
+	Centroid  []byte // 512 x float32 = 2048 bytes, L2-normalized
+	CreatedAt time.Time
+}
+
+// Face represents a detected face with its embedding and metadata.
+type Face struct {
+	ID         int64
+	EventID    string
+	Camera     string
+	PersonID   *int64
+	Embedding  []byte // 512 x float32 = 2048 bytes
+	CropPath   string
+	Confidence float64
+	Similarity *float64
+	Timestamp  time.Time
+	CreatedAt  time.Time
+}
+
+// SavePerson creates a new person record and returns the assigned ID.
+func (d *DB) SavePerson(name string, ignore bool, centroid []byte) (int64, error) {
+	result, err := d.db.Exec(
+		"INSERT INTO people (name, ignore, centroid) VALUES (?, ?, ?)",
+		name, ignore, centroid,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// GetPerson returns a person by ID, or nil if not found.
+func (d *DB) GetPerson(id int64) (*Person, error) {
+	row := d.db.QueryRow(
+		"SELECT id, name, ignore, centroid, created_at FROM people WHERE id = ?", id)
+
+	var p Person
+	var name sql.NullString
+	var centroid []byte
+	err := row.Scan(&p.ID, &name, &p.Ignore, &centroid, &p.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.Name = name.String
+	p.Centroid = centroid
+	return &p, nil
+}
+
+// ListPeople returns all people ordered by name.
+func (d *DB) ListPeople() ([]Person, error) {
+	rows, err := d.db.Query(
+		"SELECT id, name, ignore, centroid, created_at FROM people ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var people []Person
+	for rows.Next() {
+		var p Person
+		var name sql.NullString
+		var centroid []byte
+		if err := rows.Scan(&p.ID, &name, &p.Ignore, &centroid, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		p.Name = name.String
+		p.Centroid = centroid
+		people = append(people, p)
+	}
+	return people, rows.Err()
+}
+
+// UpdatePersonCentroid updates the centroid embedding for a person.
+func (d *DB) UpdatePersonCentroid(id int64, centroid []byte) error {
+	_, err := d.db.Exec("UPDATE people SET centroid = ? WHERE id = ?", centroid, id)
+	return err
+}
+
+// UpdatePersonName updates the name for a person.
+func (d *DB) UpdatePersonName(id int64, name string) error {
+	_, err := d.db.Exec("UPDATE people SET name = ? WHERE id = ?", name, id)
+	return err
+}
+
+// SaveFace inserts a face record and returns the assigned ID.
+func (d *DB) SaveFace(face Face) (int64, error) {
+	result, err := d.db.Exec(`
+		INSERT INTO faces (event_id, camera, person_id, embedding, crop_path, confidence, similarity, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		nullString(face.EventID), face.Camera, face.PersonID,
+		face.Embedding, nullString(face.CropPath),
+		face.Confidence, face.Similarity, utc(face.Timestamp),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// ListFacesByPerson returns all faces assigned to a given person, ordered by timestamp descending.
+func (d *DB) ListFacesByPerson(personID int64, limit int) ([]Face, error) {
+	query := `
+		SELECT id, event_id, camera, person_id, embedding, crop_path, confidence, similarity, timestamp, created_at
+		FROM faces WHERE person_id = ?
+		ORDER BY timestamp DESC`
+	args := []any{personID}
+
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanFaces(rows)
+}
+
+// ListUnmatchedFaces returns faces without a person assignment.
+func (d *DB) ListUnmatchedFaces(limit int) ([]Face, error) {
+	query := `
+		SELECT id, event_id, camera, person_id, embedding, crop_path, confidence, similarity, timestamp, created_at
+		FROM faces WHERE person_id IS NULL
+		ORDER BY timestamp DESC`
+	args := []any{}
+
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanFaces(rows)
+}
+
+// UpdateFacePerson assigns a face to a person with the given similarity score.
+func (d *DB) UpdateFacePerson(faceID, personID int64, similarity float64) error {
+	_, err := d.db.Exec(
+		"UPDATE faces SET person_id = ?, similarity = ? WHERE id = ?",
+		personID, similarity, faceID,
+	)
+	return err
+}
+
+func scanFaces(rows *sql.Rows) ([]Face, error) {
+	var faces []Face
+	for rows.Next() {
+		var f Face
+		var eventID, cropPath sql.NullString
+		var personID sql.NullInt64
+		var similarity sql.NullFloat64
+		err := rows.Scan(&f.ID, &eventID, &f.Camera, &personID,
+			&f.Embedding, &cropPath, &f.Confidence, &similarity,
+			&f.Timestamp, &f.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		f.EventID = eventID.String
+		f.CropPath = cropPath.String
+		if personID.Valid {
+			pid := personID.Int64
+			f.PersonID = &pid
+		}
+		if similarity.Valid {
+			sim := similarity.Float64
+			f.Similarity = &sim
+		}
+		faces = append(faces, f)
+	}
+	return faces, rows.Err()
+}
+
+func nullString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
