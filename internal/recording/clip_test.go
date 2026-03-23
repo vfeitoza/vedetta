@@ -25,7 +25,7 @@ func TestExtractClip_DynamicWindow_WithEndTime(t *testing.T) {
 		PreCapture:  5 * time.Second,
 		PostCapture: 10 * time.Second,
 	}
-	rec := New(cfg, db, nil, "")
+	rec := New(cfg, config.EventConfig{RetainDays: 90}, db, nil, "")
 
 	segDir := filepath.Join(cfg.Path, "cam1", "segments")
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
@@ -77,7 +77,7 @@ func TestExtractClip_ZeroEndTime_UsesTimestampOnly(t *testing.T) {
 		PreCapture:  5 * time.Second,
 		PostCapture: 10 * time.Second,
 	}
-	rec := New(cfg, db, nil, "")
+	rec := New(cfg, config.EventConfig{RetainDays: 90}, db, nil, "")
 
 	segDir := filepath.Join(cfg.Path, "cam1", "segments")
 	if err := os.MkdirAll(segDir, 0o755); err != nil {

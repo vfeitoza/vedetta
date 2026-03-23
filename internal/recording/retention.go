@@ -44,10 +44,13 @@ func (r *Recorder) runCleanup() {
 
 	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
+	eventMetadataCutoff := time.Now().Add(-time.Duration(r.eventConfig.RetainDays) * 24 * time.Hour)
 
 	r.cleanSegments(segmentCutoff)
 	r.cleanClips(eventCutoff)
 	r.cleanSnapshots(eventCutoff)
+	r.cleanEventMetadata(eventMetadataCutoff)
+	r.reconcileEventMediaAvailability()
 	r.enforceStorageCap()
 	r.cleanEmptyDirs()
 }
@@ -179,6 +182,45 @@ func (r *Recorder) cleanSnapshots(cutoff time.Time) {
 	})
 	if err != nil {
 		slog.Error("error walking snapshots directory", "error", err)
+	}
+}
+
+func (r *Recorder) cleanEventMetadata(cutoff time.Time) {
+	if err := r.db.DeleteFacesOlderThan(cutoff); err != nil {
+		slog.Error("failed to delete expired faces", "error", err)
+	}
+	if err := r.db.DeleteEventsOlderThan(cutoff); err != nil {
+		slog.Error("failed to delete expired events", "error", err)
+	}
+}
+
+func (r *Recorder) reconcileEventMediaAvailability() {
+	events, err := r.db.EventsWithSnapshots()
+	if err != nil {
+		slog.Error("failed to query events for media reconciliation", "error", err)
+		return
+	}
+
+	for _, ev := range events {
+		snapshotAvailable := ev.SnapshotPath != ""
+		if snapshotAvailable {
+			if _, err := os.Stat(ev.SnapshotPath); err != nil {
+				snapshotAvailable = false
+			}
+		}
+		if err := r.db.UpdateEventSnapshotAvailability(ev.ID, snapshotAvailable); err != nil {
+			slog.Error("failed to update snapshot availability", "id", ev.ID, "error", err)
+		}
+
+		clipAvailable := ev.ClipPath != ""
+		if clipAvailable {
+			if _, err := os.Stat(ev.ClipPath); err != nil {
+				clipAvailable = false
+			}
+		}
+		if err := r.db.UpdateEventClipAvailability(ev.ID, clipAvailable); err != nil {
+			slog.Error("failed to update clip availability", "id", ev.ID, "error", err)
+		}
 	}
 }
 

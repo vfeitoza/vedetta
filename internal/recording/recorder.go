@@ -18,17 +18,18 @@ import (
 
 // StorageStats contains aggregate storage information.
 type StorageStats struct {
-	TotalBytes     int64            `json:"total_bytes"`
-	SegmentCount   int              `json:"segment_count"`
-	CameraStats    map[string]int64 `json:"camera_stats"`
-	DiskAvailable  uint64           `json:"disk_available_bytes"`
-	DiskLow        bool             `json:"disk_low"`
-	RecordingPaused bool           `json:"recording_paused"`
+	TotalBytes      int64            `json:"total_bytes"`
+	SegmentCount    int              `json:"segment_count"`
+	CameraStats     map[string]int64 `json:"camera_stats"`
+	DiskAvailable   uint64           `json:"disk_available_bytes"`
+	DiskLow         bool             `json:"disk_low"`
+	RecordingPaused bool             `json:"recording_paused"`
 }
 
 // Recorder manages saving video clips for detected events.
 type Recorder struct {
 	config       config.RecordingConfig
+	eventConfig  config.EventConfig
 	db           *storage.DB
 	hub          *rtsp.Hub
 	segments     *SegmentRecorder
@@ -37,11 +38,11 @@ type Recorder struct {
 	snapshotPath string
 
 	// Cached storage stats refreshed in background
-	statsMu    sync.RWMutex
+	statsMu     sync.RWMutex
 	cachedStats StorageStats
 }
 
-func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -52,6 +53,7 @@ func New(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath
 
 	return &Recorder{
 		config:       cfg,
+		eventConfig:  eventCfg,
 		db:           db,
 		hub:          hub,
 		segments:     NewSegmentRecorder(cfg, db, hub),
