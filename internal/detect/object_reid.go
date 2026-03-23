@@ -179,7 +179,7 @@ func (oe *ObjectEmbedder) prepareInput(img *image.RGBA) []float32 {
 				srcX = bounds.Dx() - 1
 			}
 
-			srcIdx := (srcY+bounds.Min.Y)*img.Stride + (srcX+bounds.Min.X)*4
+			srcIdx := srcY*img.Stride + srcX*4
 			r := (float32(img.Pix[srcIdx+0])/255.0 - reidMean[0]) / reidStd[0]
 			g := (float32(img.Pix[srcIdx+1])/255.0 - reidMean[1]) / reidStd[1]
 			b := (float32(img.Pix[srcIdx+2])/255.0 - reidMean[2]) / reidStd[2]
