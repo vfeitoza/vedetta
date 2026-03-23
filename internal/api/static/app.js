@@ -1859,16 +1859,41 @@ function stopGridSnapshotRefresh() {
 function refreshGridSnapshots() {
   var grid = el('camera-grid');
   if (!grid || grid.style.display === 'none') return;
-  var cards = grid.querySelectorAll('.cam-card');
-  var t = Date.now();
-  cards.forEach(function(card) {
-    // Skip offline cameras — their snapshot endpoint returns 503
-    if (card.querySelector('.cam-live-dot.offline')) return;
-    var img = card.querySelector('.cam-preview img');
-    if (!img) return;
-    var base = img.src.split('?')[0];
-    img.src = base + '?t=' + t;
-  });
+
+  // Fetch live camera status and update badges + snapshots in one pass
+  fetch('/api/cameras')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(cameras) {
+      if (!cameras) return;
+      var statusMap = {};
+      cameras.forEach(function(c) { statusMap[c.name] = c; });
+
+      var cards = grid.querySelectorAll('.cam-card');
+      var t = Date.now();
+      cards.forEach(function(card) {
+        var img = card.querySelector('.cam-preview img');
+        if (!img) return;
+        var name = img.alt;
+        var cam = statusMap[name];
+        if (!cam) return;
+
+        // Update LIVE/OFFLINE badge
+        var dot = card.querySelector('.cam-live-dot');
+        var badge = card.querySelector('.cam-live-badge');
+        if (dot && badge) {
+          dot.className = 'cam-live-dot' + (cam.has_motion ? ' motion' : (cam.online ? '' : ' offline'));
+          var label = badge.lastChild;
+          if (label) label.textContent = cam.online ? 'LIVE' : 'OFFLINE';
+        }
+
+        // Refresh snapshot for online cameras
+        if (cam.online) {
+          var base = img.src.split('?')[0];
+          img.src = base + '?t=' + t;
+        }
+      });
+    })
+    .catch(function() {});
 }
 
 // Start refresh after htmx loads the grid initially
