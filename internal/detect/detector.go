@@ -190,8 +190,7 @@ func selectBackend(preference string, modelData []byte) (Backend, error) {
 	}
 }
 
-// loadModelData resolves model bytes from config path, embedded data, or
-// release-bundled local files. Vedetta no longer downloads models at runtime.
+// loadModelData resolves model bytes from config path, embedded data, common locations, or auto-download.
 func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 	if modelPath != "" {
 		slog.Info("loading model from path", "path", modelPath)
@@ -199,7 +198,7 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 		if err == nil {
 			return data, nil
 		}
-		return nil, fmt.Errorf("configured model not readable at %s: %w", modelPath, err)
+		slog.Warn("configured model not found, will try cache/download", "path", modelPath, "error", err)
 	}
 
 	if len(embeddedModel) > 0 {
@@ -210,6 +209,7 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 	// Check common local paths
 	candidates := []string{
 		"yolov8n.onnx",
+		cachedModelPath(),
 	}
 	for _, path := range candidates {
 		if data, err := os.ReadFile(path); err == nil {
@@ -218,5 +218,15 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("model not found: set detect.model_path to a bundled ONNX model or build with an embedded model")
+	// Auto-download as last resort
+	path, err := downloadModel()
+	if err != nil {
+		return nil, fmt.Errorf("auto-download model: %w", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read downloaded model: %w", err)
+	}
+	return data, nil
 }
