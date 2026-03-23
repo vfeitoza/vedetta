@@ -106,6 +106,58 @@
         </div>
       </div>
 
+      <!-- Zones -->
+      <section class="zone-section" id="zone-section">
+        <div class="zone-section-header">
+          <h2 class="zone-section-title">Zones</h2>
+          <div class="zone-section-actions">
+            <button id="btn-zone-add" class="btn btn-sm btn-primary" onclick="zoneStartDraw()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Zone
+            </button>
+            <button id="btn-zone-cancel" class="btn btn-sm hidden" onclick="zoneCancelDraw()">Cancel</button>
+          </div>
+        </div>
+
+        <div class="zone-canvas-wrap" id="zone-canvas-wrap">
+          <img id="zone-snapshot" class="zone-snapshot" alt="Camera snapshot for zone editing" draggable="false">
+          <svg id="zone-overlay" class="zone-overlay"></svg>
+          <div id="zone-draw-hint" class="zone-draw-hint hidden">Click and drag to draw a zone</div>
+        </div>
+
+        <!-- Zone form (shown when adding or editing) -->
+        <div id="zone-form" class="zone-form hidden">
+          <h3 id="zone-form-title">New Zone</h3>
+          <div class="zone-form-grid">
+            <label class="zone-label">Name
+              <input type="text" id="zone-name" class="zone-input" placeholder="e.g. driveway" autocomplete="off">
+            </label>
+            <label class="zone-label">Labels <span class="zone-hint">(comma-separated)</span>
+              <input type="text" id="zone-labels" class="zone-input" placeholder="e.g. person,car" autocomplete="off">
+            </label>
+            <label class="zone-check-label">
+              <input type="checkbox" id="zone-track-presence"> Track Presence
+            </label>
+            <label class="zone-check-label">
+              <input type="checkbox" id="zone-face-recognition"> Face Recognition
+            </label>
+            <label class="zone-check-label">
+              <input type="checkbox" id="zone-enabled" checked> Enabled
+            </label>
+          </div>
+          <div class="zone-form-actions">
+            <button class="btn btn-sm btn-primary" onclick="zoneSave()">Save</button>
+            <button class="btn btn-sm" onclick="zoneFormCancel()">Cancel</button>
+            <button id="btn-zone-delete" class="btn btn-sm btn-danger hidden" onclick="zoneDelete()">Delete</button>
+          </div>
+          <!-- Presence display for zones with track_presence -->
+          <div id="zone-presence" class="zone-presence hidden"></div>
+        </div>
+
+        <!-- Zone list -->
+        <div id="zone-list" class="zone-list"></div>
+      </section>
+
       <!-- Recent Events -->
       <section>
         <div class="page-header">
@@ -198,6 +250,9 @@
 
       // Timeline date
       initTimeline();
+
+      // Zones
+      initZones();
 
       // Auto-playback if ?t= parameter is present (from recordings page)
       const playbackTime = new URLSearchParams(location.search).get('t');

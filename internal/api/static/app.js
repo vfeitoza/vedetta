@@ -2254,3 +2254,502 @@ function playEventRecording(overlay, cameraName, timestamp) {
   video.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback?start=' + encodeURIComponent(timestamp);
   media.appendChild(video);
 }
+
+// ─── Zones ───
+var zoneData = [];          // current zones from API
+var zoneDrawing = false;    // drawing mode active
+var zoneEditing = null;     // zone name being edited (null = new)
+var zoneDragStart = null;   // {x, y} percentage coords where drag began
+var zoneDragRect = null;    // SVG rect element for in-progress draw
+var zonePresenceTimer = null;
+var zoneSnapshotTimer = null;
+
+// Zone color scheme: blue=regular, green=presence, amber=face
+function zoneColor(z) {
+  if (z.face_recognition) return { stroke: 'var(--amber)', fill: 'rgba(255, 171, 0, 0.15)' };
+  if (z.track_presence) return { stroke: 'var(--green)', fill: 'rgba(0, 230, 118, 0.15)' };
+  return { stroke: 'var(--blue)', fill: 'rgba(68, 138, 255, 0.15)' };
+}
+
+function initZones() {
+  var name = getCameraName();
+  if (!name) return;
+
+  var snap = el('zone-snapshot');
+  if (snap) {
+    snap.src = '/api/cameras/' + encodeURIComponent(name) + '/zones/snapshot?t=' + Date.now();
+    // Refresh snapshot every 10 seconds
+    zoneSnapshotTimer = setInterval(function() {
+      snap.src = '/api/cameras/' + encodeURIComponent(name) + '/zones/snapshot?t=' + Date.now();
+    }, 10000);
+  }
+
+  loadZones();
+  setupZoneDrawEvents();
+}
+
+function loadZones() {
+  var name = getCameraName();
+  if (!name) return;
+
+  fetch('/api/cameras/' + encodeURIComponent(name) + '/zones')
+    .then(function(r) { return r.json(); })
+    .then(function(zones) {
+      zoneData = zones || [];
+      renderZoneOverlay();
+      renderZoneList();
+      startPresencePolling();
+    })
+    .catch(function(err) {
+      console.error('Failed to load zones:', err);
+    });
+}
+
+function renderZoneOverlay() {
+  var svg = el('zone-overlay');
+  if (!svg) return;
+
+  // Keep any in-progress draw rect
+  var drawRect = zoneDragRect;
+
+  // Clear existing zone elements
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  // Re-add draw rect if active
+  if (drawRect) svg.appendChild(drawRect);
+
+  zoneData.forEach(function(z) {
+    var colors = zoneColor(z);
+    var x = z.x1 * 100;
+    var y = z.y1 * 100;
+    var w = (z.x2 - z.x1) * 100;
+    var h = (z.y2 - z.y1) * 100;
+
+    var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x + '%');
+    rect.setAttribute('y', y + '%');
+    rect.setAttribute('width', w + '%');
+    rect.setAttribute('height', h + '%');
+    rect.setAttribute('fill', colors.fill);
+    rect.setAttribute('stroke', colors.stroke);
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('rx', '3');
+    rect.classList.add('zone-rect');
+    rect.dataset.zoneName = z.name;
+    if (zoneEditing === z.name) rect.classList.add('selected');
+
+    rect.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (!zoneDrawing) zoneSelect(z.name);
+    });
+
+    svg.appendChild(rect);
+
+    // Label text
+    var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', (x + 0.5) + '%');
+    text.setAttribute('y', (y + 4) + '%');
+    text.classList.add('zone-label-text');
+    text.textContent = z.name;
+    svg.appendChild(text);
+  });
+}
+
+function renderZoneList() {
+  var container = el('zone-list');
+  if (!container) return;
+
+  if (zoneData.length === 0) {
+    container.innerHTML = '<div class="zone-list-empty">No zones configured. Click "Add Zone" to create one.</div>';
+    return;
+  }
+  container.innerHTML = '';
+}
+
+function setupZoneDrawEvents() {
+  var svg = el('zone-overlay');
+  if (!svg) return;
+
+  svg.addEventListener('mousedown', function(e) {
+    if (!zoneDrawing) return;
+    e.preventDefault();
+    var pct = svgEventToPercent(e);
+    zoneDragStart = pct;
+
+    zoneDragRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    zoneDragRect.setAttribute('x', pct.x + '%');
+    zoneDragRect.setAttribute('y', pct.y + '%');
+    zoneDragRect.setAttribute('width', '0%');
+    zoneDragRect.setAttribute('height', '0%');
+    zoneDragRect.setAttribute('fill', 'rgba(0, 229, 255, 0.15)');
+    zoneDragRect.setAttribute('stroke', 'var(--cyan)');
+    zoneDragRect.setAttribute('stroke-width', '2');
+    zoneDragRect.setAttribute('stroke-dasharray', '6 3');
+    zoneDragRect.setAttribute('rx', '3');
+    svg.appendChild(zoneDragRect);
+  });
+
+  svg.addEventListener('mousemove', function(e) {
+    if (!zoneDragStart || !zoneDragRect) return;
+    e.preventDefault();
+    var pct = svgEventToPercent(e);
+    var x1 = Math.min(zoneDragStart.x, pct.x);
+    var y1 = Math.min(zoneDragStart.y, pct.y);
+    var x2 = Math.max(zoneDragStart.x, pct.x);
+    var y2 = Math.max(zoneDragStart.y, pct.y);
+
+    zoneDragRect.setAttribute('x', x1 + '%');
+    zoneDragRect.setAttribute('y', y1 + '%');
+    zoneDragRect.setAttribute('width', (x2 - x1) + '%');
+    zoneDragRect.setAttribute('height', (y2 - y1) + '%');
+  });
+
+  svg.addEventListener('mouseup', function(e) {
+    if (!zoneDragStart || !zoneDragRect) return;
+    e.preventDefault();
+    var pct = svgEventToPercent(e);
+    var x1 = Math.min(zoneDragStart.x, pct.x) / 100;
+    var y1 = Math.min(zoneDragStart.y, pct.y) / 100;
+    var x2 = Math.max(zoneDragStart.x, pct.x) / 100;
+    var y2 = Math.max(zoneDragStart.y, pct.y) / 100;
+
+    // Remove draw rect
+    if (zoneDragRect && zoneDragRect.parentNode) {
+      zoneDragRect.parentNode.removeChild(zoneDragRect);
+    }
+    zoneDragRect = null;
+    zoneDragStart = null;
+
+    // Minimum size check (at least 2% in each dimension)
+    if ((x2 - x1) < 0.02 || (y2 - y1) < 0.02) {
+      toast('Zone too small, try again', 'error');
+      return;
+    }
+
+    // Clamp to 0..1
+    x1 = Math.max(0, Math.min(1, x1));
+    y1 = Math.max(0, Math.min(1, y1));
+    x2 = Math.max(0, Math.min(1, x2));
+    y2 = Math.max(0, Math.min(1, y2));
+
+    zoneDrawing = false;
+    var overlay = el('zone-overlay');
+    if (overlay) overlay.classList.remove('drawing');
+    el('zone-draw-hint').classList.add('hidden');
+    el('btn-zone-add').classList.remove('hidden');
+    el('btn-zone-cancel').classList.add('hidden');
+
+    // Show form for the new zone
+    zoneEditing = null;
+    showZoneForm({
+      name: '',
+      x1: x1, y1: y1, x2: x2, y2: y2,
+      labels: [],
+      track_presence: false,
+      face_recognition: false,
+      enabled: true
+    });
+  });
+
+  // Touch events for mobile
+  svg.addEventListener('touchstart', function(e) {
+    if (!zoneDrawing) return;
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    var touch = e.touches[0];
+    var pct = svgTouchToPercent(touch);
+    zoneDragStart = pct;
+
+    zoneDragRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    zoneDragRect.setAttribute('x', pct.x + '%');
+    zoneDragRect.setAttribute('y', pct.y + '%');
+    zoneDragRect.setAttribute('width', '0%');
+    zoneDragRect.setAttribute('height', '0%');
+    zoneDragRect.setAttribute('fill', 'rgba(0, 229, 255, 0.15)');
+    zoneDragRect.setAttribute('stroke', 'var(--cyan)');
+    zoneDragRect.setAttribute('stroke-width', '2');
+    zoneDragRect.setAttribute('stroke-dasharray', '6 3');
+    zoneDragRect.setAttribute('rx', '3');
+    svg.appendChild(zoneDragRect);
+  }, { passive: false });
+
+  svg.addEventListener('touchmove', function(e) {
+    if (!zoneDragStart || !zoneDragRect) return;
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    var touch = e.touches[0];
+    var pct = svgTouchToPercent(touch);
+    var x1 = Math.min(zoneDragStart.x, pct.x);
+    var y1 = Math.min(zoneDragStart.y, pct.y);
+    var x2 = Math.max(zoneDragStart.x, pct.x);
+    var y2 = Math.max(zoneDragStart.y, pct.y);
+
+    zoneDragRect.setAttribute('x', x1 + '%');
+    zoneDragRect.setAttribute('y', y1 + '%');
+    zoneDragRect.setAttribute('width', (x2 - x1) + '%');
+    zoneDragRect.setAttribute('height', (y2 - y1) + '%');
+  }, { passive: false });
+
+  svg.addEventListener('touchend', function(e) {
+    if (!zoneDragStart || !zoneDragRect) return;
+    // Use last known position from the rect itself
+    var x1 = parseFloat(zoneDragRect.getAttribute('x')) / 100;
+    var y1 = parseFloat(zoneDragRect.getAttribute('y')) / 100;
+    var w = parseFloat(zoneDragRect.getAttribute('width')) / 100;
+    var h = parseFloat(zoneDragRect.getAttribute('height')) / 100;
+    var x2 = x1 + w;
+    var y2 = y1 + h;
+
+    if (zoneDragRect && zoneDragRect.parentNode) {
+      zoneDragRect.parentNode.removeChild(zoneDragRect);
+    }
+    zoneDragRect = null;
+    zoneDragStart = null;
+
+    if (w < 0.02 || h < 0.02) {
+      toast('Zone too small, try again', 'error');
+      return;
+    }
+
+    x1 = Math.max(0, Math.min(1, x1));
+    y1 = Math.max(0, Math.min(1, y1));
+    x2 = Math.max(0, Math.min(1, x2));
+    y2 = Math.max(0, Math.min(1, y2));
+
+    zoneDrawing = false;
+    var overlay = el('zone-overlay');
+    if (overlay) overlay.classList.remove('drawing');
+    el('zone-draw-hint').classList.add('hidden');
+    el('btn-zone-add').classList.remove('hidden');
+    el('btn-zone-cancel').classList.add('hidden');
+
+    zoneEditing = null;
+    showZoneForm({
+      name: '',
+      x1: x1, y1: y1, x2: x2, y2: y2,
+      labels: [],
+      track_presence: false,
+      face_recognition: false,
+      enabled: true
+    });
+  });
+}
+
+function svgEventToPercent(e) {
+  var svg = el('zone-overlay');
+  var rect = svg.getBoundingClientRect();
+  var x = ((e.clientX - rect.left) / rect.width) * 100;
+  var y = ((e.clientY - rect.top) / rect.height) * 100;
+  return { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
+}
+
+function svgTouchToPercent(touch) {
+  var svg = el('zone-overlay');
+  var rect = svg.getBoundingClientRect();
+  var x = ((touch.clientX - rect.left) / rect.width) * 100;
+  var y = ((touch.clientY - rect.top) / rect.height) * 100;
+  return { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
+}
+
+function zoneStartDraw() {
+  zoneDrawing = true;
+  zoneEditing = null;
+  hideZoneForm();
+  el('zone-overlay').classList.add('drawing');
+  el('zone-draw-hint').classList.remove('hidden');
+  el('btn-zone-add').classList.add('hidden');
+  el('btn-zone-cancel').classList.remove('hidden');
+  renderZoneOverlay();
+}
+
+function zoneCancelDraw() {
+  zoneDrawing = false;
+  if (zoneDragRect && zoneDragRect.parentNode) {
+    zoneDragRect.parentNode.removeChild(zoneDragRect);
+  }
+  zoneDragRect = null;
+  zoneDragStart = null;
+  el('zone-overlay').classList.remove('drawing');
+  el('zone-draw-hint').classList.add('hidden');
+  el('btn-zone-add').classList.remove('hidden');
+  el('btn-zone-cancel').classList.add('hidden');
+}
+
+function zoneSelect(name) {
+  var z = zoneData.find(function(zone) { return zone.name === name; });
+  if (!z) return;
+  zoneEditing = name;
+  showZoneForm(z);
+  renderZoneOverlay();
+  loadZonePresence(z);
+}
+
+function showZoneForm(z) {
+  var form = el('zone-form');
+  form.classList.remove('hidden');
+  el('zone-form-title').textContent = zoneEditing ? 'Edit Zone: ' + zoneEditing : 'New Zone';
+  el('zone-name').value = z.name || '';
+  el('zone-labels').value = (z.labels || []).join(', ');
+  el('zone-track-presence').checked = !!z.track_presence;
+  el('zone-face-recognition').checked = !!z.face_recognition;
+  el('zone-enabled').checked = z.enabled !== false;
+
+  // Store coords on the form for saving
+  form.dataset.x1 = z.x1;
+  form.dataset.y1 = z.y1;
+  form.dataset.x2 = z.x2;
+  form.dataset.y2 = z.y2;
+
+  // Show delete button only when editing
+  var delBtn = el('btn-zone-delete');
+  if (zoneEditing) {
+    delBtn.classList.remove('hidden');
+  } else {
+    delBtn.classList.add('hidden');
+  }
+
+  // Name field: editable only for new zones
+  el('zone-name').readOnly = !!zoneEditing;
+}
+
+function hideZoneForm() {
+  el('zone-form').classList.add('hidden');
+  el('zone-presence').classList.add('hidden');
+  el('zone-presence').innerHTML = '';
+}
+
+function zoneFormCancel() {
+  zoneEditing = null;
+  hideZoneForm();
+  renderZoneOverlay();
+}
+
+function zoneSave() {
+  var name = getCameraName();
+  if (!name) return;
+
+  var form = el('zone-form');
+  var zoneName = el('zone-name').value.trim();
+  if (!zoneName) {
+    toast('Zone name is required', 'error');
+    return;
+  }
+
+  var labelsRaw = el('zone-labels').value.trim();
+  var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+  var payload = {
+    name: zoneName,
+    x1: parseFloat(form.dataset.x1),
+    y1: parseFloat(form.dataset.y1),
+    x2: parseFloat(form.dataset.x2),
+    y2: parseFloat(form.dataset.y2),
+    labels: labels,
+    track_presence: el('zone-track-presence').checked,
+    face_recognition: el('zone-face-recognition').checked,
+    enabled: el('zone-enabled').checked
+  };
+
+  var url, method;
+  if (zoneEditing) {
+    url = '/api/cameras/' + encodeURIComponent(name) + '/zones/' + encodeURIComponent(zoneEditing);
+    method = 'PUT';
+  } else {
+    url = '/api/cameras/' + encodeURIComponent(name) + '/zones';
+    method = 'POST';
+  }
+
+  fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(err) { throw new Error(err.error || 'Save failed'); });
+      return r.json();
+    })
+    .then(function() {
+      toast('Zone saved');
+      zoneEditing = null;
+      hideZoneForm();
+      loadZones();
+    })
+    .catch(function(err) {
+      toast(err.message, 'error');
+    });
+}
+
+function zoneDelete() {
+  if (!zoneEditing) return;
+  var name = getCameraName();
+  if (!name) return;
+
+  if (!confirm('Delete zone "' + zoneEditing + '"?')) return;
+
+  fetch('/api/cameras/' + encodeURIComponent(name) + '/zones/' + encodeURIComponent(zoneEditing), {
+    method: 'DELETE'
+  })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(err) { throw new Error(err.error || 'Delete failed'); });
+      return r.json();
+    })
+    .then(function() {
+      toast('Zone deleted');
+      zoneEditing = null;
+      hideZoneForm();
+      loadZones();
+    })
+    .catch(function(err) {
+      toast(err.message, 'error');
+    });
+}
+
+// Presence polling
+function startPresencePolling() {
+  if (zonePresenceTimer) clearInterval(zonePresenceTimer);
+
+  var hasPresenceZones = zoneData.some(function(z) { return z.track_presence; });
+  if (!hasPresenceZones) return;
+
+  // Poll presence for the selected zone if it has track_presence
+  zonePresenceTimer = setInterval(function() {
+    if (zoneEditing) {
+      var z = zoneData.find(function(zone) { return zone.name === zoneEditing; });
+      if (z && z.track_presence) loadZonePresence(z);
+    }
+  }, 5000);
+}
+
+function loadZonePresence(z) {
+  if (!z.track_presence) {
+    el('zone-presence').classList.add('hidden');
+    return;
+  }
+
+  var name = getCameraName();
+  if (!name) return;
+
+  fetch('/api/cameras/' + encodeURIComponent(name) + '/zones/' + encodeURIComponent(z.name) + '/presence')
+    .then(function(r) { return r.json(); })
+    .then(function(presence) {
+      var container = el('zone-presence');
+      container.classList.remove('hidden');
+
+      if (!presence || presence.length === 0) {
+        container.innerHTML = '<span style="color: var(--text-tertiary); font-size: var(--text-xs);">No presence data yet</span>';
+        return;
+      }
+
+      container.innerHTML = presence.map(function(p) {
+        var cls = p.present ? 'present' : 'absent';
+        var status = p.present ? 'present' : 'absent';
+        return '<span class="zone-presence-badge ' + cls + '">' +
+          '<span class="zone-presence-dot"></span>' +
+          p.label + ': ' + status +
+          '</span>';
+      }).join('');
+    })
+    .catch(function() {
+      el('zone-presence').classList.add('hidden');
+    });
+}

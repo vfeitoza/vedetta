@@ -121,6 +121,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB, camera
 	s.mux.HandleFunc("GET /api/recordings/export/{camera}", s.handleRecordingExport)
 
 	// Zone endpoints
+	s.mux.HandleFunc("GET /api/cameras/{name}/zones/snapshot", s.handleSnapshot) // reuse camera snapshot for zone overlay background
 	s.mux.HandleFunc("GET /api/cameras/{name}/zones", s.handleListZones)
 	s.mux.HandleFunc("POST /api/cameras/{name}/zones", s.handleCreateZone)
 	s.mux.HandleFunc("PUT /api/cameras/{name}/zones/{zone}", s.handleUpdateZone)
