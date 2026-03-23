@@ -672,8 +672,12 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 		if len(centroid) == 0 {
 			continue
 		}
+		objThreshold := threshold
+		if obj.MatchThreshold != nil {
+			objThreshold = *obj.MatchThreshold
+		}
 		sim := detect.CosineSimilarity(embedding, centroid)
-		if sim >= threshold {
+		if sim >= objThreshold {
 			if _, err := db.SaveObjectSighting(storage.ObjectSighting{
 				EventID:    event.ID,
 				Camera:     event.CameraName,

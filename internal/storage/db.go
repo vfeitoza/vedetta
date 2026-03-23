@@ -172,6 +172,7 @@ func migrate(db *sql.DB) error {
 			label TEXT NOT NULL,
 			centroid BLOB,
 			crop_path TEXT,
+			match_threshold REAL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -210,6 +211,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN clip_available BOOLEAN NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE zones ADD COLUMN points TEXT NOT NULL DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN object_name TEXT")
+	_, _ = db.Exec("ALTER TABLE known_objects ADD COLUMN match_threshold REAL")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN sub_label TEXT")
 
 	// Normalize timestamps to UTC RFC3339 format for consistent SQLite comparisons.
@@ -1375,12 +1377,13 @@ func zoneBounds(points [][]float64) (x1, y1, x2, y2 float64) {
 
 // KnownObject represents a user-defined object to recognize (e.g. "Ruben's car").
 type KnownObject struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Label     string    `json:"label"`
-	Centroid  []byte    `json:"-"`
-	CropPath  string    `json:"crop_path,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Label          string   `json:"label"`
+	Centroid       []byte   `json:"-"`
+	CropPath       string   `json:"crop_path,omitempty"`
+	MatchThreshold *float64 `json:"match_threshold,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // ObjectSighting records when a known object was recognized in an event.
@@ -1425,6 +1428,32 @@ func (d *DB) UpdateKnownObjectName(id int64, name string) error {
 	return err
 }
 
+func (d *DB) UpdateKnownObjectThreshold(id int64, threshold *float64) error {
+	_, err := d.db.Exec("UPDATE known_objects SET match_threshold = ? WHERE id = ?", threshold, id)
+	return err
+}
+
+func (d *DB) DeleteObjectSighting(id int64) error {
+	_, err := d.db.Exec("DELETE FROM object_sightings WHERE id = ?", id)
+	return err
+}
+
+func (d *DB) GetObjectSighting(id int64) (*ObjectSighting, error) {
+	row := d.db.QueryRow(`SELECT s.id, s.event_id, s.camera, s.object_id, o.name, s.similarity, s.timestamp
+		FROM object_sightings s JOIN known_objects o ON s.object_id = o.id WHERE s.id = ?`, id)
+	var s ObjectSighting
+	var eventID sql.NullString
+	err := row.Scan(&s.ID, &eventID, &s.Camera, &s.ObjectID, &s.ObjectName, &s.Similarity, &s.Timestamp)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.EventID = eventID.String
+	return &s, nil
+}
+
 func (d *DB) UpdateKnownObjectCentroid(id int64, centroid []byte) error {
 	_, err := d.db.Exec("UPDATE known_objects SET centroid = ? WHERE id = ?", centroid, id)
 	return err
@@ -1456,7 +1485,7 @@ func (d *DB) RecentUnmatchedEventsByLabel(label string, limit int) ([]camera.Eve
 }
 
 func (d *DB) ListKnownObjects() ([]KnownObject, error) {
-	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects ORDER BY name`)
+	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, match_threshold, created_at FROM known_objects ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1465,7 +1494,7 @@ func (d *DB) ListKnownObjects() ([]KnownObject, error) {
 }
 
 func (d *DB) ListKnownObjectsByLabel(label string) ([]KnownObject, error) {
-	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects WHERE label = ? ORDER BY name`, label)
+	rows, err := d.db.Query(`SELECT id, name, label, centroid, crop_path, match_threshold, created_at FROM known_objects WHERE label = ? ORDER BY name`, label)
 	if err != nil {
 		return nil, err
 	}
@@ -1474,10 +1503,11 @@ func (d *DB) ListKnownObjectsByLabel(label string) ([]KnownObject, error) {
 }
 
 func (d *DB) GetKnownObject(id int64) (*KnownObject, error) {
-	row := d.db.QueryRow(`SELECT id, name, label, centroid, crop_path, created_at FROM known_objects WHERE id = ?`, id)
+	row := d.db.QueryRow(`SELECT id, name, label, centroid, crop_path, match_threshold, created_at FROM known_objects WHERE id = ?`, id)
 	var obj KnownObject
 	var cropPath sql.NullString
-	err := row.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &obj.CreatedAt)
+	var threshold sql.NullFloat64
+	err := row.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &threshold, &obj.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1485,6 +1515,9 @@ func (d *DB) GetKnownObject(id int64) (*KnownObject, error) {
 		return nil, err
 	}
 	obj.CropPath = cropPath.String
+	if threshold.Valid {
+		obj.MatchThreshold = &threshold.Float64
+	}
 	return &obj, nil
 }
 
@@ -1539,10 +1572,14 @@ func scanKnownObjects(rows *sql.Rows) ([]KnownObject, error) {
 	for rows.Next() {
 		var obj KnownObject
 		var cropPath sql.NullString
-		if err := rows.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &obj.CreatedAt); err != nil {
+		var threshold sql.NullFloat64
+		if err := rows.Scan(&obj.ID, &obj.Name, &obj.Label, &obj.Centroid, &cropPath, &threshold, &obj.CreatedAt); err != nil {
 			return nil, err
 		}
 		obj.CropPath = cropPath.String
+		if threshold.Valid {
+			obj.MatchThreshold = &threshold.Float64
+		}
 		objects = append(objects, obj)
 	}
 	return objects, rows.Err()

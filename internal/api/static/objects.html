@@ -112,6 +112,14 @@
           + 'onchange="renameObject(' + obj.id + ', this.value)" onfocus="this.select()" '
           + 'style="font-size:1.1rem;font-weight:600">'
           + '<div class="object-meta">' + obj.label + ' <span id="ref-count-' + obj.id + '"></span></div>'
+          + '<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem">'
+          + '<label style="font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">Threshold</label>'
+          + '<input type="range" min="0.3" max="0.95" step="0.05" value="' + (obj.match_threshold || 0.65) + '" '
+          + 'style="flex:1;accent-color:var(--accent)" '
+          + 'oninput="document.getElementById(\'thresh-val-' + obj.id + '\').textContent=this.value" '
+          + 'onchange="updateThreshold(' + obj.id + ', parseFloat(this.value))">'
+          + '<span id="thresh-val-' + obj.id + '" style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--text-secondary);min-width:2.5em">' + (obj.match_threshold || 0.65) + '</span>'
+          + '</div>'
           + '</div>'
           + '<button class="btn btn-sm btn-ghost" style="color:var(--danger)" onclick="deleteObject(' + obj.id + ', \'' + escapeAttr(obj.name) + '\')">Delete</button>'
           + '</div>'
@@ -157,13 +165,15 @@
           el.innerHTML = '<span>No sightings yet</span>';
           return;
         }
-        var html = '<div style="margin-top:0.25rem;font-weight:600;color:var(--text-secondary)">Recent Sightings</div>';
+        var html = '<div style="margin-top:0.25rem;font-weight:600;color:var(--text-secondary)">Recent Sightings (' + sightings.length + ')</div>';
         sightings.forEach(function(s) {
           var time = new Date(s.timestamp).toLocaleString();
           var sim = Math.round(s.similarity * 100) + '%';
-          html += '<div style="display:flex;justify-content:space-between;padding:0.15rem 0">'
-            + '<a href="/event.html?id=' + s.event_id + '" style="color:var(--accent);text-decoration:none">' + s.camera + '</a>'
-            + '<span>' + sim + ' — ' + time + '</span>'
+          var simColor = s.similarity >= 0.8 ? 'var(--green)' : s.similarity >= 0.65 ? 'var(--amber)' : 'var(--danger)';
+          html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0">'
+            + '<a href="/event.html?id=' + s.event_id + '" style="color:var(--accent);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + s.camera + ' — ' + time + '</a>'
+            + '<span style="font-family:var(--font-mono);color:' + simColor + '">' + sim + '</span>'
+            + '<button class="btn btn-xs btn-ghost" style="color:var(--danger);padding:0 0.25rem;font-size:10px" onclick="dismissSighting(' + s.id + ',' + objectId + ')" title="Wrong match — dismiss">✕</button>'
             + '</div>';
         });
         el.innerHTML = html;
@@ -204,6 +214,25 @@
         if (typeof toast === 'function') toast('Renamed to ' + name);
       }).catch(function() {
         if (typeof toast === 'function') toast('Rename failed');
+      });
+    }
+
+    function updateThreshold(id, value) {
+      fetch('/api/objects/' + id, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({match_threshold: value})
+      }).then(function(r) {
+        if (!r.ok) throw new Error('Failed');
+        if (typeof toast === 'function') toast('Threshold set to ' + value);
+      });
+    }
+
+    function dismissSighting(sightingId, objectId) {
+      fetch('/api/objects/sightings/' + sightingId, { method: 'DELETE' }).then(function(r) {
+        if (!r.ok) throw new Error('Failed');
+        loadSightings(objectId);
+        if (typeof toast === 'function') toast('Sighting dismissed');
       });
     }
 

@@ -169,6 +169,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 	s.mux.HandleFunc("GET /api/objects/{id}/references", s.handleObjectReferences)
 	s.mux.HandleFunc("POST /api/objects/{id}/references", s.handleAddObjectReference)
 	s.mux.HandleFunc("DELETE /api/objects/references/{id}", s.handleDeleteObjectReference)
+	s.mux.HandleFunc("DELETE /api/objects/sightings/{id}", s.handleDismissSighting)
 	s.mux.HandleFunc("POST /api/events/{id}/identify", s.handleIdentifyEvent)
 
 	// Streaming endpoints
@@ -2328,17 +2329,49 @@ func (s *Server) handleUpdateObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name           *string  `json:"name"`
+		MatchThreshold *float64 `json:"match_threshold"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	if err := s.db.UpdateKnownObjectName(id, req.Name); err != nil {
+	if req.Name != nil && *req.Name != "" {
+		if err := s.db.UpdateKnownObjectName(id, *req.Name); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if req.MatchThreshold != nil {
+		if err := s.db.UpdateKnownObjectThreshold(id, req.MatchThreshold); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) handleDismissSighting(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sighting ID"})
+		return
+	}
+	sighting, err := s.db.GetObjectSighting(id)
+	if err != nil || sighting == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sighting not found"})
+		return
+	}
+	// Clear the sub_label and object_name on the event
+	if sighting.EventID != "" {
+		_ = s.db.UpdateEventObjectName(sighting.EventID, "")
+		_ = s.db.UpdateEventSubLabel(sighting.EventID, "")
+	}
+	if err := s.db.DeleteObjectSighting(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
 }
 
 func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {

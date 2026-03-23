@@ -66,6 +66,10 @@
       <button class="chip active" data-filter="camera" data-value="" onclick="toggleChip(this, 'camera')">All Cameras</button>
     </div>
 
+    <!-- Object Filter Chips (populated dynamically) -->
+    <div class="chip-bar" id="object-chips" role="toolbar" aria-label="Object filters" style="display:none">
+    </div>
+
     <!-- Event Gallery -->
     <div class="event-gallery"
          id="events-gallery"
@@ -125,8 +129,9 @@
     // Populate camera chips from API and fetch event counts
     Promise.all([
       fetch('/api/cameras').then(r => r.json()),
-      fetch('/api/events/counts').then(r => r.json())
-    ]).then(function([camData, counts]) {
+      fetch('/api/events/counts').then(r => r.json()),
+      fetch('/api/objects').then(r => r.json())
+    ]).then(function([camData, counts, objects]) {
       var byLabel = counts.by_label || {};
       var byCamera = counts.by_camera || {};
       var total = counts.total || 0;
@@ -163,6 +168,28 @@
         btn.onclick = function() { toggleChip(this, 'camera'); };
         bar.appendChild(btn);
       });
+
+      // Object filter chips
+      if (objects && objects.length > 0) {
+        var objBar = document.getElementById('object-chips');
+        objBar.style.display = '';
+        var allObjBtn = document.createElement('button');
+        allObjBtn.className = 'chip active';
+        allObjBtn.dataset.filter = 'object';
+        allObjBtn.dataset.value = '';
+        allObjBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="margin-right:3px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>All Objects';
+        allObjBtn.onclick = function() { toggleChip(this, 'object'); };
+        objBar.appendChild(allObjBtn);
+        objects.forEach(function(obj) {
+          var btn = document.createElement('button');
+          btn.className = 'chip';
+          btn.dataset.filter = 'object';
+          btn.dataset.value = obj.name;
+          btn.innerHTML = obj.name;
+          btn.onclick = function() { toggleChip(this, 'object'); };
+          objBar.appendChild(btn);
+        });
+      }
     });
   </script>
 </body>

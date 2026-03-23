@@ -1369,6 +1369,7 @@ function reloadEvents() {
 
   const labelChip = document.querySelector('.chip[data-filter="label"].active');
   const cameraChip = document.querySelector('.chip[data-filter="camera"].active');
+  const objectChip = document.querySelector('.chip[data-filter="object"].active');
 
   let url = '/partials/events-gallery?limit=50';
   if (labelChip && labelChip.dataset.value) {
@@ -1376,6 +1377,9 @@ function reloadEvents() {
   }
   if (cameraChip && cameraChip.dataset.value) {
     url += '&camera=' + encodeURIComponent(cameraChip.dataset.value);
+  }
+  if (objectChip && objectChip.dataset.value) {
+    url += '&object=' + encodeURIComponent(objectChip.dataset.value);
   }
 
   gallery.setAttribute('hx-get', url);
