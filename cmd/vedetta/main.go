@@ -109,6 +109,13 @@ func main() {
 		slog.Info("face recognition enabled")
 	}
 
+	objectEmbedder, oeErr := detect.NewObjectEmbedder(detect.ObjectEmbedderConfig{})
+	if oeErr != nil {
+		slog.Warn("object re-identification disabled", "error", oeErr)
+	} else {
+		slog.Info("object re-identification enabled")
+	}
+
 	// Create RTSP Hub — central connection manager
 	hub := rtsp.NewHub(ctx)
 	defer hub.Close()
@@ -296,6 +303,10 @@ func main() {
 					}
 				}
 
+				if objectEmbedder != nil && event.SnapshotImage != nil {
+					matchEventToKnownObjects(db, objectEmbedder, event)
+				}
+
 				if mqttClient != nil {
 					if err := mqttClient.PublishEvent(event); err != nil {
 						slog.Error("failed to publish event", "error", err)
@@ -391,7 +402,7 @@ func main() {
 	}
 
 	// Wire subsystems into the API server now that everything is initialized
-	server.SetSubsystems(manager, recorder, hub, faceRecognizer, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras)
+	server.SetSubsystems(manager, recorder, hub, faceRecognizer, objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras)
 
 	slog.Info("vedetta started", "cameras", len(cfg.Cameras))
 
@@ -592,6 +603,43 @@ func averageEmbeddings(a, b []float32) []float32 {
 		}
 	}
 	return out
+}
+
+const objectMatchThreshold = 0.65
+
+func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event camera.Event) {
+	knownObjects, err := db.ListKnownObjectsByLabel(event.Label)
+	if err != nil || len(knownObjects) == 0 {
+		return
+	}
+
+	embedding, err := oe.Embed(event.SnapshotImage, event.Box)
+	if err != nil {
+		slog.Error("object re-ID embed failed", "event", event.ID, "error", err)
+		return
+	}
+
+	for _, obj := range knownObjects {
+		centroid := detect.BytesToFloat32(obj.Centroid)
+		if len(centroid) == 0 {
+			continue
+		}
+		sim := detect.CosineSimilarity(embedding, centroid)
+		if sim >= objectMatchThreshold {
+			if _, err := db.SaveObjectSighting(storage.ObjectSighting{
+				EventID:    event.ID,
+				Camera:     event.CameraName,
+				ObjectID:   obj.ID,
+				Similarity: sim,
+				Timestamp:  event.Timestamp,
+			}); err != nil {
+				slog.Error("failed to save object sighting", "error", err)
+			} else {
+				slog.Info("object recognized", "object", obj.Name, "event", event.ID,
+					"similarity", fmt.Sprintf("%.3f", sim))
+			}
+		}
+	}
 }
 
 func reconcileEventMediaAvailability(db *storage.DB) {

@@ -50,6 +50,7 @@ type Server struct {
 	streams        *stream.StreamManager
 	mse            *stream.MSEManager
 	faceRecognizer *detect.FaceRecognizer
+	objectEmbedder *detect.ObjectEmbedder
 	snapshotPath   string
 	faceCropDir    string
 	cameraConfigs  []config.CameraConfig
@@ -84,6 +85,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 		"scorePercent": func(s float32) string {
 			return fmt.Sprintf("%.0f%%", s*100)
 		},
+		"toFloat32": func(f float64) float32 { return float32(f) },
 		"formatTime": func(t time.Time) template.HTML {
 			iso := t.UTC().Format(time.RFC3339)
 			display := t.UTC().Format("2006-01-02 15:04:05 UTC")
@@ -156,6 +158,14 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 	s.mux.HandleFunc("POST /api/faces/backfill", s.handleFaceBackfill)
 	s.mux.HandleFunc("POST /api/people/merge", s.handleMergePeople)
 
+	// Object re-identification
+	s.mux.HandleFunc("GET /api/objects", s.handleListObjects)
+	s.mux.HandleFunc("POST /api/objects", s.handleCreateObject)
+	s.mux.HandleFunc("DELETE /api/objects/{id}", s.handleDeleteObject)
+	s.mux.HandleFunc("GET /api/objects/{id}/sightings", s.handleObjectSightings)
+	s.mux.HandleFunc("GET /api/objects/{id}/crop", s.handleObjectCrop)
+	s.mux.HandleFunc("POST /api/events/{id}/identify", s.handleIdentifyEvent)
+
 	// Streaming endpoints
 	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
 	s.mux.HandleFunc("GET /api/cameras/{name}/mse/ws", s.handleMSEWebSocket)
@@ -213,13 +223,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // SetSubsystems wires in the heavy dependencies once they're initialized.
 // After calling this, camera/recording/streaming endpoints become functional.
-func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig) {
+func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig) {
 	s.cameras = cameras
 	s.recorder = recorder
 	s.hub = hub
 	s.streams = stream.NewStreamManager(hub)
 	s.mse = stream.NewMSEManager(hub)
 	s.faceRecognizer = faceRecognizer
+	s.objectEmbedder = objectEmbedder
 	s.snapshotPath = snapshotPath
 	s.faceCropDir = faceCropDir
 	s.cameraConfigs = cameraConfigs
@@ -1315,6 +1326,8 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 
 	prevID, nextID, _ := s.db.GetAdjacentEvents(id)
 
+	sightings, _ := s.db.GetEventSightings(id)
+
 	type eventDetailData struct {
 		camera.Event
 		PrevID       string
@@ -1322,6 +1335,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		RecordingURL string
 		HasRecording bool
 		Duration     string
+		Sightings    []storage.ObjectSighting
 	}
 
 	recURL := fmt.Sprintf("/camera.html?name=%s&t=%s",
@@ -1344,6 +1358,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		RecordingURL: recURL,
 		HasRecording: hasRecording,
 		Duration:     duration,
+		Sightings:    sightings,
 	}
 
 	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
@@ -1381,6 +1396,15 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
 			` View in Recording</a>{{end}}` +
 			`</div>` +
+			`{{if .Sightings}}<div class="meta-card">` +
+			`<div class="meta-card-header">Recognized</div>` +
+			`{{range .Sightings}}<div class="meta-row"><span class="key">{{.ObjectName}}</span><span class="val">{{scorePercent (toFloat32 .Similarity)}}</span></div>{{end}}` +
+			`</div>{{end}}` +
+			`{{if .SnapshotAvailable}}<div class="meta-card">` +
+			`<button class="btn btn-sm" style="width:100%" onclick="trackObject('{{.ID}}', '{{.Label}}')">` +
+			`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>` +
+			` Track this {{.Label}}</button>` +
+			`</div>{{end}}` +
 			`<div class="event-nav">` +
 			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
 			`{{if .NextID}}<a href="/event.html?id={{.NextID}}" class="btn" data-next-id="{{.NextID}}">Next &#8594;</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">Next &#8594;</span>{{end}}` +
@@ -2193,6 +2217,232 @@ func averageEmbeddings(a, b []float32) []float32 {
 		}
 	}
 	return out
+}
+
+// ─── Object Re-Identification Handlers ───
+
+func (s *Server) handleListObjects(w http.ResponseWriter, _ *http.Request) {
+	objects, err := s.db.ListKnownObjects()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if objects == nil {
+		objects = []storage.KnownObject{}
+	}
+	writeJSON(w, http.StatusOK, objects)
+}
+
+func (s *Server) handleCreateObject(w http.ResponseWriter, r *http.Request) {
+	if s.objectEmbedder == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
+		return
+	}
+
+	var req struct {
+		EventID string `json:"event_id"`
+		Name    string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.EventID == "" || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "event_id and name are required"})
+		return
+	}
+
+	event, err := s.db.GetEventByID(req.EventID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if event == nil || !event.SnapshotAvailable {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event snapshot not found"})
+		return
+	}
+
+	img, err := loadSnapshotImage(event.SnapshotPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load snapshot"})
+		return
+	}
+
+	embedding, err := s.objectEmbedder.Embed(img, event.Box)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		return
+	}
+
+	obj := storage.KnownObject{
+		Name:     req.Name,
+		Label:    event.Label,
+		Centroid: detect.Float32ToBytes(embedding),
+	}
+	id, err := s.db.SaveKnownObject(obj)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	cropDir := filepath.Join(s.snapshotPath, "objects")
+	cropPath := s.objectEmbedder.SaveCrop(img, event.Box, cropDir, id)
+	if cropPath != "" {
+		_ = s.db.UpdateKnownObjectCrop(id, cropPath)
+	}
+
+	obj.ID = id
+	obj.CropPath = cropPath
+	writeJSON(w, http.StatusCreated, obj)
+}
+
+func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
+		return
+	}
+
+	obj, err := s.db.GetKnownObject(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if obj == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "object not found"})
+		return
+	}
+
+	if obj.CropPath != "" {
+		os.Remove(obj.CropPath)
+	}
+	if err := s.db.DeleteKnownObject(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleObjectSightings(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
+		return
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	sightings, err := s.db.ListObjectSightings(id, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if sightings == nil {
+		sightings = []storage.ObjectSighting{}
+	}
+	writeJSON(w, http.StatusOK, sightings)
+}
+
+func (s *Server) handleObjectCrop(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
+		return
+	}
+	obj, err := s.db.GetKnownObject(id)
+	if err != nil || obj == nil || obj.CropPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crop not found"})
+		return
+	}
+	http.ServeFile(w, r, obj.CropPath)
+}
+
+func (s *Server) handleIdentifyEvent(w http.ResponseWriter, r *http.Request) {
+	if s.objectEmbedder == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
+		return
+	}
+
+	eventID := r.PathValue("id")
+	event, err := s.db.GetEventByID(eventID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if event == nil || !event.SnapshotAvailable {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event snapshot not found"})
+		return
+	}
+
+	img, err := loadSnapshotImage(event.SnapshotPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load snapshot"})
+		return
+	}
+
+	embedding, err := s.objectEmbedder.Embed(img, event.Box)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		return
+	}
+
+	knownObjects, err := s.db.ListKnownObjectsByLabel(event.Label)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	const matchThreshold = 0.65
+	var matches []storage.ObjectSighting
+	for _, obj := range knownObjects {
+		centroid := detect.BytesToFloat32(obj.Centroid)
+		if len(centroid) == 0 {
+			continue
+		}
+		sim := detect.CosineSimilarity(embedding, centroid)
+		if sim >= matchThreshold {
+			sighting := storage.ObjectSighting{
+				EventID:    eventID,
+				Camera:     event.CameraName,
+				ObjectID:   obj.ID,
+				ObjectName: obj.Name,
+				Similarity: sim,
+				Timestamp:  event.Timestamp,
+			}
+			if _, err := s.db.SaveObjectSighting(sighting); err == nil {
+				matches = append(matches, sighting)
+			}
+		}
+	}
+
+	if matches == nil {
+		matches = []storage.ObjectSighting{}
+	}
+	writeJSON(w, http.StatusOK, matches)
+}
+
+func loadSnapshotImage(path string) (*image.RGBA, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	img, err := jpeg.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+
+	rgba, ok := img.(*image.RGBA)
+	if !ok {
+		bounds := img.Bounds()
+		rgba = image.NewRGBA(bounds)
+		draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+	}
+	return rgba, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

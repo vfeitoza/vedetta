@@ -2303,6 +2303,24 @@ function hideDiskWarning() {
   healthWarningVisible = false;
 }
 
+// ─── Object Tracking ───
+function trackObject(eventId, label) {
+  var name = prompt('Name this ' + label + ':');
+  if (!name || !name.trim()) return;
+  fetch('/api/objects', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, name: name.trim()})
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error); });
+    return r.json();
+  }).then(function(obj) {
+    toast('"' + obj.name + '" is now being tracked');
+  }).catch(function(e) {
+    toast('Failed: ' + e.message);
+  });
+}
+
 // Poll health every 30 seconds
 pollHealth();
 setInterval(pollHealth, 30000);
