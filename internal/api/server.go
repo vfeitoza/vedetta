@@ -231,6 +231,79 @@ func (s *Server) Start() error {
 }
 
 // Shutdown gracefully stops the HTTP server.
+// TriggerDoorbell programmatically triggers a doorbell event for a camera.
+// Used by ONVIF event subscribers when a doorbell press is detected.
+func (s *Server) TriggerDoorbell(cameraName string) {
+	cam := s.cameras.GetCamera(cameraName)
+	if cam == nil {
+		return
+	}
+	img := cam.LastSnapshot()
+	if img == nil {
+		return
+	}
+
+	eventID := fmt.Sprintf("%s-doorbell-%d", cameraName, time.Now().UnixMilli())
+	ev := camera.Event{
+		ID:                eventID,
+		CameraName:        cameraName,
+		Label:             "doorbell",
+		Score:             1.0,
+		Box:               [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()},
+		Timestamp:         time.Now(),
+		SnapshotAvailable: true,
+	}
+
+	snapDir := filepath.Join(s.snapshotPath, cameraName)
+	snapPath := filepath.Join(snapDir, eventID+".jpg")
+	if err := os.MkdirAll(snapDir, 0o755); err == nil {
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil {
+			if err := os.WriteFile(snapPath, buf.Bytes(), 0o644); err == nil {
+				ev.SnapshotPath = snapPath
+				if s.mqttClient != nil {
+					s.mqttClient.PublishSnapshot(cameraName, "doorbell", buf.Bytes())
+					s.mqttClient.PublishDoorbell(cameraName, "", buf.Bytes())
+				}
+			}
+		}
+	}
+
+	// Face recognition
+	if s.faceRecognizer != nil {
+		fullBox := [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()}
+		results := s.faceRecognizer.DetectAndEmbed(img, fullBox, s.faceCropDir)
+		if len(results) > 0 {
+			personID, _ := s.matchFaceToPerson(results[0].Embedding)
+			if personID > 0 {
+				if p, err := s.db.GetPerson(personID); err == nil && p != nil && p.Name != "" {
+					ev.SubLabel = p.Name
+					// Re-publish doorbell with person name
+					if s.mqttClient != nil {
+						var jpegData []byte
+						if ev.SnapshotPath != "" {
+							jpegData, _ = os.ReadFile(ev.SnapshotPath)
+						}
+						s.mqttClient.PublishDoorbell(cameraName, p.Name, jpegData)
+					}
+				}
+			}
+		}
+	}
+
+	if err := s.db.SaveEvent(ev); err != nil {
+		slog.Error("failed to save doorbell event", "error", err)
+	}
+	if ev.SnapshotPath != "" {
+		_ = s.db.UpdateEventSnapshotPath(ev.ID, ev.SnapshotPath)
+	}
+	if ev.SubLabel != "" {
+		_ = s.db.UpdateEventSubLabel(ev.ID, ev.SubLabel)
+	}
+
+	slog.Info("doorbell event created", "camera", cameraName, "event", eventID, "person", ev.SubLabel)
+}
+
 func (s *Server) SetMQTT(publisher MQTTPublisher) {
 	s.mqttClient = publisher
 }

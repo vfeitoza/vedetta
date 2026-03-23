@@ -467,6 +467,36 @@ func main() {
 		server.SetMQTT(mqttClient)
 	}
 
+	// Start ONVIF event subscribers for doorbell cameras
+	onvifEvents := make(chan camera.OnvifEvent, 50)
+	for _, cam := range cfg.Cameras {
+		if !cam.IsEnabled() || !cam.Doorbell.Enabled {
+			continue
+		}
+		sub, err := camera.NewOnvifEventSubscriber(cam.Name, cam.URL, onvifEvents)
+		if err != nil {
+			slog.Warn("ONVIF event subscriber failed", "camera", cam.Name, "error", err)
+			continue
+		}
+		go sub.Run(ctx)
+		slog.Info("ONVIF event subscriber started", "camera", cam.Name)
+	}
+
+	// Process ONVIF events (doorbell presses)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-onvifEvents:
+				if ev.Type == camera.OnvifEventDoorbell && ev.Value {
+					slog.Info("ONVIF doorbell press detected", "camera", ev.Camera, "topic", ev.Topic)
+					server.TriggerDoorbell(ev.Camera)
+				}
+			}
+		}
+	}()
+
 	slog.Info("vedetta started", "cameras", len(cfg.Cameras))
 
 	sig := make(chan os.Signal, 1)
