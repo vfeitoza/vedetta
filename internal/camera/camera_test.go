@@ -148,6 +148,28 @@ func TestStatus_NoHub(t *testing.T) {
 	}
 }
 
+func TestManager_AddCamera(t *testing.T) {
+	events := make(chan Event, 10)
+	eventEnds := make(chan EventEnd, 10)
+	presenceEvents := make(chan PresenceEvent, 10)
+	faceEvents := make(chan FaceEvent, 10)
+	m := NewManager(nil, nil, config.MotionConfig{}, events, eventEnds, presenceEvents, nil, "", 85, "", nil, faceEvents, "")
+	if len(m.ListCameras()) != 0 {
+		t.Fatal("expected 0 cameras initially")
+	}
+	cfg := config.CameraConfig{Name: "test_cam", URL: "rtsp://localhost/stream"}
+	m.AddCamera(cfg)
+	names := m.ListCameras()
+	if len(names) != 1 || names[0] != "test_cam" {
+		t.Errorf("expected [test_cam], got %v", names)
+	}
+	// Adding same name again should be a no-op
+	m.AddCamera(cfg)
+	if len(m.ListCameras()) != 1 {
+		t.Error("duplicate add should be ignored")
+	}
+}
+
 func TestProcessFrame_PreservesDetectorDegradedState(t *testing.T) {
 	cam := newTestCamera(config.CameraConfig{
 		Name:   "test",
