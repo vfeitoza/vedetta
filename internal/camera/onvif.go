@@ -1,16 +1,26 @@
 package camera
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
+	"image/jpeg"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+	"github.com/pion/rtp"
+
+	"github.com/rvben/vedetta/internal/media"
 )
 
 // DiscoveredCamera represents a camera found via ONVIF WS-Discovery.
@@ -367,6 +377,240 @@ func GenerateConfig(cameras []DiscoveredCamera) string {
 	}
 
 	return b.String()
+}
+
+// GrabThumbnail connects to an RTSP URL, waits for one IDR frame,
+// decodes it to JPEG, and returns the bytes. Times out after 10 seconds.
+// Falls back to common HTTP snapshot URLs if RTSP decoding fails.
+func GrabThumbnail(rtspURL string, quality int) ([]byte, error) {
+	if quality <= 0 || quality > 100 {
+		quality = 75
+	}
+
+	// Try RTSP IDR frame capture first
+	jpegData, err := grabThumbnailRTSP(rtspURL, quality)
+	if err == nil {
+		return jpegData, nil
+	}
+	slog.Debug("RTSP thumbnail failed, trying HTTP snapshot", "url", rtspURL, "error", err)
+
+	// Extract credentials and host from the RTSP URL for HTTP fallback
+	u, parseErr := url.Parse(rtspURL)
+	if parseErr != nil {
+		return nil, fmt.Errorf("RTSP thumbnail failed: %w; cannot parse URL for HTTP fallback", err)
+	}
+	host := u.Hostname()
+	username := ""
+	password := ""
+	if u.User != nil {
+		username = u.User.Username()
+		password, _ = u.User.Password()
+	}
+
+	return grabThumbnailHTTP(host, username, password)
+}
+
+// grabThumbnailRTSP connects via RTSP, reads one IDR frame, decodes to JPEG.
+func grabThumbnailRTSP(rtspURL string, quality int) ([]byte, error) {
+	if !media.OpenH264Available() {
+		return nil, fmt.Errorf("OpenH264 not available")
+	}
+
+	u, err := base.ParseURL(rtspURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse RTSP URL: %w", err)
+	}
+
+	proto := gortsplib.ProtocolTCP
+	client := &gortsplib.Client{
+		Scheme:       u.Scheme,
+		Host:         u.Host,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 3 * time.Second,
+		Protocol:     &proto,
+	}
+
+	if err := client.Start(); err != nil {
+		return nil, fmt.Errorf("RTSP connect: %w", err)
+	}
+	defer client.Close()
+
+	desc, _, err := client.Describe(u)
+	if err != nil {
+		return nil, fmt.Errorf("RTSP describe: %w", err)
+	}
+
+	// Find H264 format
+	var h264Format *format.H264
+	for _, m := range desc.Medias {
+		for _, f := range m.Formats {
+			if hf, ok := f.(*format.H264); ok {
+				h264Format = hf
+				break
+			}
+		}
+		if h264Format != nil {
+			break
+		}
+	}
+	if h264Format == nil {
+		return nil, fmt.Errorf("no H264 track found")
+	}
+
+	rtpDecoder, err := h264Format.CreateDecoder()
+	if err != nil {
+		return nil, fmt.Errorf("create RTP decoder: %w", err)
+	}
+
+	h264Dec := media.NewH264Decoder()
+	if h264Dec == nil {
+		return nil, fmt.Errorf("failed to create H264 decoder")
+	}
+	defer h264Dec.Close()
+
+	sps := h264Format.SPS
+	pps := h264Format.PPS
+
+	result := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+
+	client.OnPacketRTPAny(func(_ *description.Media, _ format.Format, pkt *rtp.Packet) {
+		au, decErr := rtpDecoder.Decode(pkt)
+		if decErr != nil {
+			return
+		}
+
+		// Update SPS/PPS from in-band parameters
+		for _, nalu := range au {
+			if len(nalu) == 0 {
+				continue
+			}
+			typ := h264.NALUType(nalu[0] & 0x1F)
+			switch typ {
+			case h264.NALUTypeSPS:
+				sps = nalu
+			case h264.NALUTypePPS:
+				pps = nalu
+			}
+		}
+
+		if !h264.IsRandomAccess(au) {
+			return
+		}
+		if sps == nil {
+			return
+		}
+
+		// Build NAL stream with start codes
+		var nalStream []byte
+		startCode := []byte{0, 0, 0, 1}
+
+		hasSPS := false
+		for _, nalu := range au {
+			if len(nalu) > 0 && h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeSPS {
+				hasSPS = true
+				break
+			}
+		}
+		if !hasSPS {
+			nalStream = append(nalStream, startCode...)
+			nalStream = append(nalStream, sps...)
+			if pps != nil {
+				nalStream = append(nalStream, startCode...)
+				nalStream = append(nalStream, pps...)
+			}
+		}
+
+		for _, nalu := range au {
+			if len(nalu) == 0 {
+				continue
+			}
+			nalStream = append(nalStream, startCode...)
+			nalStream = append(nalStream, nalu...)
+		}
+
+		ycbcr := h264Dec.Decode(nalStream)
+		if ycbcr == nil {
+			return
+		}
+
+		var buf bytes.Buffer
+		if encErr := jpeg.Encode(&buf, ycbcr, &jpeg.Options{Quality: quality}); encErr != nil {
+			select {
+			case errCh <- fmt.Errorf("JPEG encode: %w", encErr):
+			default:
+			}
+			return
+		}
+
+		select {
+		case result <- buf.Bytes():
+		default:
+		}
+	})
+
+	if err := client.SetupAll(desc.BaseURL, desc.Medias); err != nil {
+		return nil, fmt.Errorf("RTSP setup: %w", err)
+	}
+
+	if _, err := client.Play(nil); err != nil {
+		return nil, fmt.Errorf("RTSP play: %w", err)
+	}
+
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
+
+	select {
+	case data := <-result:
+		return data, nil
+	case err := <-errCh:
+		return nil, err
+	case <-timeout.C:
+		return nil, fmt.Errorf("timeout waiting for IDR frame")
+	}
+}
+
+// httpSnapshotPaths are common HTTP snapshot endpoints exposed by IP cameras.
+var httpSnapshotPaths = []string{
+	"/snap.jpg",
+	"/cgi-bin/snapshot.cgi",
+	"/ISAPI/Streaming/channels/101/picture",
+}
+
+// grabThumbnailHTTP tries common HTTP snapshot endpoints with digest/basic auth.
+func grabThumbnailHTTP(host, username, password string) ([]byte, error) {
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+
+	for _, path := range httpSnapshotPaths {
+		snapshotURL := fmt.Sprintf("http://%s%s", host, path)
+		req, err := http.NewRequest("GET", snapshotURL, nil)
+		if err != nil {
+			continue
+		}
+		if username != "" {
+			req.SetBasicAuth(username, password)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+		resp.Body.Close()
+
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		// Verify the response looks like a JPEG
+		if len(body) > 2 && body[0] == 0xFF && body[1] == 0xD8 {
+			slog.Debug("HTTP snapshot succeeded", "url", snapshotURL)
+			return body, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no HTTP snapshot endpoint responded with a JPEG")
 }
 
 // sanitizeName converts a camera name to a config-friendly identifier.

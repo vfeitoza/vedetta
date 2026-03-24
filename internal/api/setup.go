@@ -136,11 +136,37 @@ func (h *SetupHandler) HandleProbe(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
+
+		// Grab thumbnail asynchronously using the sub stream (or first available)
+		thumbnailURL := ""
+		if len(streams) > 0 {
+			thumbnailURL = fmt.Sprintf("/api/discover/thumbnail/%s", cam.IP)
+			// Pick sub stream for thumbnail (smaller/faster), fall back to first
+			streamURL := streams[0].URL
+			for _, s := range streams {
+				if s.Resolution == "sub" {
+					streamURL = s.URL
+					break
+				}
+			}
+			go func(ip, rtspURL string) {
+				data, err := camera.GrabThumbnail(rtspURL, 75)
+				if err != nil {
+					slog.Debug("thumbnail grab failed", "ip", ip, "error", err)
+					return
+				}
+				h.mu.Lock()
+				h.thumbnails[ip] = data
+				h.mu.Unlock()
+				slog.Info("thumbnail cached", "ip", ip, "size", len(data))
+			}(cam.IP, streamURL)
+		}
+
 		results = append(results, probeResult{
 			IP:        cam.IP,
 			Status:    "ok",
 			Streams:   streams,
-			Thumbnail: fmt.Sprintf("/api/discover/thumbnail/%s", cam.IP),
+			Thumbnail: thumbnailURL,
 		})
 	}
 
