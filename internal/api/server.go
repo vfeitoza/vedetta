@@ -1912,11 +1912,13 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`{{else}}<div class="meta-card-header">Identify</div>` +
 			`<div style="display:flex;gap:0.75rem;margin-bottom:0.5rem;align-items:center">` +
 			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:64px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--accent)">` +
-			`<span style="font-size:var(--text-sm);color:var(--text-tertiary)">Who/what is this?</span>` +
+			`<input type="text" id="identify-search" class="person-name-input" placeholder="Search or add new {{.Label}}..." ` +
+			`style="flex:1;padding:0.5rem 0.7rem;font-size:var(--text-sm)" ` +
+			`oninput="filterIdentifyResults(this.value)" ` +
+			`onkeydown="if(event.key==='Enter')identifyEnter(this.value,'{{.ID}}','{{.Label}}')">` +
 			`</div>` +
 			`<div id="identify-grid" data-event-id="{{.ID}}" data-label="{{.Label}}"></div>` +
-			`<button class="btn btn-sm btn-ghost" style="width:100%;margin-top:0.25rem" onclick="trackObject('{{.ID}}', '{{.Label}}')">` +
-			`+ New {{.Label}}</button>{{end}}` +
+			`{{end}}` +
 			`</div>{{end}}` +
 			`<div class="event-nav">` +
 			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +

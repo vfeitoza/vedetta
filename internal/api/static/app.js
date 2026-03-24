@@ -2309,7 +2309,9 @@ function hideDiskWarning() {
 
 // ─── Object Tracking ───
 function trackObject(eventId, label) {
-  showInputModal('Track ' + label, 'Name this ' + label + ':', '', function(name) {
+  var searchBox = document.getElementById('identify-search');
+  var prefill = searchBox ? searchBox.value.trim() : '';
+  showInputModal('Track ' + label, 'Name this ' + label + ':', prefill, function(name) {
     var endpoint = label === 'person' ? '/api/events/' + eventId + '/track-person' : '/api/objects';
     var body = label === 'person'
       ? JSON.stringify({name: name})
@@ -2449,29 +2451,27 @@ function toggleDetectionPopover(box, eventId, label) {
   }, 0);
 }
 
-// Populate the identify grid with face/object thumbnails
+// Identify grid: searchable face/object picker
+var _identifyData = [];
+
 function loadIdentifyGrid() {
   var grid = document.getElementById('identify-grid');
   if (!grid) return;
-  var eventId = grid.dataset.eventId;
   var label = grid.dataset.label;
 
   if (label === 'person') {
     fetch('/api/people').then(function(r) { return r.json(); }).then(function(data) {
-      var people = (data.people || data || []).filter(function(p) { return p.name && !p.ignore; });
-      if (!people.length) { grid.innerHTML = '<div style="font-size:var(--text-sm);color:var(--text-tertiary)">No known people yet</div>'; return; }
-      var html = '<div style="display:flex;flex-wrap:wrap;gap:0.35rem">';
-      people.forEach(function(p) {
-        html += '<div class="identify-chip" onclick="assignPersonToEvent(' + p.id + ',\'' + p.name.replace(/'/g, "\\'") + '\',\'' + eventId + '\')" title="' + p.name + '">';
-        html += '<div class="identify-chip-thumb" id="id-thumb-' + p.id + '"></div>';
-        html += '<span>' + p.name + '</span>';
-        html += '</div>';
+      _identifyData = (data.people || data || []).filter(function(p) { return p.name && !p.ignore; });
+      // Deduplicate by name (keep first)
+      var seen = {};
+      _identifyData = _identifyData.filter(function(p) {
+        if (seen[p.name.toLowerCase()]) return false;
+        seen[p.name.toLowerCase()] = true;
+        return true;
       });
-      html += '</div>';
-      grid.innerHTML = html;
-
+      renderIdentifyResults('');
       // Load thumbnails
-      people.forEach(function(p) {
+      _identifyData.forEach(function(p) {
         if (p.face_count > 0) {
           fetch('/api/people/' + p.id + '/faces?limit=1').then(function(r) { return r.json(); }).then(function(faces) {
             if (faces && faces.length > 0) {
@@ -2487,28 +2487,76 @@ function loadIdentifyGrid() {
     });
   } else {
     fetch('/api/objects').then(function(r) { return r.json(); }).then(function(objects) {
-      var filtered = (objects || []).filter(function(o) { return o.label === label; });
-      if (!filtered.length) return;
-      var html = '<div style="display:flex;flex-wrap:wrap;gap:0.35rem">';
-      filtered.forEach(function(o) {
-        html += '<div class="identify-chip" onclick="addObjectReference(' + o.id + ',\'' + o.name.replace(/'/g, "\\'") + '\',\'' + eventId + '\')" title="' + o.name + '">';
-        html += '<div class="identify-chip-thumb" style="background-image:url(/api/objects/' + o.id + '/crop)"></div>';
-        html += '<span>' + o.name + '</span>';
-        html += '</div>';
-      });
-      html += '</div>';
-      grid.innerHTML = html;
+      _identifyData = (objects || []).filter(function(o) { return o.label === label; });
+      _identifyData.forEach(function(o) { o._isObject = true; });
+      renderIdentifyResults('');
     });
   }
 }
 
-// Auto-load identify grid when event detail loads
+function filterIdentifyResults(query) {
+  renderIdentifyResults(query);
+}
+
+function renderIdentifyResults(query) {
+  var grid = document.getElementById('identify-grid');
+  if (!grid) return;
+  var eventId = grid.dataset.eventId;
+  var label = grid.dataset.label;
+  var q = (query || '').toLowerCase().trim();
+
+  var filtered = q ? _identifyData.filter(function(p) {
+    return p.name.toLowerCase().indexOf(q) !== -1;
+  }) : _identifyData;
+
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.25rem">';
+  filtered.forEach(function(p) {
+    var escapedName = p.name.replace(/'/g, "\\'");
+    var onclick = p._isObject
+      ? 'addObjectReference(' + p.id + ',\'' + escapedName + '\',\'' + eventId + '\')'
+      : 'assignPersonToEvent(' + p.id + ',\'' + escapedName + '\',\'' + eventId + '\')';
+    html += '<div class="identify-chip" onclick="' + onclick + '" title="' + p.name + '">';
+    if (p._isObject) {
+      html += '<div class="identify-chip-thumb" style="background-image:url(/api/objects/' + p.id + '/crop)"></div>';
+    } else {
+      html += '<div class="identify-chip-thumb" id="id-thumb-' + p.id + '"></div>';
+    }
+    html += '<span>' + p.name + '</span></div>';
+  });
+
+  // Show "create new" chip if query doesn't match anything exactly
+  if (q && !filtered.some(function(p) { return p.name.toLowerCase() === q; })) {
+    html += '<div class="identify-chip identify-chip-new" onclick="trackObject(\'' + eventId + '\',\'' + label + '\')" title="Track as new">';
+    html += '<div class="identify-chip-thumb" style="display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--accent)">+</div>';
+    html += '<span>New: ' + q + '</span></div>';
+  }
+
+  html += '</div>';
+  grid.innerHTML = html;
+}
+
+function identifyEnter(query, eventId, label) {
+  var q = (query || '').trim();
+  if (!q) return;
+  // Check if exact match exists
+  var match = _identifyData.find(function(p) { return p.name.toLowerCase() === q.toLowerCase(); });
+  if (match) {
+    if (match._isObject) {
+      addObjectReference(match.id, match.name, eventId);
+    } else {
+      assignPersonToEvent(match.id, match.name, eventId);
+    }
+  } else {
+    // Create new
+    trackObject(eventId, label);
+  }
+}
+
 document.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'event-detail') {
     loadIdentifyGrid();
   }
 });
-// Also try on page load
 if (document.getElementById('identify-grid')) loadIdentifyGrid();
 
 function reloadEventDetail(eventId) {
