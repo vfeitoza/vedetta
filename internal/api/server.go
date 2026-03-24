@@ -188,6 +188,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 
 	s.mux.HandleFunc("GET /api/events/{id}/detection-crop", s.handleEventDetectionCrop)
 	s.mux.HandleFunc("POST /api/events/{id}/track-person", s.handleTrackPerson)
+	s.mux.HandleFunc("POST /api/events/{id}/assign-person", s.handleAssignPersonToEvent)
 
 	// Doorbell + real-time events
 	s.mux.HandleFunc("POST /api/cameras/{name}/doorbell", s.handleDoorbellPress)
@@ -681,6 +682,60 @@ func (s *Server) handleTrackPerson(w http.ResponseWriter, r *http.Request) {
 		"person_id": personID,
 		"name":      req.Name,
 		"method":    method,
+	})
+}
+
+func (s *Server) handleAssignPersonToEvent(w http.ResponseWriter, r *http.Request) {
+	eventID := r.PathValue("id")
+
+	var req struct {
+		PersonID int64 `json:"person_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PersonID == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "person_id is required"})
+		return
+	}
+
+	person, err := s.db.GetPerson(req.PersonID)
+	if err != nil || person == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "person not found"})
+		return
+	}
+
+	event, err := s.db.GetEventByID(eventID)
+	if err != nil || event == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+		return
+	}
+
+	// Try face detection if snapshot available
+	if event.SnapshotAvailable && event.SnapshotPath != "" && s.faceRecognizer != nil {
+		if img, err := loadSnapshotImage(event.SnapshotPath); err == nil {
+			results := s.faceRecognizer.DetectAndEmbed(img, event.Box, s.faceCropDir)
+			if len(results) > 0 {
+				face := storage.Face{
+					EventID:    eventID,
+					Camera:     event.CameraName,
+					PersonID:   &req.PersonID,
+					Embedding:  detect.Float32ToBytes(results[0].Embedding),
+					CropPath:   results[0].CropPath,
+					Confidence: float64(results[0].Confidence),
+					Timestamp:  event.Timestamp,
+				}
+				sim := 1.0
+				face.Similarity = &sim
+				s.db.SaveFace(face)
+				s.updatePersonCentroid(req.PersonID, results[0].Embedding)
+			}
+		}
+	}
+
+	_ = s.db.UpdateEventSubLabel(eventID, person.Name)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "assigned",
+		"person_id": req.PersonID,
+		"name":      person.Name,
 	})
 }
 
@@ -1747,6 +1802,23 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 	sightings, _ := s.db.GetEventSightings(id)
 	knownObjects, _ := s.db.ListKnownObjectsByLabel(event.Label)
 
+	type namedPerson struct {
+		ID   int64
+		Name string
+	}
+
+	// Load named people for person events
+	var namedPeople []namedPerson
+	if event.Label == "person" {
+		if people, err := s.db.ListPeople(); err == nil {
+			for _, p := range people {
+				if p.Name != "" && !p.Ignore {
+					namedPeople = append(namedPeople, namedPerson{ID: p.ID, Name: p.Name})
+				}
+			}
+		}
+	}
+
 	type eventDetailData struct {
 		camera.Event
 		PrevID       string
@@ -1756,6 +1828,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		Duration     string
 		Sightings    []storage.ObjectSighting
 		KnownObjects []storage.KnownObject
+		NamedPeople  []namedPerson
 	}
 
 	recURL := fmt.Sprintf("/camera.html?name=%s&t=%s",
@@ -1780,6 +1853,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 		Duration:     duration,
 		Sightings:    sightings,
 		KnownObjects: knownObjects,
+		NamedPeople:  namedPeople,
 	}
 
 	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
@@ -1828,13 +1902,15 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:80px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--green)">` +
 			`<span style="font-size:var(--text-sm);color:var(--green);font-weight:600">{{.SubLabel}}</span>` +
 			`</div>` +
-			`{{else}}<div class="meta-card-header">Object Tracking</div>` +
+			`{{else}}<div class="meta-card-header">Identify</div>` +
 			`<div style="display:flex;gap:0.75rem;margin-bottom:0.5rem;align-items:center">` +
 			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:80px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--accent)">` +
-			`<span style="font-size:var(--text-sm);color:var(--text-tertiary)">This {{.Label}} will be tracked</span>` +
+			`<span style="font-size:var(--text-sm);color:var(--text-tertiary)">Who/what is this?</span>` +
 			`</div>` +
+			`{{range .NamedPeople}}<button class="btn btn-sm" style="width:100%;margin-bottom:0.25rem" onclick="assignPersonToEvent({{.ID}}, '{{.Name}}', '{{$.ID}}')">` +
+			`This is {{.Name}}</button>{{end}}` +
 			`{{range .KnownObjects}}<button class="btn btn-sm" style="width:100%;margin-bottom:0.25rem" onclick="addObjectReference({{.ID}}, '{{.Name}}', '{{$.ID}}')">` +
-			`+ Add reference to {{.Name}}</button>{{end}}` +
+			`This is {{.Name}}</button>{{end}}` +
 			`<button class="btn btn-sm btn-ghost" style="width:100%" onclick="trackObject('{{.ID}}', '{{.Label}}')">` +
 			`Track as new {{.Label}}</button>{{end}}` +
 			`</div>{{end}}` +

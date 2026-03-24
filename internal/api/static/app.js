@@ -2331,6 +2331,22 @@ function trackObject(eventId, label) {
   });
 }
 
+function assignPersonToEvent(personId, personName, eventId) {
+  fetch('/api/events/' + eventId + '/assign-person', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person_id: personId})
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error); });
+    return r.json();
+  }).then(function() {
+    toast('Identified as ' + personName);
+    reloadEventDetail(eventId);
+  }).catch(function(e) {
+    toast('Failed: ' + e.message);
+  });
+}
+
 function reloadEventDetail(eventId) {
   var detail = document.getElementById('event-detail');
   if (detail && typeof htmx !== 'undefined') {
