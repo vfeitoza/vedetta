@@ -3250,3 +3250,11 @@ function loadZonePresence(z) {
       el('zone-presence').classList.add('hidden');
     });
 }
+
+function startDiscovery() {
+  toast('Camera discovery coming soon');
+}
+
+function showAddManual() {
+  toast('Manual camera add coming soon');
+}

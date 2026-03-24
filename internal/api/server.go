@@ -1749,6 +1749,45 @@ func (s *Server) reloadCameraZones(name string, cam *camera.Camera) {
 func (s *Server) handleCameraGridPartial(w http.ResponseWriter, _ *http.Request) {
 	statuses := s.cameraStatuses()
 
+	w.Header().Set("Content-Type", "text/html")
+
+	if len(statuses) == 0 {
+		const emptyHTML = `<div class="empty-hero">
+  <div class="empty-icon">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+      <circle cx="12" cy="13" r="4"/>
+    </svg>
+  </div>
+  <div class="empty-title">No cameras configured yet</div>
+  <div class="empty-desc">
+    Vedetta can automatically discover cameras on your network using ONVIF. Or add one manually if you know the RTSP URL.
+  </div>
+  <div class="empty-actions">
+    <a href="#" onclick="startDiscovery(); return false;" class="action-card primary">
+      <div class="action-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M2 12h20"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+      </div>
+      <div class="action-text"><h3>Discover Cameras</h3><p>Scan your network for ONVIF cameras</p></div>
+    </a>
+    <a href="#" onclick="showAddManual(); return false;" class="action-card">
+      <div class="action-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </div>
+      <div class="action-text"><h3>Add Manually</h3><p>Enter an RTSP URL directly</p></div>
+    </a>
+  </div>
+</div>`
+		fmt.Fprint(w, emptyHTML)
+		return
+	}
+
 	type cameraCard struct {
 		Name        string
 		DisplayName string
@@ -1779,7 +1818,6 @@ func (s *Server) handleCameraGridPartial(w http.ResponseWriter, _ *http.Request)
   </div>
 </div>{{end}}`))
 
-	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, cards); err != nil {
 		slog.Error("template error", "error", err)
 	}
