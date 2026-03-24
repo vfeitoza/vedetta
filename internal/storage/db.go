@@ -123,6 +123,7 @@ func migrate(db *sql.DB) error {
 			name TEXT,
 			ignore BOOLEAN NOT NULL DEFAULT 0,
 			centroid BLOB,
+			source_event_id TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -211,6 +212,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN clip_available BOOLEAN NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE zones ADD COLUMN points TEXT NOT NULL DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN object_name TEXT")
+	_, _ = db.Exec("ALTER TABLE people ADD COLUMN source_event_id TEXT")
 	_, _ = db.Exec("ALTER TABLE known_objects ADD COLUMN match_threshold REAL")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN sub_label TEXT")
 
@@ -976,11 +978,12 @@ func scanZone(row *sql.Row) (*camera.Zone, error) {
 
 // Person represents a known or unknown person in the face recognition system.
 type Person struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Ignore    bool      `json:"ignore"`
-	Centroid  []byte    `json:"-"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	Ignore        bool      `json:"ignore"`
+	Centroid      []byte    `json:"-"`
+	SourceEventID string    `json:"source_event_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Face represents a detected face with its embedding and metadata.
@@ -999,9 +1002,13 @@ type Face struct {
 
 // SavePerson creates a new person record and returns the assigned ID.
 func (d *DB) SavePerson(name string, ignore bool, centroid []byte) (int64, error) {
+	return d.SavePersonWithEvent(name, ignore, centroid, "")
+}
+
+func (d *DB) SavePersonWithEvent(name string, ignore bool, centroid []byte, sourceEventID string) (int64, error) {
 	result, err := d.db.Exec(
-		"INSERT INTO people (name, ignore, centroid) VALUES (?, ?, ?)",
-		name, ignore, centroid,
+		"INSERT INTO people (name, ignore, centroid, source_event_id) VALUES (?, ?, ?, ?)",
+		name, ignore, centroid, nullString(sourceEventID),
 	)
 	if err != nil {
 		return 0, err
@@ -1012,12 +1019,12 @@ func (d *DB) SavePerson(name string, ignore bool, centroid []byte) (int64, error
 // GetPerson returns a person by ID, or nil if not found.
 func (d *DB) GetPerson(id int64) (*Person, error) {
 	row := d.db.QueryRow(
-		"SELECT id, name, ignore, centroid, created_at FROM people WHERE id = ?", id)
+		"SELECT id, name, ignore, centroid, source_event_id, created_at FROM people WHERE id = ?", id)
 
 	var p Person
-	var name sql.NullString
+	var name, sourceEventID sql.NullString
 	var centroid []byte
-	err := row.Scan(&p.ID, &name, &p.Ignore, &centroid, &p.CreatedAt)
+	err := row.Scan(&p.ID, &name, &p.Ignore, &centroid, &sourceEventID, &p.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1026,13 +1033,14 @@ func (d *DB) GetPerson(id int64) (*Person, error) {
 	}
 	p.Name = name.String
 	p.Centroid = centroid
+	p.SourceEventID = sourceEventID.String
 	return &p, nil
 }
 
 // ListPeople returns all people ordered by name.
 func (d *DB) ListPeople() ([]Person, error) {
 	rows, err := d.db.Query(
-		"SELECT id, name, ignore, centroid, created_at FROM people ORDER BY name")
+		"SELECT id, name, ignore, centroid, source_event_id, created_at FROM people ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -1041,13 +1049,14 @@ func (d *DB) ListPeople() ([]Person, error) {
 	var people []Person
 	for rows.Next() {
 		var p Person
-		var name sql.NullString
+		var name, sourceEventID sql.NullString
 		var centroid []byte
-		if err := rows.Scan(&p.ID, &name, &p.Ignore, &centroid, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &name, &p.Ignore, &centroid, &sourceEventID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		p.Name = name.String
 		p.Centroid = centroid
+		p.SourceEventID = sourceEventID.String
 		people = append(people, p)
 	}
 	return people, rows.Err()

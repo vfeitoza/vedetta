@@ -598,51 +598,89 @@ func (s *Server) handleTrackPerson(w http.ResponseWriter, r *http.Request) {
 
 	// Try face detection first
 	var faceEmbedding []float32
-	var cropPath string
+	var faceCropPath string
 	if s.faceRecognizer != nil {
 		results := s.faceRecognizer.DetectAndEmbed(img, event.Box, s.faceCropDir)
 		if len(results) > 0 {
 			faceEmbedding = results[0].Embedding
-			cropPath = results[0].CropPath
+			faceCropPath = results[0].CropPath
 		}
 	}
 
-	// Create person record
+	// Create person record with face centroid if available
 	var centroid []byte
 	if len(faceEmbedding) > 0 {
 		centroid = detect.Float32ToBytes(faceEmbedding)
 	}
-	personID, err := s.db.SavePerson(req.Name, false, centroid)
+	personID, err := s.db.SavePersonWithEvent(req.Name, false, centroid, eventID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Save face record if we got an embedding
+	method := "none"
+
 	if len(faceEmbedding) > 0 {
+		// Save face record
 		face := storage.Face{
 			EventID:    eventID,
 			Camera:     event.CameraName,
 			PersonID:   &personID,
 			Embedding:  centroid,
-			CropPath:   cropPath,
+			CropPath:   faceCropPath,
 			Confidence: 1.0,
 			Timestamp:  event.Timestamp,
 		}
 		sim := 1.0
 		face.Similarity = &sim
 		s.db.SaveFace(face)
+		method = "face"
+	} else if s.objectEmbedder != nil {
+		// Fall back to body re-ID via OSNet
+		bodyEmb, embErr := s.objectEmbedder.Embed(img, event.Box)
+		if embErr == nil && len(bodyEmb) > 0 {
+			// Create a known_object for body matching
+			obj := storage.KnownObject{
+				Name:     req.Name,
+				Label:    "person",
+				Centroid: detect.Float32ToBytes(bodyEmb),
+			}
+			objID, objErr := s.db.SaveKnownObject(obj)
+			if objErr == nil {
+				cropDir := filepath.Join(s.snapshotPath, "objects")
+				cropPath := s.objectEmbedder.SaveCrop(img, event.Box, cropDir, objID)
+				if cropPath != "" {
+					_ = s.db.UpdateKnownObjectCrop(objID, cropPath)
+				}
+				s.db.SaveObjectReference(storage.ObjectReference{
+					ObjectID:  objID,
+					EventID:   eventID,
+					Embedding: detect.Float32ToBytes(bodyEmb),
+					CropPath:  cropPath,
+				})
+				// Also save a sighting for this event
+				s.db.SaveObjectSighting(storage.ObjectSighting{
+					EventID:    eventID,
+					Camera:     event.CameraName,
+					ObjectID:   objID,
+					Similarity: 1.0,
+					Timestamp:  event.Timestamp,
+				})
+				method = "body"
+			}
+		}
 	}
 
 	// Set sub_label on the event
 	_ = s.db.UpdateEventSubLabel(eventID, req.Name)
 
-	slog.Info("person tracked from event", "person_id", personID, "name", req.Name, "event", eventID, "has_face", len(faceEmbedding) > 0)
+	slog.Info("person tracked from event", "person_id", personID, "name", req.Name,
+		"event", eventID, "method", method)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"person_id": personID,
 		"name":      req.Name,
-		"has_face":  len(faceEmbedding) > 0,
+		"method":    method,
 	})
 }
 

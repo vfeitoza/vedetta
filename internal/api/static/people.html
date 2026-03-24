@@ -181,6 +181,7 @@
           + 'onfocus="this.select()">'
           + '<div class="person-meta">'
           + '<span class="badge badge-sm">' + p.face_count + ' face' + (p.face_count !== 1 ? 's' : '') + '</span>'
+          + (p.source_event_id ? '<a href="/event.html?id=' + p.source_event_id + '" class="btn btn-xs btn-ghost" title="View source event">Source</a>' : '')
           + '<button class="btn btn-xs ' + (p.ignore ? 'btn-primary' : 'btn-ghost') + '" onclick="toggleIgnore(' + p.id + ', ' + !p.ignore + ')">'
           + (p.ignore ? 'Ignored' : 'Ignore') + '</button>'
           + '<button class="btn btn-xs btn-ghost btn-danger" onclick="deletePerson(' + p.id + ', \'' + escapeAttr(p.name) + '\')">Delete</button>'
@@ -192,7 +193,7 @@
       });
       grid.innerHTML = html;
 
-      // Load thumbnail for each person (first face crop)
+      // Load thumbnail for each person (first face crop, or source event detection crop)
       people.forEach(function(p) {
         if (p.face_count > 0) {
           fetch('/api/people/' + p.id + '/faces?limit=1').then(function(r) { return r.json(); }).then(function(faces) {
@@ -203,6 +204,12 @@
               }
             }
           });
+        } else if (p.source_event_id) {
+          var thumb = document.getElementById('person-thumb-' + p.id);
+          if (thumb) {
+            thumb.style.backgroundImage = 'url(/api/events/' + p.source_event_id + '/detection-crop)';
+            thumb.title = 'From event (no face detected)';
+          }
         }
       });
     }
