@@ -2196,22 +2196,24 @@ func (s *Server) handleListPeople(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	type personResponse struct {
-		ID        int64     `json:"id"`
-		Name      string    `json:"name"`
-		Ignore    bool      `json:"ignore"`
-		FaceCount int       `json:"face_count"`
-		CreatedAt time.Time `json:"created_at"`
+		ID            int64     `json:"id"`
+		Name          string    `json:"name"`
+		Ignore        bool      `json:"ignore"`
+		FaceCount     int       `json:"face_count"`
+		SourceEventID string    `json:"source_event_id,omitempty"`
+		CreatedAt     time.Time `json:"created_at"`
 	}
 
 	resp := make([]personResponse, 0, len(people))
 	for _, p := range people {
 		faces, _ := s.db.ListFacesByPerson(p.ID, 0)
 		resp = append(resp, personResponse{
-			ID:        p.ID,
-			Name:      p.Name,
-			Ignore:    p.Ignore,
-			FaceCount: len(faces),
-			CreatedAt: p.CreatedAt,
+			ID:            p.ID,
+			Name:          p.Name,
+			Ignore:        p.Ignore,
+			FaceCount:     len(faces),
+			SourceEventID: p.SourceEventID,
+			CreatedAt:     p.CreatedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
