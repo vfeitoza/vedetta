@@ -29,6 +29,7 @@ import (
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/media"
+	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/storage"
@@ -900,11 +901,38 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
 		return
 	}
-	filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
-	if r.URL.Query().Get("download") != "" {
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+
+	// Serve raw file for downloads or if ?raw=1
+	if r.URL.Query().Get("download") != "" || r.URL.Query().Get("raw") != "" {
+		filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
+		if r.URL.Query().Get("download") != "" {
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		}
+		http.ServeFile(w, r, event.SnapshotPath)
+		return
 	}
-	http.ServeFile(w, r, event.SnapshotPath)
+
+	// Draw bounding box on-the-fly
+	img, err := loadSnapshotImage(event.SnapshotPath)
+	if err != nil {
+		http.ServeFile(w, r, event.SnapshotPath)
+		return
+	}
+
+	label := event.Label
+	if event.SubLabel != "" {
+		label = event.SubLabel
+	}
+	det := detect.Detection{
+		Label: label,
+		Score: event.Score,
+		Box:   event.Box,
+	}
+	snapshot.DrawDetectionsInPlace(img, []detect.Detection{det})
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
 }
 
 func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
