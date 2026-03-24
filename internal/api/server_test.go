@@ -550,10 +550,10 @@ func TestHandleCameraGridPartial_Empty(t *testing.T) {
 	if ct != "text/html" {
 		t.Errorf("Content-Type = %q, want %q", ct, "text/html")
 	}
-	// No cameras means empty body (template iterates over empty slice)
+	// No cameras renders an empty-state hero with discover/add CTAs.
 	body := w.Body.String()
-	if body != "" {
-		t.Errorf("expected empty body for no cameras, got %q", body)
+	if !strings.Contains(body, "No cameras configured yet") {
+		t.Errorf("expected empty-state hero in body, got %q", body)
 	}
 }
 

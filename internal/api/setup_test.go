@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -271,5 +273,82 @@ func TestSetupHandler_Thumbnail_Found(t *testing.T) {
 	}
 	if len(w.Body.Bytes()) != 4 {
 		t.Errorf("expected 4 bytes, got %d", len(w.Body.Bytes()))
+	}
+}
+
+func TestSetupFlow_EndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yml")
+	dbPath := filepath.Join(dir, "test.db")
+
+	db, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("DB: %v", err)
+	}
+	defer db.Close()
+
+	setupDone := make(chan struct{})
+	server := NewSetupMode(config.APIConfig{Host: "127.0.0.1", Port: 0}, db, configPath, setupDone)
+
+	// Start on random port using httptest
+	ts := httptest.NewServer(server.mux)
+	defer ts.Close()
+
+	// 1. Non-setup API routes should be blocked (403)
+	resp, _ := http.Get(ts.URL + "/api/events")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for /api/events during setup, got %d", resp.StatusCode)
+	}
+
+	// 2. Setup status should indicate setup mode
+	resp, _ = http.Get(ts.URL + "/api/setup/status")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for setup status, got %d", resp.StatusCode)
+	}
+
+	// 3. Create admin account
+	body := strings.NewReader(`{"username":"admin","password":"test1234"}`)
+	resp, _ = http.Post(ts.URL+"/api/setup", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("setup failed: %d", resp.StatusCode)
+	}
+
+	// Verify config file was created
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("config file not created: %v", err)
+	}
+
+	// 4. Discovery should work (returns 200, may have empty cameras)
+	resp, _ = http.Get(ts.URL + "/api/discover")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("discover should return 200, got %d", resp.StatusCode)
+	}
+
+	// 5. Signal complete (skip cameras)
+	resp, _ = http.Post(ts.URL+"/api/setup/complete", "application/json", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("complete failed: %d", resp.StatusCode)
+	}
+
+	// 6. setupDone should be closed
+	select {
+	case <-setupDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setupDone not signaled within 2s")
+	}
+
+	// 7. Config should be loadable with valid auth
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config not loadable: %v", err)
+	}
+	if len(cfg.Auth.Users) != 1 {
+		t.Errorf("expected 1 auth user, got %d", len(cfg.Auth.Users))
+	}
+
+	// 8. Auth user should be in DB
+	users, _ := db.ListAuthUsers()
+	if len(users) != 1 || users[0].Username != "admin" {
+		t.Errorf("expected admin in DB, got %v", users)
 	}
 }

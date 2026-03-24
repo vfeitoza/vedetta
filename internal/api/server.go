@@ -166,10 +166,17 @@ func NewSetupMode(cfg config.APIConfig, db *storage.DB, configPath string, setup
 		fileServer.ServeHTTP(w, r)
 	})
 
-	// Catch-all: block non-setup API routes
-	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+	// Catch-all: block non-setup API routes.
+	// Uses GET and POST since those are the only methods not already covered by
+	// setup-specific handlers above; this avoids mux conflict with "GET /".
+	blockSetup := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "setup not complete"})
-	})
+	}
+	s.mux.HandleFunc("GET /api/", blockSetup)
+	s.mux.HandleFunc("POST /api/", blockSetup)
+	s.mux.HandleFunc("DELETE /api/", blockSetup)
+	s.mux.HandleFunc("PUT /api/", blockSetup)
+	s.mux.HandleFunc("PATCH /api/", blockSetup)
 
 	return s
 }
