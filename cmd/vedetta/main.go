@@ -57,11 +57,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := auth.ValidateConfig(cfg.Auth); err != nil {
-		slog.Error("invalid auth config", "error", err)
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -72,10 +67,17 @@ func main() {
 	}
 	defer func() { _ = db.Close() }()
 
+	// Seed auth users from config into DB so config acts as the source of truth for initial credentials.
+	for _, user := range cfg.Auth.Users {
+		if err := db.SeedAuthUser(user.Username, user.PasswordHash); err != nil {
+			slog.Error("failed to seed auth user", "username", user.Username, "error", err)
+		}
+	}
+
 	// Reconcile event media availability with the filesystem without deleting metadata.
 	go reconcileEventMediaAvailability(db)
 
-	authChecker := auth.New(cfg.Auth, cfg.API, db)
+	authChecker := auth.NewFromDB(cfg.API, db)
 	defer authChecker.Close()
 
 	// Start API server early so the UI is available during initialization
