@@ -1785,7 +1785,12 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`{{range .Sightings}}<div class="meta-row"><span class="key">{{.ObjectName}}</span><span class="val">{{scorePercent (toFloat32 .Similarity)}}</span></div>{{end}}` +
 			`</div>{{end}}` +
 			`{{if .SnapshotAvailable}}<div class="meta-card">` +
-			`<div class="meta-card-header">Object Tracking</div>` +
+			`{{if .SubLabel}}<div class="meta-card-header">Tracked</div>` +
+			`<div style="display:flex;gap:0.75rem;align-items:center">` +
+			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:80px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--green)">` +
+			`<span style="font-size:var(--text-sm);color:var(--green);font-weight:600">{{.SubLabel}}</span>` +
+			`</div>` +
+			`{{else}}<div class="meta-card-header">Object Tracking</div>` +
 			`<div style="display:flex;gap:0.75rem;margin-bottom:0.5rem;align-items:center">` +
 			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:80px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--accent)">` +
 			`<span style="font-size:var(--text-sm);color:var(--text-tertiary)">This {{.Label}} will be tracked</span>` +
@@ -1793,7 +1798,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`{{range .KnownObjects}}<button class="btn btn-sm" style="width:100%;margin-bottom:0.25rem" onclick="addObjectReference({{.ID}}, '{{.Name}}', '{{$.ID}}')">` +
 			`+ Add reference to {{.Name}}</button>{{end}}` +
 			`<button class="btn btn-sm btn-ghost" style="width:100%" onclick="trackObject('{{.ID}}', '{{.Label}}')">` +
-			`Track as new {{.Label}}</button>` +
+			`Track as new {{.Label}}</button>{{end}}` +
 			`</div>{{end}}` +
 			`<div class="event-nav">` +
 			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
