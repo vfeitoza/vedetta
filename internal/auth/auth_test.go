@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/storage"
@@ -67,7 +68,7 @@ func TestCheckRateLimitIsPerIP(t *testing.T) {
 func TestSessionAuthenticationAndCSRF(t *testing.T) {
 	c := newChecker(t, config.APIConfig{Exposure: "lan"})
 
-	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent")
+	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent", false)
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestSessionAuthenticationAndCSRF(t *testing.T) {
 func TestSetSessionCookies_LANHTTPDoesNotForceSecure(t *testing.T) {
 	c := newChecker(t, config.APIConfig{Exposure: "lan"})
 
-	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent")
+	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent", false)
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestSetSessionCookies_LANHTTPDoesNotForceSecure(t *testing.T) {
 func TestSetSessionCookies_SecureTransportUsesSecureCookies(t *testing.T) {
 	c := newChecker(t, config.APIConfig{Exposure: "lan"})
 
-	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent")
+	session, err := c.Login("admin", "secret", "10.0.0.1", "test-agent", false)
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestChecker_DBAuth(t *testing.T) {
 	defer checker.Close()
 
 	// Valid login
-	session, err := checker.Login("admin", "secret", "127.0.0.1", "test")
+	session, err := checker.Login("admin", "secret", "127.0.0.1", "test", false)
 	if err != nil {
 		t.Fatalf("Login should succeed: %v", err)
 	}
@@ -189,13 +190,13 @@ func TestChecker_DBAuth(t *testing.T) {
 	}
 
 	// Invalid password
-	_, err = checker.Login("admin", "wrong", "127.0.0.1", "test")
+	_, err = checker.Login("admin", "wrong", "127.0.0.1", "test", false)
 	if err == nil {
 		t.Error("Login with wrong password should fail")
 	}
 
 	// Unknown user
-	_, err = checker.Login("nobody", "secret", "127.0.0.1", "test")
+	_, err = checker.Login("nobody", "secret", "127.0.0.1", "test", false)
 	if err == nil {
 		t.Error("Login with unknown user should fail")
 	}
@@ -221,7 +222,7 @@ func TestChangePassword(t *testing.T) {
 	}
 
 	// Login with new password succeeds
-	session, err := checker.Login("admin", "newpassword123", "127.0.0.1", "test")
+	session, err := checker.Login("admin", "newpassword123", "127.0.0.1", "test", false)
 	if err != nil {
 		t.Fatalf("Login with new password should succeed: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestChangePassword(t *testing.T) {
 	}
 
 	// Login with old password fails
-	_, err = checker.Login("admin", "oldpassword", "127.0.0.1", "test")
+	_, err = checker.Login("admin", "oldpassword", "127.0.0.1", "test", false)
 	if err == nil {
 		t.Error("Login with old password should fail after change")
 	}
@@ -256,6 +257,95 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 	}
 	if err != ErrInvalidCredentials {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestLoginRememberMe(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storage.New(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	defer db.Close()
+
+	hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	db.SaveAuthUser("admin", string(hash))
+
+	checker := NewFromDB(config.APIConfig{Exposure: "lan"}, db)
+	defer checker.Close()
+
+	// Login with remember=true: 30-day expiry
+	session, err := checker.Login("admin", "secret", "127.0.0.1", "test", true)
+	if err != nil {
+		t.Fatalf("Login with remember=true should succeed: %v", err)
+	}
+	expectedExpiry := 30 * 24 * time.Hour
+	actualExpiry := session.ExpiresAt.Sub(session.CreatedAt)
+	if actualExpiry < expectedExpiry-time.Second || actualExpiry > expectedExpiry+time.Second {
+		t.Errorf("remember session expiry = %v, want ~%v", actualExpiry, expectedExpiry)
+	}
+	if session.IdleTTL != 7*24*time.Hour {
+		t.Errorf("remember session idle TTL = %v, want %v", session.IdleTTL, 7*24*time.Hour)
+	}
+
+	// Login with remember=false: 12-hour expiry
+	session2, err := checker.Login("admin", "secret", "127.0.0.1", "test", false)
+	if err != nil {
+		t.Fatalf("Login with remember=false should succeed: %v", err)
+	}
+	expectedExpiry2 := 12 * time.Hour
+	actualExpiry2 := session2.ExpiresAt.Sub(session2.CreatedAt)
+	if actualExpiry2 < expectedExpiry2-time.Second || actualExpiry2 > expectedExpiry2+time.Second {
+		t.Errorf("standard session expiry = %v, want ~%v", actualExpiry2, expectedExpiry2)
+	}
+	if session2.IdleTTL != 30*time.Minute {
+		t.Errorf("standard session idle TTL = %v, want %v", session2.IdleTTL, 30*time.Minute)
+	}
+}
+
+func TestRememberSessionIdleTTL(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storage.New(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	defer db.Close()
+
+	hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	db.SaveAuthUser("admin", string(hash))
+
+	checker := NewFromDB(config.APIConfig{Exposure: "lan"}, db)
+	defer checker.Close()
+
+	// Create a remember session
+	session, err := checker.Login("admin", "secret", "127.0.0.1", "test", true)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// Verify the session can be retrieved and has correct idle TTL
+	retrieved, err := db.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if retrieved.IdleTTL != 7*24*time.Hour {
+		t.Errorf("stored idle TTL = %v, want %v", retrieved.IdleTTL, 7*24*time.Hour)
+	}
+
+	// Authenticate with the session via HTTP request
+	rr := httptest.NewRecorder()
+	checker.SetSessionCookies(rr, httptest.NewRequest(http.MethodGet, "http://vedetta.local/", nil), session)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	for _, cookie := range rr.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	principal, err := checker.Authenticate(req)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if principal == nil || principal.Username != "admin" {
+		t.Fatalf("expected admin principal, got %+v", principal)
 	}
 }
 

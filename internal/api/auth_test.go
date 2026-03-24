@@ -86,7 +86,7 @@ func TestAuthMiddleware_AllowsSessionAndEnforcesCSRF(t *testing.T) {
 	srv, checker := newTestServerAuth(t)
 	handler := authMiddleware(srv, okHandler)
 
-	session, err := checker.Login("admin", "secret", "10.0.0.1", "agent")
+	session, err := checker.Login("admin", "secret", "10.0.0.1", "agent", false)
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}

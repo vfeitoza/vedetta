@@ -29,6 +29,8 @@ const (
 	CSRFCookieName     = "vedetta_csrf"
 	SessionAbsoluteTTL = 12 * time.Hour
 	SessionIdleTTL     = 30 * time.Minute
+	RememberAbsoluteTTL = 30 * 24 * time.Hour // 30 days
+	RememberIdleTTL     = 7 * 24 * time.Hour  // 7 days
 )
 
 const (
@@ -216,7 +218,7 @@ func (c *Checker) ChangePassword(username, currentPassword, newPassword string) 
 	return nil
 }
 
-func (c *Checker) Login(user, pass, remoteIP, userAgent string) (*storage.AuthSession, error) {
+func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (*storage.AuthSession, error) {
 	if c == nil {
 		return nil, ErrInvalidCredentials
 	}
@@ -243,6 +245,13 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string) (*storage.AuthSe
 		return nil, err
 	}
 
+	absoluteTTL := SessionAbsoluteTTL
+	idleTTL := SessionIdleTTL
+	if remember {
+		absoluteTTL = RememberAbsoluteTTL
+		idleTTL = RememberIdleTTL
+	}
+
 	now := time.Now().UTC()
 	session := &storage.AuthSession{
 		ID:         sessionID,
@@ -252,13 +261,14 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string) (*storage.AuthSe
 		UserAgent:  userAgent,
 		CreatedAt:  now,
 		LastSeenAt: now,
-		ExpiresAt:  now.Add(SessionAbsoluteTTL),
+		ExpiresAt:  now.Add(absoluteTTL),
+		IdleTTL:    idleTTL,
 	}
 	if err := c.db.CreateSession(*session); err != nil {
 		return nil, err
 	}
 
-	slog.Info("login succeeded", "username", user, "ip", remoteIP)
+	slog.Info("login succeeded", "username", user, "ip", remoteIP, "remember", remember)
 	return session, nil
 }
 
@@ -302,7 +312,11 @@ func (c *Checker) authenticateSession(r *http.Request) (*Principal, error) {
 	}
 
 	now := time.Now().UTC()
-	if now.After(session.ExpiresAt) || now.Sub(session.LastSeenAt) > SessionIdleTTL {
+	idleTTL := session.IdleTTL
+	if idleTTL <= 0 {
+		idleTTL = SessionIdleTTL
+	}
+	if now.After(session.ExpiresAt) || now.Sub(session.LastSeenAt) > idleTTL {
 		_ = c.db.DeleteSession(session.ID)
 		return nil, nil
 	}

@@ -222,6 +222,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE people ADD COLUMN source_event_id TEXT")
 	_, _ = db.Exec("ALTER TABLE known_objects ADD COLUMN match_threshold REAL")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN sub_label TEXT")
+	_, _ = db.Exec("ALTER TABLE auth_sessions ADD COLUMN idle_ttl_seconds INTEGER NOT NULL DEFAULT 1800")
 
 	// Normalize timestamps to UTC RFC3339 format for consistent SQLite comparisons.
 	// The modernc.org/sqlite driver stores time.Time using Go's String() which includes
@@ -1226,6 +1227,7 @@ type AuthSession struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+	IdleTTL    time.Duration
 }
 
 type APIToken struct {
@@ -1241,22 +1243,27 @@ type APIToken struct {
 }
 
 func (d *DB) CreateSession(session AuthSession) error {
+	idleSecs := int64(session.IdleTTL.Seconds())
+	if idleSecs <= 0 {
+		idleSecs = 1800 // default 30 minutes
+	}
 	_, err := d.db.Exec(`
-		INSERT INTO auth_sessions (id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO auth_sessions (id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at, idle_ttl_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID, session.Username, session.CSRFToken, nullString(session.RemoteIP), nullString(session.UserAgent),
-		utc(session.CreatedAt), utc(session.LastSeenAt), utc(session.ExpiresAt),
+		utc(session.CreatedAt), utc(session.LastSeenAt), utc(session.ExpiresAt), idleSecs,
 	)
 	return err
 }
 
 func (d *DB) GetSession(id string) (*AuthSession, error) {
 	row := d.db.QueryRow(`
-		SELECT id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at
+		SELECT id, username, csrf_token, remote_ip, user_agent, created_at, last_seen_at, expires_at, idle_ttl_seconds
 		FROM auth_sessions WHERE id = ?`, id)
 	var session AuthSession
 	var remoteIP, userAgent sql.NullString
-	err := row.Scan(&session.ID, &session.Username, &session.CSRFToken, &remoteIP, &userAgent, &session.CreatedAt, &session.LastSeenAt, &session.ExpiresAt)
+	var idleSecs int64
+	err := row.Scan(&session.ID, &session.Username, &session.CSRFToken, &remoteIP, &userAgent, &session.CreatedAt, &session.LastSeenAt, &session.ExpiresAt, &idleSecs)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1265,6 +1272,7 @@ func (d *DB) GetSession(id string) (*AuthSession, error) {
 	}
 	session.RemoteIP = remoteIP.String
 	session.UserAgent = userAgent.String
+	session.IdleTTL = time.Duration(idleSecs) * time.Second
 	return &session, nil
 }
 
@@ -1279,7 +1287,10 @@ func (d *DB) DeleteSession(id string) error {
 }
 
 func (d *DB) DeleteExpiredSessions(now time.Time) error {
-	_, err := d.db.Exec("DELETE FROM auth_sessions WHERE expires_at <= ? OR last_seen_at <= ?", utc(now), utc(now.Add(-30*time.Minute)))
+	_, err := d.db.Exec(`DELETE FROM auth_sessions
+		WHERE expires_at <= ?
+		   OR (julianday(?) - julianday(last_seen_at)) * 86400 > idle_ttl_seconds`,
+		utc(now), utc(now))
 	return err
 }
 

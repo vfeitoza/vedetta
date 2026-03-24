@@ -104,13 +104,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
 
-	session, err := s.auth.Login(req.Username, req.Password, s.auth.ClientIP(r), r.UserAgent())
+	session, err := s.auth.Login(req.Username, req.Password, s.auth.ClientIP(r), r.UserAgent(), req.Remember)
 	switch err {
 	case nil:
 	case auth.ErrRateLimited:

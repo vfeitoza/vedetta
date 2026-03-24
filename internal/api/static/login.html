@@ -99,6 +99,10 @@
       <input id="username" name="username" autocomplete="username" required>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;cursor:pointer;font-size:0.92rem;color:var(--muted)">
+        <input type="checkbox" id="remember" checked style="accent-color:var(--accent);width:16px;height:16px">
+        Remember me
+      </label>
       <button id="submit" type="submit">Sign In</button>
       <div class="status" id="status"></div>
     </form>
@@ -126,7 +130,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username: document.getElementById('username').value.trim(),
-            password: document.getElementById('password').value
+            password: document.getElementById('password').value,
+            remember: document.getElementById('remember').checked
           })
         })
           .then(function(resp) {
