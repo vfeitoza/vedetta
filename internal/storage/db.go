@@ -198,6 +198,13 @@ func migrate(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_object_references_object ON object_references(object_id);
+
+		CREATE TABLE IF NOT EXISTS auth_users (
+			username TEXT PRIMARY KEY,
+			password_hash TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	if err != nil {
 		return err
@@ -1326,6 +1333,56 @@ func (d *DB) TouchAPIToken(id int64, lastUsed time.Time) error {
 func (d *DB) RevokeAPIToken(id int64, username string) error {
 	_, err := d.db.Exec("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND username = ?", utc(time.Now()), id, username)
 	return err
+}
+
+// --- Auth User operations ---
+
+// AuthUser represents a user stored in the database for authentication.
+type AuthUser struct {
+	Username     string
+	PasswordHash string
+}
+
+// SaveAuthUser creates or updates an auth user. If the username already exists,
+// the password hash and updated_at timestamp are overwritten.
+func (d *DB) SaveAuthUser(username, passwordHash string) error {
+	_, err := d.db.Exec(`
+		INSERT INTO auth_users (username, password_hash)
+		VALUES (?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			password_hash = excluded.password_hash,
+			updated_at = CURRENT_TIMESTAMP`,
+		username, passwordHash,
+	)
+	return err
+}
+
+// SeedAuthUser inserts a user only if the username does not already exist.
+// This preserves any password changes made through the UI/API.
+func (d *DB) SeedAuthUser(username, passwordHash string) error {
+	_, err := d.db.Exec(`INSERT OR IGNORE INTO auth_users (username, password_hash) VALUES (?, ?)`,
+		username, passwordHash,
+	)
+	return err
+}
+
+// ListAuthUsers returns all auth users ordered by username.
+func (d *DB) ListAuthUsers() ([]AuthUser, error) {
+	rows, err := d.db.Query("SELECT username, password_hash FROM auth_users ORDER BY username")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []AuthUser
+	for rows.Next() {
+		var u AuthUser
+		if err := rows.Scan(&u.Username, &u.PasswordHash); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
 }
 
 func scanFaces(rows *sql.Rows) ([]Face, error) {

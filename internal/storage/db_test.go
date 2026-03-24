@@ -983,6 +983,77 @@ func TestMigration_AddsEndTimeColumn(t *testing.T) {
 	}
 }
 
+// --- Auth Users ---
+
+func TestAuthUsers(t *testing.T) {
+	db := newTestDB(t)
+
+	// 1. SaveAuthUser creates a user, ListAuthUsers returns it
+	if err := db.SaveAuthUser("alice", "hash1"); err != nil {
+		t.Fatalf("SaveAuthUser(alice): %v", err)
+	}
+	users, err := db.ListAuthUsers()
+	if err != nil {
+		t.Fatalf("ListAuthUsers: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("got %d users, want 1", len(users))
+	}
+	if users[0].Username != "alice" || users[0].PasswordHash != "hash1" {
+		t.Errorf("got user %+v, want alice/hash1", users[0])
+	}
+
+	// 2. SaveAuthUser again with same username updates the hash (no duplicate)
+	if err := db.SaveAuthUser("alice", "hash2"); err != nil {
+		t.Fatalf("SaveAuthUser(alice, hash2): %v", err)
+	}
+	users, err = db.ListAuthUsers()
+	if err != nil {
+		t.Fatalf("ListAuthUsers after update: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("got %d users after update, want 1", len(users))
+	}
+	if users[0].PasswordHash != "hash2" {
+		t.Errorf("password_hash = %q, want %q", users[0].PasswordHash, "hash2")
+	}
+
+	// 3. SeedAuthUser on existing user does NOT overwrite
+	if err := db.SeedAuthUser("alice", "hash3"); err != nil {
+		t.Fatalf("SeedAuthUser(alice, hash3): %v", err)
+	}
+	users, err = db.ListAuthUsers()
+	if err != nil {
+		t.Fatalf("ListAuthUsers after seed existing: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("got %d users after seed, want 1", len(users))
+	}
+	if users[0].PasswordHash != "hash2" {
+		t.Errorf("SeedAuthUser overwrote existing: password_hash = %q, want %q", users[0].PasswordHash, "hash2")
+	}
+
+	// 4. SeedAuthUser on new user inserts it
+	if err := db.SeedAuthUser("bob", "bobhash"); err != nil {
+		t.Fatalf("SeedAuthUser(bob): %v", err)
+	}
+	users, err = db.ListAuthUsers()
+	if err != nil {
+		t.Fatalf("ListAuthUsers after seed new: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("got %d users after seed new, want 2", len(users))
+	}
+
+	// 5. After all operations, ListAuthUsers returns correct count and order
+	if users[0].Username != "alice" {
+		t.Errorf("users[0].Username = %q, want alice", users[0].Username)
+	}
+	if users[1].Username != "bob" {
+		t.Errorf("users[1].Username = %q, want bob", users[1].Username)
+	}
+}
+
 func TestNew_WALModeIsSet(t *testing.T) {
 	db := newTestDB(t)
 
