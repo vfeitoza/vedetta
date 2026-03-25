@@ -2790,8 +2790,8 @@ setInterval(pollHealth, 30000);
 // ─── Event Detail: Play Clip on Demand ───
 function playEventClip(overlay, eventId) {
   var media = overlay.parentElement;
-  var img = media.querySelector('#event-snapshot');
-  if (img) img.style.display = 'none';
+  var wrap = media.querySelector('#detection-wrap');
+  if (wrap) wrap.style.display = 'none';
   overlay.style.display = 'none';
 
   var video = document.createElement('video');
@@ -2803,8 +2803,8 @@ function playEventClip(overlay, eventId) {
 
 function playEventRecording(overlay, cameraName, timestamp) {
   var media = overlay.parentElement;
-  var img = media.querySelector('#event-snapshot');
-  if (img) img.style.display = 'none';
+  var wrap = media.querySelector('#detection-wrap');
+  if (wrap) wrap.style.display = 'none';
   overlay.style.display = 'none';
 
   var video = document.createElement('video');
