@@ -1143,8 +1143,8 @@ function renderWaveform(activity, events, segments) {
     segments.forEach(function(seg) {
       var start = new Date(seg.start_time);
       var end = new Date(seg.end_time);
-      var startMin = start.getUTCHours() * 60 + start.getUTCMinutes();
-      var endMin = end.getUTCHours() * 60 + end.getUTCMinutes();
+      var startMin = start.getHours() * 60 + start.getMinutes();
+      var endMin = end.getHours() * 60 + end.getMinutes();
       for (var m = startMin; m <= endMin && m < 1440; m++) {
         hasCoverage[m] = 1;
       }
@@ -1156,7 +1156,7 @@ function renderWaveform(activity, events, segments) {
   if (activity) {
     activity.forEach(function(a) {
       var d = new Date(a.t);
-      var minute = d.getUTCHours() * 60 + d.getUTCMinutes();
+      var minute = d.getHours() * 60 + d.getMinutes();
       if (minute >= 0 && minute < 1440) {
         scores[minute] = a.s;
       }
