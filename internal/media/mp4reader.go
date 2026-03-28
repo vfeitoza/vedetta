@@ -829,10 +829,25 @@ func ServeHLSSegment(w io.Writer, filePath string, byteStart, byteEnd int64) err
 		return fmt.Errorf("unmarshal fmp4: %w", err)
 	}
 
-	// Re-marshal: the fmp4 library writes clean moof+mdat pairs that
-	// browsers can consume via MSE.
+	// Split multi-track Parts into separate single-track Parts.
+	// Browsers reject multi-traf moofs (video+audio in one moof) via MSE.
+	// Each track gets its own moof+mdat pair.
+	var singleTrackParts fmp4.Parts
+	for _, p := range parts {
+		if len(p.Tracks) <= 1 {
+			singleTrackParts = append(singleTrackParts, p)
+		} else {
+			for _, tr := range p.Tracks {
+				singleTrackParts = append(singleTrackParts, &fmp4.Part{
+					SequenceNumber: p.SequenceNumber,
+					Tracks:         []*fmp4.PartTrack{tr},
+				})
+			}
+		}
+	}
+
 	ws := &writeSeeker{buf: &bytes.Buffer{}}
-	if err := parts.Marshal(ws); err != nil {
+	if err := singleTrackParts.Marshal(ws); err != nil {
 		return fmt.Errorf("marshal fmp4: %w", err)
 	}
 
