@@ -12,13 +12,14 @@ let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
 let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
 let playbackOffset = 0; // offset into segment where playback begins
+let playbackHls = null; // Hls instance for recording playback
 let timelineDragging = false; // true during timeline drag
 var cachedSegments = []; // raw segment data from API
 var cachedActivity = [];
 var cachedTimelineEvents = [];
 var mergedBlocks = []; // merged blocks {start: sec, end: sec} for hit-testing
 var eventBarSnaps = []; // per-bar: nearest event start in seconds-of-day, or -1
-let timelineDate = new Date();
+let timelineDate = null;
 let calendarDate = new Date();
 
 // ─── Helpers ───
@@ -475,10 +476,10 @@ function updatePauseUI() {
   if (pauseIcon) pauseIcon.style.display = userPaused ? 'none' : '';
   if (playIcon) playIcon.style.display = userPaused ? '' : 'none';
 
-  // Update LIVE button state
+  // Update LIVE button state (never "live" during playback)
   var liveBtn = el('btn-go-live');
   if (liveBtn) {
-    var atLive = !userPaused && !isBehindLive();
+    var atLive = !playbackMode && !userPaused && !isBehindLive();
     liveBtn.classList.toggle('is-live', atLive);
   }
 
@@ -795,7 +796,7 @@ function updateFullscreenIcon() {
 
 // ─── Timeline ───
 function initTimeline() {
-  timelineDate = new Date();
+  if (!timelineDate) timelineDate = new Date();
   updateTimelineDate();
   updatePlayheadToNow();
   fetchTimelineData();
@@ -1376,108 +1377,100 @@ function refreshBirdseye() {
 })();
 
 // ─── Playback ───
+function cleanupPlaybackHls() {
+  if (playbackHls) {
+    playbackHls.destroy();
+    playbackHls = null;
+  }
+}
+
 function startPlayback(timestamp) {
   var name = getCameraName();
   if (!name) return;
 
   var isoStr = timestamp.toISOString();
-  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback?start=' + encodeURIComponent(isoStr);
+  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback.m3u8?start=' + encodeURIComponent(isoStr);
 
-  // Stop any live stream first
   if (currentStream) {
     stopStream();
   }
+  cleanupPlaybackHls();
 
   var video = el('live-video');
   if (!video) return;
 
-  // Check if segment exists before loading video
-  fetch(url, { method: 'HEAD' })
-    .then(function(resp) {
-      if (!resp.ok) {
-        if (resp.status === 404) {
+  playbackOffset = 0;
+  playbackStartTime = timestamp;
+
+  video.muted = true;
+  video.playsInline = true;
+  video.classList.remove('hidden');
+  hide('live-snapshot');
+  hide('live-mjpeg');
+
+  updateMuteButton(true);
+
+  video.ontimeupdate = function() {
+    updatePlayheadForPlayback(video.currentTime);
+  };
+
+  video.onended = function() {
+    returnToLive();
+  };
+
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    // Chrome/Firefox/Edge: hls.js
+    var hls = new Hls({
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120,
+      maxBufferSize: 60 * 1000 * 1000,
+      maxBufferHole: 0.5,
+    });
+    playbackHls = hls;
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      video.play().catch(function() {});
+    });
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      console.error('HLS error:', data.type, data.details, data.fatal, data.response ? data.response.code : '');
+      if (data.fatal) {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response && data.response.code === 404) {
           toast('No recording found for this timestamp', 'error');
         } else {
-          toast('Playback error: ' + resp.status, 'error');
+          toast('Playback error: ' + data.details, 'error');
         }
+        hls.destroy();
+        playbackHls = null;
         updatePlayheadToNow();
-        return;
-      }
-
-      // Server trims the fMP4 to start at the requested time,
-      // so playback starts at the clicked position directly.
-      playbackOffset = 0;
-      playbackStartTime = timestamp;
-
-      video.srcObject = null;
-      video.src = url;
-      video.muted = false;
-      video.autoplay = true;
-      video.classList.remove('hidden');
-      hide('live-snapshot');
-      hide('live-mjpeg');
-
-      video.onloadedmetadata = function() {
-        video.play().catch(function() {});
-      };
-
-      video.ontimeupdate = function() {
-        updatePlayheadForPlayback(video.currentTime);
-      };
-
-      video.onended = function() {
-        playNextSegment();
-      };
-
-      playbackMode = true;
-      updatePlaybackUI();
-      toast('Playing recording from ' + timestamp.toLocaleTimeString());
-    })
-    .catch(function(err) {
-      toast('Playback failed: ' + err.message, 'error');
-    });
-}
-
-function playNextSegment() {
-  if (!playbackStartTime || !playbackMode) {
-    returnToLive();
-    return;
-  }
-
-  var video = el('live-video');
-  if (!video) { returnToLive(); return; }
-
-  // Calculate where the current segment ended in wall-clock time
-  var elapsed = video.duration || 0;
-  var nextTime = new Date(playbackStartTime.getTime() + elapsed * 1000);
-
-  // Don't play past current time
-  if (nextTime >= new Date()) {
-    returnToLive();
-    return;
-  }
-
-  var name = getCameraName();
-  var nextISO = nextTime.toISOString();
-  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback?start=' + encodeURIComponent(nextISO);
-
-  fetch(url, { method: 'HEAD' })
-    .then(function(resp) {
-      if (!resp.ok) {
         returnToLive();
-        return;
       }
-
-      playbackStartTime = nextTime;
-      video.src = url;
-      video.play().catch(function() {});
-    })
-    .catch(function() {
-      returnToLive();
     });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari/iOS: native HLS (hls.js not needed)
+    video.src = url;
+    video.autoplay = true;
+    video.onerror = function() {
+      video.onerror = null; // prevent repeated fires
+      toast('No recording found for this timestamp', 'error');
+      updatePlayheadToNow();
+      returnToLive();
+    };
+    video.onloadedmetadata = function() {
+      video.play().catch(function() {});
+    };
+  } else {
+    toast('HLS playback not supported in this browser', 'error');
+    return;
+  }
+
+  playbackMode = true;
+  updatePlaybackUI();
+  toast('Playing recording from ' + timestamp.toLocaleTimeString());
 }
 
 function returnToLive() {
+  cleanupPlaybackHls();
   var video = el('live-video');
   if (video) {
     video.pause();
@@ -1512,6 +1505,10 @@ function updatePlaybackUI() {
   if (toolbar) toolbar.classList.toggle('hidden', !playbackMode);
   if (pbBadge) pbBadge.classList.toggle('hidden', !playbackMode);
   if (btnLive) btnLive.classList.toggle('hidden', !playbackMode);
+
+  // Grey out the LIVE button in video controls during playback
+  var goLiveBtn = el('btn-go-live');
+  if (goLiveBtn) goLiveBtn.classList.toggle('is-live', !playbackMode);
 }
 
 function updatePlayheadForPlayback(currentTime) {
@@ -1971,14 +1968,17 @@ initTheme();
 // ─── Connection Status ───
 var connDebounceTimer = null;
 
-function setConnStatus(ok) {
+function setConnStatus(status, detail) {
   var dot = document.getElementById('conn-dot');
   var label = document.getElementById('conn-label');
   if (!dot || !label) return;
 
-  if (ok) {
+  if (status === 'ok') {
     dot.className = 'conn-dot ok';
     label.textContent = 'Connected';
+  } else if (status === 'degraded') {
+    dot.className = 'conn-dot warn';
+    label.textContent = detail || 'Degraded';
   } else {
     dot.className = 'conn-dot error';
     label.textContent = 'Reconnecting...';
@@ -1987,23 +1987,43 @@ function setConnStatus(ok) {
 
 document.addEventListener('htmx:sendError', function() {
   clearTimeout(connDebounceTimer);
-  setConnStatus(false);
+  setConnStatus('error');
 });
 
 document.addEventListener('htmx:responseError', function(e) {
   console.error('HTMX error:', e.detail);
   clearTimeout(connDebounceTimer);
-  setConnStatus(false);
+  setConnStatus('error');
 });
 
 document.addEventListener('htmx:afterRequest', function(e) {
   if (!e.detail.failed) {
     clearTimeout(connDebounceTimer);
     connDebounceTimer = setTimeout(function() {
-      setConnStatus(true);
+      setConnStatus('ok');
     }, 300);
   }
 });
+
+// ─── Health Check: detect degraded services ───
+(function pollHealth() {
+  function check() {
+    fetch('/api/health')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'degraded') {
+          var issues = [];
+          if (data.checks && data.checks.mqtt === 'disconnected') issues.push('MQTT disconnected');
+          if (data.checks && data.checks.storage && data.checks.storage.disk_low) issues.push('Disk low');
+          if (data.checks && data.checks.database === 'error') issues.push('DB error');
+          setConnStatus('degraded', issues.join(', ') || 'Degraded');
+        }
+      })
+      .catch(function() {});
+  }
+  check();
+  setInterval(check, 60000);
+})();
 
 // ─── Page visibility: pause updates when hidden ───
 document.addEventListener('visibilitychange', function() {
@@ -2309,23 +2329,34 @@ function startPlayheadAnimation() {
   if (playheadRAF) cancelAnimationFrame(playheadRAF);
 
   function tick() {
+    var now = new Date();
+    var today = new Date();
+    var isToday = timelineDate.toDateString() === today.toDateString();
+    var nowPct = isToday ? (now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60) / (24 * 60) * 100 : -1;
+
+    // During playback: show a "now" marker so user knows where current time is
+    var nowMarker = el('timeline-now-marker');
+    if (nowMarker) {
+      if (playbackMode && isToday && nowPct >= 0) {
+        nowMarker.style.left = nowPct + '%';
+        nowMarker.style.display = '';
+      } else {
+        nowMarker.style.display = 'none';
+      }
+    }
+
     if (!playbackMode && !timelineDragging) {
       var playhead = el('timeline-playhead');
-      if (playhead) {
-        var now = new Date();
-        var today = new Date();
-        if (timelineDate.toDateString() === today.toDateString()) {
-          var pct = (now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60) / (24 * 60) * 100;
-          playhead.style.left = pct + '%';
-          playhead.style.display = '';
+      if (playhead && isToday) {
+        playhead.style.left = nowPct + '%';
+        playhead.style.display = '';
+      }
 
-          // Refresh timeline segments every 30s so blue bars stay current
-          var ts = Date.now();
-          if (ts - lastTimelineRefresh > 30000) {
-            lastTimelineRefresh = ts;
-            fetchTimelineData();
-          }
-        }
+      // Refresh timeline segments every 30s so blue bars stay current
+      var ts = Date.now();
+      if (ts - lastTimelineRefresh > 30000) {
+        lastTimelineRefresh = ts;
+        fetchTimelineData();
       }
     }
     playheadRAF = requestAnimationFrame(tick);
@@ -2978,6 +3009,8 @@ function playEventClip(overlay, eventId) {
   var video = document.createElement('video');
   video.controls = true;
   video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
   video.src = '/api/events/' + encodeURIComponent(eventId) + '/clip';
   media.appendChild(video);
 }
@@ -2991,6 +3024,8 @@ function playEventRecording(overlay, cameraName, timestamp) {
   var video = document.createElement('video');
   video.controls = true;
   video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
   video.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback?start=' + encodeURIComponent(timestamp);
   media.appendChild(video);
 }

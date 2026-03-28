@@ -30,7 +30,7 @@
       <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
     </button>
     <div class="topnav-spacer"></div>
-    <div class="conn-status"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></div>
+    <a href="/system.html" class="conn-status" title="System health"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></a>
   </nav>
 
   <main class="page">
@@ -147,6 +147,7 @@
         <div class="timeline-track" id="timeline-track" role="slider" aria-label="Recording timeline" tabindex="0">
           <canvas id="timeline-canvas"></canvas>
           <div class="timeline-playhead" id="timeline-playhead" style="left: 50%"></div>
+          <div class="timeline-now-marker" id="timeline-now-marker" style="display:none"></div>
         </div>
         <div class="timeline-labels">
           <span>00:00</span><span>03:00</span><span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
@@ -275,6 +276,7 @@
   </div>
 
   <div class="toast-container" id="toasts"></div>
+  <script src="/hls.min.js"></script>
   <script src="/app.js"></script>
   <script>
     (function() {
@@ -300,7 +302,18 @@
       eventsEl.setAttribute('hx-trigger', 'load');
       htmx.process(eventsEl);
 
-      // Timeline date
+      // Auto-playback if ?t= parameter is present (from recordings page)
+      const playbackTime = new URLSearchParams(location.search).get('t');
+      if (playbackTime) {
+        const ts = new Date(playbackTime);
+        if (!isNaN(ts.getTime())) {
+          // Set timeline date BEFORE initTimeline so it fetches the right day
+          timelineDate = new Date(ts);
+          timelineDate.setHours(0, 0, 0, 0);
+        }
+      }
+
+      // Timeline date (uses timelineDate set above, or defaults to today)
       initTimeline();
 
       // Zones
@@ -309,13 +322,9 @@
       initPTZ(name);
       initViewportPause();
 
-      // Auto-playback if ?t= parameter is present (from recordings page)
-      const playbackTime = new URLSearchParams(location.search).get('t');
       if (playbackTime) {
         const ts = new Date(playbackTime);
         if (!isNaN(ts.getTime())) {
-          // Set timeline to that day and start playback after a short delay
-          timelineDate = new Date(ts);
           setTimeout(function() { startPlayback(ts); }, 500);
         }
       } else {

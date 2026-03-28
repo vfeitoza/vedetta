@@ -483,7 +483,9 @@ func (d *DB) SaveMotionActivity(camera string, bucket time.Time, score float64) 
 func (d *DB) GetMotionActivity(camera string, date time.Time) ([]MotionBucket, error) {
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	rows, err := d.db.Query("SELECT bucket, score FROM motion_activity WHERE camera = ? AND bucket >= ? AND bucket < ? ORDER BY bucket", camera, dayStart, dayEnd)
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query("SELECT bucket, score FROM motion_activity WHERE camera = ? AND replace(bucket, 'T', ' ') >= ? AND replace(bucket, 'T', ' ') < ? ORDER BY bucket",
+		camera, dayStart.Format(layout), dayEnd.Format(layout))
 	if err != nil {
 		return nil, err
 	}
@@ -507,10 +509,15 @@ func (d *DB) DeleteMotionActivityBefore(cutoff time.Time) error {
 
 // QuerySegments returns segments for a camera that overlap the given time range.
 func (d *DB) QuerySegments(cameraName string, from, to time.Time) ([]SegmentRecord, error) {
+	// Use replace() to normalize the stored timestamps so that string comparison
+	// works regardless of whether they were stored in Go's String() format
+	// ("2006-01-02 15:04:05 +0000 UTC") or RFC3339 ("2006-01-02T15:04:05Z").
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes
 		FROM segments
-		WHERE camera = ? AND start_time < ? AND end_time > ?
+		WHERE camera = ?
+		  AND replace(start_time, 'T', ' ') < replace(?, 'T', ' ')
+		  AND replace(end_time, 'T', ' ') > replace(?, 'T', ' ')
 		ORDER BY start_time`,
 		cameraName, utc(to), utc(from),
 	)
@@ -562,11 +569,26 @@ func (d *DB) GetSegmentByPath(path string) (*SegmentRecord, error) {
 	return &seg, nil
 }
 
+// GetSegmentByID returns a single segment record by its primary key, or nil if not found.
+func (d *DB) GetSegmentByID(id int64) (*SegmentRecord, error) {
+	row := d.db.QueryRow(
+		`SELECT id, camera, path, start_time, end_time, size_bytes FROM segments WHERE id = ?`, id)
+	var s SegmentRecord
+	err := row.Scan(&s.ID, &s.Camera, &s.Path, &s.StartTime, &s.EndTime, &s.SizeBytes)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 // CountEventsToday returns the number of events with timestamp >= today midnight UTC.
 func (d *DB) CountEventsToday() (int, error) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM events WHERE timestamp >= ?", today).Scan(&count)
+	err := d.db.QueryRow("SELECT COUNT(*) FROM events WHERE replace(timestamp, 'T', ' ') >= ?", today.Format("2006-01-02 15:04:05")).Scan(&count)
 	return count, err
 }
 
@@ -619,23 +641,29 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
+	// Use replace() to normalize timestamps for comparison — the DB may store
+	// timestamps in Go's String() format or RFC3339 format.
+	const layout = "2006-01-02 15:04:05"
+	dayStartStr := dayStart.Format(layout)
+	dayEndStr := dayEnd.Format(layout)
+
 	var rows *sql.Rows
 	var err error
 	if cameraName != "" {
 		rows, err = d.db.Query(`
 			SELECT id, camera, path, start_time, end_time, size_bytes
 			FROM segments
-			WHERE camera = ? AND start_time >= ? AND start_time < ?
+			WHERE camera = ? AND replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
 			ORDER BY start_time`,
-			cameraName, dayStart, dayEnd,
+			cameraName, dayStartStr, dayEndStr,
 		)
 	} else {
 		rows, err = d.db.Query(`
 			SELECT id, camera, path, start_time, end_time, size_bytes
 			FROM segments
-			WHERE start_time >= ? AND start_time < ?
+			WHERE replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
 			ORDER BY start_time`,
-			dayStart, dayEnd,
+			dayStartStr, dayEndStr,
 		)
 	}
 	if err != nil {
@@ -651,12 +679,13 @@ func (d *DB) QueryEventsForDate(cameraName string, date time.Time) ([]camera.Eve
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
+	const evLayout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
 		FROM events
-		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
+		WHERE camera = ? AND replace(timestamp, 'T', ' ') >= ? AND replace(timestamp, 'T', ' ') < ?
 		ORDER BY timestamp`,
-		cameraName, dayStart, dayEnd,
+		cameraName, dayStart.Format(evLayout), dayEnd.Format(evLayout),
 	)
 	if err != nil {
 		return nil, err
@@ -719,20 +748,24 @@ func (d *DB) GetRecordingDays(camera string, year int, month int) ([]int, error)
 	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
+	const layout = "2006-01-02 15:04:05"
+	startStr := monthStart.Format(layout)
+	endStr := monthEnd.Format(layout)
+
 	var rows *sql.Rows
 	var err error
 	if camera != "" {
 		rows, err = d.db.Query(`
 			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
 			FROM segments
-			WHERE camera = ? AND start_time >= ? AND start_time < ?
-			ORDER BY day`, camera, monthStart, monthEnd)
+			WHERE camera = ? AND replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
+			ORDER BY day`, camera, startStr, endStr)
 	} else {
 		rows, err = d.db.Query(`
 			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
 			FROM segments
-			WHERE start_time >= ? AND start_time < ?
-			ORDER BY day`, monthStart, monthEnd)
+			WHERE replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
+			ORDER BY day`, startStr, endStr)
 	}
 	if err != nil {
 		return nil, err
