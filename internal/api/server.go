@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"html/template"
 	"image"
 	"image/draw"
@@ -1408,9 +1410,51 @@ func (s *Server) handleSegmentInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The init segment is the ftyp+moov at the start of the file.
-	// http.ServeFile with Range header handles this via the BYTERANGE in the playlist.
-	http.ServeFile(w, r, seg.Path)
+	// Read just the ftyp+moov init segment from the start of the file.
+	// Served directly (not via byte-range) for Safari/iOS native HLS compatibility.
+	f, err := os.Open(seg.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "open segment file"})
+		return
+	}
+	defer f.Close()
+
+	// Read the init segment size by scanning ftyp+moov box headers
+	var initSize int64
+	for {
+		var hdr [8]byte
+		if _, err := io.ReadFull(f, hdr[:]); err != nil {
+			break
+		}
+		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
+		boxType := string(hdr[4:8])
+		if boxType == "moof" || boxType == "mdat" {
+			break // past init segment
+		}
+		initSize += boxSize
+		if _, err := f.Seek(initSize, io.SeekStart); err != nil {
+			break
+		}
+	}
+	if initSize == 0 {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no init segment found"})
+		return
+	}
+
+	// Read and serve the init bytes
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "seek failed"})
+		return
+	}
+	initData := make([]byte, initSize)
+	if _, err := io.ReadFull(f, initData); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read init segment"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(initData)
 }
 
 // handleSegmentHLS serves a re-segmented fMP4 chunk for HLS playback.

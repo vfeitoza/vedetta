@@ -783,9 +783,9 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 	for i, seg := range segments {
 		init := segInits[i]
 		if init.fileIdx != lastFileIdx {
-			// Init segment: serve the ftyp+moov as a byte-range (no multi-traf issue)
-			fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s/hls/init.mp4\",BYTERANGE=\"%d@%d\"\n",
-				baseURIs[init.fileIdx], init.byteLen, init.byteStart)
+			// Init segment served directly (not byte-range) for Safari compatibility
+			fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s/hls/init.mp4\"\n",
+				baseURIs[init.fileIdx])
 			lastFileIdx = init.fileIdx
 		}
 
