@@ -1139,12 +1139,15 @@ function renderWaveform(activity, events, segments) {
 
   // Mark minutes that have recording coverage
   var hasCoverage = new Uint8Array(1440);
+  var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
+  var nowMin = isToday ? new Date().getHours() * 60 + new Date().getMinutes() : 1440;
   if (segments) {
     segments.forEach(function(seg) {
       var start = new Date(seg.start_time);
       var end = new Date(seg.end_time);
       var startMin = start.getHours() * 60 + start.getMinutes();
       var endMin = end.getHours() * 60 + end.getMinutes();
+      if (endMin > nowMin) endMin = nowMin;
       for (var m = startMin; m <= endMin && m < 1440; m++) {
         hasCoverage[m] = 1;
       }
