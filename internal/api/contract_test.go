@@ -333,3 +333,108 @@ func TestContract_DeleteToken(t *testing.T) {
 	}
 	cv.validate(req, rec)
 }
+
+func TestContract_ListCameras(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+
+	// Verify envelope structure
+	var resp map[string]any
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["items"]; !ok {
+		t.Error("response missing 'items' field")
+	}
+	if _, ok := resp["total"]; !ok {
+		t.Error("response missing 'total' field")
+	}
+	if _, ok := resp["has_more"]; !ok {
+		t.Error("response missing 'has_more' field")
+	}
+}
+
+func TestContract_ListCameras_WithCamera(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	// Add a camera so the list is non-empty
+	srv.cameras.AddCamera(config.CameraConfig{Name: "test_cam", URL: "rtsp://localhost/stream"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+
+	var resp map[string]any
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	items, ok := resp["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected 1 item, got %v", resp["items"])
+	}
+	cam := items[0].(map[string]any)
+	if cam["name"] != "test_cam" {
+		t.Errorf("name = %v, want test_cam", cam["name"])
+	}
+}
+
+func TestContract_GetCamera(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	srv.cameras.AddCamera(config.CameraConfig{Name: "test_cam", URL: "rtsp://localhost/stream"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/test_cam", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_GetCamera_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/nonexistent", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_ListZones(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	srv.cameras.AddCamera(config.CameraConfig{Name: "test_cam", URL: "rtsp://localhost/stream"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/test_cam/zones", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}

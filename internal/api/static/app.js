@@ -1310,11 +1310,11 @@ function refreshBirdseye() {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();
     })
-    .then(function(cameras) {
+    .then(function(data) {
       var grid = el('birdseye-grid');
       if (!grid) return;
 
-      var cameraList = cameras || [];
+      var cameraList = (data && data.items) || [];
       if (cameraList.length === 0) {
         grid.innerHTML = '<div class="empty-state"><p>No cameras configured</p></div>';
         return;
@@ -2073,8 +2073,9 @@ function refreshGridSnapshots() {
   // Fetch live camera status and update badges + snapshots in one pass
   fetch('/api/cameras')
     .then(function(r) { return r.ok ? r.json() : null; })
-    .then(function(cameras) {
-      if (!cameras) return;
+    .then(function(data) {
+      if (!data) return;
+      var cameras = (data.items) || [];
       var statusMap = {};
       cameras.forEach(function(c) { statusMap[c.name] = c; });
 
@@ -3596,7 +3597,8 @@ function showAddManual() {
 function initPTZ(cameraName) {
   fetch('/api/cameras')
     .then(function(r) { return r.json(); })
-    .then(function(cameras) {
+    .then(function(data) {
+      var cameras = (data && data.items) || [];
       var cam = cameras.find(function(c) { return c.name === cameraName; });
       if (cam && cam.ptz) {
         var ptzEl = el('ptz-controls');

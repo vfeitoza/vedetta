@@ -201,6 +201,7 @@ func (s *Server) registerRoutes() {
 
 	// API endpoints
 	s.mux.HandleFunc("GET /api/cameras", s.handleListCameras)
+	s.mux.HandleFunc("GET /api/cameras/{name}", s.handleGetCamera)
 	s.mux.HandleFunc("GET /api/cameras/{name}/snapshot", s.handleSnapshot)
 	s.mux.HandleFunc("GET /api/events", s.handleListEvents)
 	s.mux.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
@@ -688,7 +689,36 @@ func (s *Server) handleListCameras(w http.ResponseWriter, _ *http.Request) {
 		_, hasPTZ := s.ptzClients[st.Name]
 		result[i] = cameraInfo{Name: st.Name, Online: st.Online, HasMotion: st.HasMotion, PTZ: hasPTZ}
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    result,
+		"total":    len(result),
+		"limit":    len(result),
+		"offset":   0,
+		"has_more": false,
+	})
+}
+
+func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+	st := cam.Status()
+	_, hasPTZ := s.ptzClients[name]
+	zones, _ := s.db.ListZones(name)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":            st.Name,
+		"online":          st.Online,
+		"has_motion":      st.HasMotion,
+		"degraded":        st.Degraded,
+		"degraded_reason": st.DegradedReason,
+		"last_frame":      st.LastFrame,
+		"ptz":             hasPTZ,
+		"zone_count":      len(zones),
+		"recording":       s.recorder != nil,
+	})
 }
 
 func (s *Server) handlePTZ(w http.ResponseWriter, r *http.Request) {

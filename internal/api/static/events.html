@@ -157,7 +157,7 @@
       if (allCamChip && total > 0) {
         allCamChip.innerHTML = 'All Cameras <span class="count">' + total + '</span>';
       }
-      (camData.cameras || []).forEach(function(name) {
+      ((camData.items || []).map(function(c) { return c.name; })).forEach(function(name) {
         var btn = document.createElement('button');
         btn.className = 'chip';
         btn.dataset.filter = 'camera';

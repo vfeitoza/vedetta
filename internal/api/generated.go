@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -136,6 +137,72 @@ func (e LogoutResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for PTZRequestAction.
+const (
+	Move PTZRequestAction = "move"
+	Stop PTZRequestAction = "stop"
+	Zoom PTZRequestAction = "zoom"
+)
+
+// Valid indicates whether the value is a known member of the PTZRequestAction enum.
+func (e PTZRequestAction) Valid() bool {
+	switch e {
+	case Move:
+		return true
+	case Stop:
+		return true
+	case Zoom:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PTZRequestDirection.
+const (
+	Down  PTZRequestDirection = "down"
+	In    PTZRequestDirection = "in"
+	Left  PTZRequestDirection = "left"
+	Out   PTZRequestDirection = "out"
+	Right PTZRequestDirection = "right"
+	Up    PTZRequestDirection = "up"
+)
+
+// Valid indicates whether the value is a known member of the PTZRequestDirection enum.
+func (e PTZRequestDirection) Valid() bool {
+	switch e {
+	case Down:
+		return true
+	case In:
+		return true
+	case Left:
+		return true
+	case Out:
+		return true
+	case Right:
+		return true
+	case Up:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatusDeletedStatus.
+const (
+	Deleted StatusDeletedStatus = "deleted"
+)
+
+// Valid indicates whether the value is a known member of the StatusDeletedStatus enum.
+func (e StatusDeletedStatus) Valid() bool {
+	switch e {
+	case Deleted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusOkStatus.
 const (
 	Ok StatusOkStatus = "ok"
@@ -175,10 +242,40 @@ type AuthMeResponse struct {
 	Username  string     `json:"username"`
 }
 
+// CameraDetail defines model for CameraDetail.
+type CameraDetail struct {
+	Degraded       bool       `json:"degraded"`
+	DegradedReason *string    `json:"degraded_reason,omitempty"`
+	HasMotion      bool       `json:"has_motion"`
+	LastFrame      *time.Time `json:"last_frame,omitempty"`
+	Name           string     `json:"name"`
+	Online         bool       `json:"online"`
+	Ptz            bool       `json:"ptz"`
+	Recording      bool       `json:"recording"`
+	ZoneCount      int        `json:"zone_count"`
+}
+
 // CameraHealthCheck defines model for CameraHealthCheck.
 type CameraHealthCheck struct {
 	Online int `json:"online"`
 	Total  int `json:"total"`
+}
+
+// CameraInfo defines model for CameraInfo.
+type CameraInfo struct {
+	HasMotion bool   `json:"has_motion"`
+	Name      string `json:"name"`
+	Online    bool   `json:"online"`
+	Ptz       bool   `json:"ptz"`
+}
+
+// CameraListEnvelope defines model for CameraListEnvelope.
+type CameraListEnvelope struct {
+	HasMore bool         `json:"has_more"`
+	Items   []CameraInfo `json:"items"`
+	Limit   int          `json:"limit"`
+	Offset  int          `json:"offset"`
+	Total   int          `json:"total"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -201,6 +298,27 @@ type CreateTokenResponse struct {
 	Scopes      []string  `json:"scopes"`
 	Token       string    `json:"token"`
 	TokenPrefix string    `json:"token_prefix"`
+}
+
+// CreateZoneRequest defines model for CreateZoneRequest.
+type CreateZoneRequest struct {
+	Enabled         *bool        `json:"enabled,omitempty"`
+	FaceRecognition *bool        `json:"face_recognition,omitempty"`
+	Labels          *[]string    `json:"labels,omitempty"`
+	Name            string       `json:"name"`
+	Points          *[][]float32 `json:"points,omitempty"`
+	TrackPresence   *bool        `json:"track_presence,omitempty"`
+	X1              *float32     `json:"x1,omitempty"`
+	X2              *float32     `json:"x2,omitempty"`
+	Y1              *float32     `json:"y1,omitempty"`
+	Y2              *float32     `json:"y2,omitempty"`
+}
+
+// DoorbellResponse defines model for DoorbellResponse.
+type DoorbellResponse struct {
+	Camera  string `json:"camera"`
+	EventId string `json:"event_id"`
+	Person  string `json:"person"`
 }
 
 // Error defines model for Error.
@@ -274,6 +392,18 @@ type LogoutResponse struct {
 // LogoutResponseStatus defines model for LogoutResponse.Status.
 type LogoutResponseStatus string
 
+// PTZRequest defines model for PTZRequest.
+type PTZRequest struct {
+	Action    PTZRequestAction     `json:"action"`
+	Direction *PTZRequestDirection `json:"direction,omitempty"`
+}
+
+// PTZRequestAction defines model for PTZRequest.Action.
+type PTZRequestAction string
+
+// PTZRequestDirection defines model for PTZRequest.Direction.
+type PTZRequestDirection string
+
 // ReadyCameraCheck defines model for ReadyCameraCheck.
 type ReadyCameraCheck struct {
 	Degraded int `json:"degraded"`
@@ -301,6 +431,14 @@ type RecompressionStats struct {
 	LastRun              *time.Time `json:"last_run,omitempty"`
 	SegmentsRecompressed int        `json:"segments_recompressed"`
 }
+
+// StatusDeleted defines model for StatusDeleted.
+type StatusDeleted struct {
+	Status StatusDeletedStatus `json:"status"`
+}
+
+// StatusDeletedStatus defines model for StatusDeleted.Status.
+type StatusDeletedStatus string
 
 // StatusOk defines model for StatusOk.
 type StatusOk struct {
@@ -339,11 +477,46 @@ type TokenRevokedResponse struct {
 // TokenRevokedResponseStatus defines model for TokenRevokedResponse.Status.
 type TokenRevokedResponseStatus string
 
+// Zone defines model for Zone.
+type Zone struct {
+	Camera          string      `json:"camera"`
+	Enabled         bool        `json:"enabled"`
+	FaceRecognition bool        `json:"face_recognition"`
+	Id              int         `json:"id"`
+	Labels          []string    `json:"labels"`
+	Name            string      `json:"name"`
+	Points          [][]float32 `json:"points"`
+	TrackPresence   bool        `json:"track_presence"`
+}
+
+// ZonePresence defines model for ZonePresence.
+type ZonePresence struct {
+	Label       string     `json:"label"`
+	LastChanged *time.Time `json:"last_changed,omitempty"`
+	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	Present     bool       `json:"present"`
+	ZoneId      int        `json:"zone_id"`
+}
+
+// GetCameraThumbnailParams defines parameters for GetCameraThumbnail.
+type GetCameraThumbnailParams struct {
+	T time.Time `form:"t" json:"t"`
+}
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// SendPTZCommandJSONRequestBody defines body for SendPTZCommand for application/json ContentType.
+type SendPTZCommandJSONRequestBody = PTZRequest
+
+// CreateZoneJSONRequestBody defines body for CreateZone for application/json ContentType.
+type CreateZoneJSONRequestBody = CreateZoneRequest
+
+// UpdateZoneJSONRequestBody defines body for UpdateZone for application/json ContentType.
+type UpdateZoneJSONRequestBody = CreateZoneRequest
 
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = CreateTokenRequest
@@ -362,6 +535,39 @@ type ServerInterface interface {
 	// Get the current authenticated principal
 	// (GET /api/auth/me)
 	GetAuthMe(w http.ResponseWriter, r *http.Request)
+	// List all cameras
+	// (GET /api/cameras)
+	ListCameras(w http.ResponseWriter, r *http.Request)
+	// Get camera detail
+	// (GET /api/cameras/{name})
+	GetCamera(w http.ResponseWriter, r *http.Request, name string)
+	// Trigger a doorbell press event
+	// (POST /api/cameras/{name}/doorbell)
+	PressDoorbell(w http.ResponseWriter, r *http.Request, name string)
+	// Send a PTZ command to a camera
+	// (POST /api/cameras/{name}/ptz)
+	SendPTZCommand(w http.ResponseWriter, r *http.Request, name string)
+	// Get live camera snapshot
+	// (GET /api/cameras/{name}/snapshot)
+	GetCameraSnapshot(w http.ResponseWriter, r *http.Request, name string)
+	// Get recording thumbnail at a given time
+	// (GET /api/cameras/{name}/thumbnail)
+	GetCameraThumbnail(w http.ResponseWriter, r *http.Request, name string, params GetCameraThumbnailParams)
+	// List zones for a camera
+	// (GET /api/cameras/{name}/zones)
+	ListZones(w http.ResponseWriter, r *http.Request, name string)
+	// Create a zone for a camera
+	// (POST /api/cameras/{name}/zones)
+	CreateZone(w http.ResponseWriter, r *http.Request, name string)
+	// Delete a zone
+	// (DELETE /api/cameras/{name}/zones/{zone})
+	DeleteZone(w http.ResponseWriter, r *http.Request, name string, zone string)
+	// Update a zone
+	// (PUT /api/cameras/{name}/zones/{zone})
+	UpdateZone(w http.ResponseWriter, r *http.Request, name string, zone string)
+	// Get presence state for a zone
+	// (GET /api/cameras/{name}/zones/{zone}/presence)
+	GetZonePresence(w http.ResponseWriter, r *http.Request, name string, zone string)
 	// Full health check
 	// (GET /api/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -471,6 +677,403 @@ func (siw *ServerInterfaceWrapper) GetAuthMe(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAuthMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCameras operation middleware
+func (siw *ServerInterfaceWrapper) ListCameras(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCameras(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCamera operation middleware
+func (siw *ServerInterfaceWrapper) GetCamera(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCamera(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PressDoorbell operation middleware
+func (siw *ServerInterfaceWrapper) PressDoorbell(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PressDoorbell(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendPTZCommand operation middleware
+func (siw *ServerInterfaceWrapper) SendPTZCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendPTZCommand(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCameraSnapshot operation middleware
+func (siw *ServerInterfaceWrapper) GetCameraSnapshot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCameraSnapshot(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCameraThumbnail operation middleware
+func (siw *ServerInterfaceWrapper) GetCameraThumbnail(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCameraThumbnailParams
+
+	// ------------- Required query parameter "t" -------------
+
+	if paramValue := r.URL.Query().Get("t"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "t"})
+		return
+	}
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "t", r.URL.Query(), &params.T, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "t", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCameraThumbnail(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListZones operation middleware
+func (siw *ServerInterfaceWrapper) ListZones(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListZones(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateZone operation middleware
+func (siw *ServerInterfaceWrapper) CreateZone(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateZone(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteZone operation middleware
+func (siw *ServerInterfaceWrapper) DeleteZone(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "zone" -------------
+	var zone string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "zone", r.PathValue("zone"), &zone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "zone", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteZone(w, r, name, zone)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZone operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZone(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "zone" -------------
+	var zone string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "zone", r.PathValue("zone"), &zone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "zone", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZone(w, r, name, zone)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZonePresence operation middleware
+func (siw *ServerInterfaceWrapper) GetZonePresence(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "zone" -------------
+	var zone string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "zone", r.PathValue("zone"), &zone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "zone", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZonePresence(w, r, name, zone)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -789,6 +1392,17 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/auth/login", wrapper.Login)
 	m.HandleFunc("POST "+options.BaseURL+"/api/auth/logout", wrapper.Logout)
 	m.HandleFunc("GET "+options.BaseURL+"/api/auth/me", wrapper.GetAuthMe)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras", wrapper.ListCameras)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}", wrapper.GetCamera)
+	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/doorbell", wrapper.PressDoorbell)
+	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/ptz", wrapper.SendPTZCommand)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/snapshot", wrapper.GetCameraSnapshot)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/thumbnail", wrapper.GetCameraThumbnail)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/zones", wrapper.ListZones)
+	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/zones", wrapper.CreateZone)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/cameras/{name}/zones/{zone}", wrapper.DeleteZone)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/cameras/{name}/zones/{zone}", wrapper.UpdateZone)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/zones/{zone}/presence", wrapper.GetZonePresence)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/live", wrapper.GetHealthLive)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/ready", wrapper.GetHealthReady)
@@ -900,6 +1514,354 @@ type GetAuthMe401JSONResponse Error
 func (response GetAuthMe401JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListCamerasRequestObject struct {
+}
+
+type ListCamerasResponseObject interface {
+	VisitListCamerasResponse(w http.ResponseWriter) error
+}
+
+type ListCameras200JSONResponse CameraListEnvelope
+
+func (response ListCameras200JSONResponse) VisitListCamerasResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCameraRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetCameraResponseObject interface {
+	VisitGetCameraResponse(w http.ResponseWriter) error
+}
+
+type GetCamera200JSONResponse CameraDetail
+
+func (response GetCamera200JSONResponse) VisitGetCameraResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCamera404JSONResponse Error
+
+func (response GetCamera404JSONResponse) VisitGetCameraResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PressDoorbellRequestObject struct {
+	Name string `json:"name"`
+}
+
+type PressDoorbellResponseObject interface {
+	VisitPressDoorbellResponse(w http.ResponseWriter) error
+}
+
+type PressDoorbell200JSONResponse DoorbellResponse
+
+func (response PressDoorbell200JSONResponse) VisitPressDoorbellResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PressDoorbell404JSONResponse Error
+
+func (response PressDoorbell404JSONResponse) VisitPressDoorbellResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PressDoorbell503JSONResponse Error
+
+func (response PressDoorbell503JSONResponse) VisitPressDoorbellResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendPTZCommandRequestObject struct {
+	Name string `json:"name"`
+	Body *SendPTZCommandJSONRequestBody
+}
+
+type SendPTZCommandResponseObject interface {
+	VisitSendPTZCommandResponse(w http.ResponseWriter) error
+}
+
+type SendPTZCommand200JSONResponse StatusOk
+
+func (response SendPTZCommand200JSONResponse) VisitSendPTZCommandResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendPTZCommand400JSONResponse Error
+
+func (response SendPTZCommand400JSONResponse) VisitSendPTZCommandResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendPTZCommand404JSONResponse Error
+
+func (response SendPTZCommand404JSONResponse) VisitSendPTZCommandResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCameraSnapshotRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetCameraSnapshotResponseObject interface {
+	VisitGetCameraSnapshotResponse(w http.ResponseWriter) error
+}
+
+type GetCameraSnapshot200ImagejpegResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetCameraSnapshot200ImagejpegResponse) VisitGetCameraSnapshotResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "image/jpeg")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetCameraSnapshot404JSONResponse Error
+
+func (response GetCameraSnapshot404JSONResponse) VisitGetCameraSnapshotResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCameraThumbnailRequestObject struct {
+	Name   string `json:"name"`
+	Params GetCameraThumbnailParams
+}
+
+type GetCameraThumbnailResponseObject interface {
+	VisitGetCameraThumbnailResponse(w http.ResponseWriter) error
+}
+
+type GetCameraThumbnail200ImagejpegResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetCameraThumbnail200ImagejpegResponse) VisitGetCameraThumbnailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "image/jpeg")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetCameraThumbnail400JSONResponse Error
+
+func (response GetCameraThumbnail400JSONResponse) VisitGetCameraThumbnailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCameraThumbnail404JSONResponse Error
+
+func (response GetCameraThumbnail404JSONResponse) VisitGetCameraThumbnailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListZonesRequestObject struct {
+	Name string `json:"name"`
+}
+
+type ListZonesResponseObject interface {
+	VisitListZonesResponse(w http.ResponseWriter) error
+}
+
+type ListZones200JSONResponse []Zone
+
+func (response ListZones200JSONResponse) VisitListZonesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListZones404JSONResponse Error
+
+func (response ListZones404JSONResponse) VisitListZonesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateZoneRequestObject struct {
+	Name string `json:"name"`
+	Body *CreateZoneJSONRequestBody
+}
+
+type CreateZoneResponseObject interface {
+	VisitCreateZoneResponse(w http.ResponseWriter) error
+}
+
+type CreateZone201JSONResponse Zone
+
+func (response CreateZone201JSONResponse) VisitCreateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateZone400JSONResponse Error
+
+func (response CreateZone400JSONResponse) VisitCreateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateZone404JSONResponse Error
+
+func (response CreateZone404JSONResponse) VisitCreateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteZoneRequestObject struct {
+	Name string `json:"name"`
+	Zone string `json:"zone"`
+}
+
+type DeleteZoneResponseObject interface {
+	VisitDeleteZoneResponse(w http.ResponseWriter) error
+}
+
+type DeleteZone200JSONResponse StatusDeleted
+
+func (response DeleteZone200JSONResponse) VisitDeleteZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteZone404JSONResponse Error
+
+func (response DeleteZone404JSONResponse) VisitDeleteZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateZoneRequestObject struct {
+	Name string `json:"name"`
+	Zone string `json:"zone"`
+	Body *UpdateZoneJSONRequestBody
+}
+
+type UpdateZoneResponseObject interface {
+	VisitUpdateZoneResponse(w http.ResponseWriter) error
+}
+
+type UpdateZone200JSONResponse Zone
+
+func (response UpdateZone200JSONResponse) VisitUpdateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateZone400JSONResponse Error
+
+func (response UpdateZone400JSONResponse) VisitUpdateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateZone404JSONResponse Error
+
+func (response UpdateZone404JSONResponse) VisitUpdateZoneResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetZonePresenceRequestObject struct {
+	Name string `json:"name"`
+	Zone string `json:"zone"`
+}
+
+type GetZonePresenceResponseObject interface {
+	VisitGetZonePresenceResponse(w http.ResponseWriter) error
+}
+
+type GetZonePresence200JSONResponse []ZonePresence
+
+func (response GetZonePresence200JSONResponse) VisitGetZonePresenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetZonePresence404JSONResponse Error
+
+func (response GetZonePresence404JSONResponse) VisitGetZonePresenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -1092,6 +2054,39 @@ type StrictServerInterface interface {
 	// Get the current authenticated principal
 	// (GET /api/auth/me)
 	GetAuthMe(ctx context.Context, request GetAuthMeRequestObject) (GetAuthMeResponseObject, error)
+	// List all cameras
+	// (GET /api/cameras)
+	ListCameras(ctx context.Context, request ListCamerasRequestObject) (ListCamerasResponseObject, error)
+	// Get camera detail
+	// (GET /api/cameras/{name})
+	GetCamera(ctx context.Context, request GetCameraRequestObject) (GetCameraResponseObject, error)
+	// Trigger a doorbell press event
+	// (POST /api/cameras/{name}/doorbell)
+	PressDoorbell(ctx context.Context, request PressDoorbellRequestObject) (PressDoorbellResponseObject, error)
+	// Send a PTZ command to a camera
+	// (POST /api/cameras/{name}/ptz)
+	SendPTZCommand(ctx context.Context, request SendPTZCommandRequestObject) (SendPTZCommandResponseObject, error)
+	// Get live camera snapshot
+	// (GET /api/cameras/{name}/snapshot)
+	GetCameraSnapshot(ctx context.Context, request GetCameraSnapshotRequestObject) (GetCameraSnapshotResponseObject, error)
+	// Get recording thumbnail at a given time
+	// (GET /api/cameras/{name}/thumbnail)
+	GetCameraThumbnail(ctx context.Context, request GetCameraThumbnailRequestObject) (GetCameraThumbnailResponseObject, error)
+	// List zones for a camera
+	// (GET /api/cameras/{name}/zones)
+	ListZones(ctx context.Context, request ListZonesRequestObject) (ListZonesResponseObject, error)
+	// Create a zone for a camera
+	// (POST /api/cameras/{name}/zones)
+	CreateZone(ctx context.Context, request CreateZoneRequestObject) (CreateZoneResponseObject, error)
+	// Delete a zone
+	// (DELETE /api/cameras/{name}/zones/{zone})
+	DeleteZone(ctx context.Context, request DeleteZoneRequestObject) (DeleteZoneResponseObject, error)
+	// Update a zone
+	// (PUT /api/cameras/{name}/zones/{zone})
+	UpdateZone(ctx context.Context, request UpdateZoneRequestObject) (UpdateZoneResponseObject, error)
+	// Get presence state for a zone
+	// (GET /api/cameras/{name}/zones/{zone}/presence)
+	GetZonePresence(ctx context.Context, request GetZonePresenceRequestObject) (GetZonePresenceResponseObject, error)
 	// Full health check
 	// (GET /api/health)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -1253,6 +2248,315 @@ func (sh *strictHandler) GetAuthMe(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAuthMeResponseObject); ok {
 		if err := validResponse.VisitGetAuthMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListCameras operation middleware
+func (sh *strictHandler) ListCameras(w http.ResponseWriter, r *http.Request) {
+	var request ListCamerasRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCameras(ctx, request.(ListCamerasRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCameras")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCamerasResponseObject); ok {
+		if err := validResponse.VisitListCamerasResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCamera operation middleware
+func (sh *strictHandler) GetCamera(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetCameraRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCamera(ctx, request.(GetCameraRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCamera")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCameraResponseObject); ok {
+		if err := validResponse.VisitGetCameraResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PressDoorbell operation middleware
+func (sh *strictHandler) PressDoorbell(w http.ResponseWriter, r *http.Request, name string) {
+	var request PressDoorbellRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PressDoorbell(ctx, request.(PressDoorbellRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PressDoorbell")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PressDoorbellResponseObject); ok {
+		if err := validResponse.VisitPressDoorbellResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SendPTZCommand operation middleware
+func (sh *strictHandler) SendPTZCommand(w http.ResponseWriter, r *http.Request, name string) {
+	var request SendPTZCommandRequestObject
+
+	request.Name = name
+
+	var body SendPTZCommandJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SendPTZCommand(ctx, request.(SendPTZCommandRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SendPTZCommand")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SendPTZCommandResponseObject); ok {
+		if err := validResponse.VisitSendPTZCommandResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCameraSnapshot operation middleware
+func (sh *strictHandler) GetCameraSnapshot(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetCameraSnapshotRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCameraSnapshot(ctx, request.(GetCameraSnapshotRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCameraSnapshot")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCameraSnapshotResponseObject); ok {
+		if err := validResponse.VisitGetCameraSnapshotResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCameraThumbnail operation middleware
+func (sh *strictHandler) GetCameraThumbnail(w http.ResponseWriter, r *http.Request, name string, params GetCameraThumbnailParams) {
+	var request GetCameraThumbnailRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCameraThumbnail(ctx, request.(GetCameraThumbnailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCameraThumbnail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCameraThumbnailResponseObject); ok {
+		if err := validResponse.VisitGetCameraThumbnailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListZones operation middleware
+func (sh *strictHandler) ListZones(w http.ResponseWriter, r *http.Request, name string) {
+	var request ListZonesRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListZones(ctx, request.(ListZonesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListZones")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListZonesResponseObject); ok {
+		if err := validResponse.VisitListZonesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateZone operation middleware
+func (sh *strictHandler) CreateZone(w http.ResponseWriter, r *http.Request, name string) {
+	var request CreateZoneRequestObject
+
+	request.Name = name
+
+	var body CreateZoneJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateZone(ctx, request.(CreateZoneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateZone")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateZoneResponseObject); ok {
+		if err := validResponse.VisitCreateZoneResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteZone operation middleware
+func (sh *strictHandler) DeleteZone(w http.ResponseWriter, r *http.Request, name string, zone string) {
+	var request DeleteZoneRequestObject
+
+	request.Name = name
+	request.Zone = zone
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteZone(ctx, request.(DeleteZoneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteZone")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteZoneResponseObject); ok {
+		if err := validResponse.VisitDeleteZoneResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateZone operation middleware
+func (sh *strictHandler) UpdateZone(w http.ResponseWriter, r *http.Request, name string, zone string) {
+	var request UpdateZoneRequestObject
+
+	request.Name = name
+	request.Zone = zone
+
+	var body UpdateZoneJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateZone(ctx, request.(UpdateZoneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateZone")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateZoneResponseObject); ok {
+		if err := validResponse.VisitUpdateZoneResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetZonePresence operation middleware
+func (sh *strictHandler) GetZonePresence(w http.ResponseWriter, r *http.Request, name string, zone string) {
+	var request GetZonePresenceRequestObject
+
+	request.Name = name
+	request.Zone = zone
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetZonePresence(ctx, request.(GetZonePresenceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetZonePresence")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetZonePresenceResponseObject); ok {
+		if err := validResponse.VisitGetZonePresenceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -1488,38 +2792,54 @@ func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"mxzk8DTG8pt5W+1ud/8LAAD//6m2z7j6JQAA",
+	"H4sIAAAAAAAC/+Rb3XPbuBH/VzBsZ/rCi5xc2pnqLXXSnK+5RGO7eXDGo4HIFYWIBBgAlKN49L938MFv",
+	"gKJiy1F6T7ZIYLEfPyx2F8v7IGJZzihQKYLpfSCiFWRY//uqkKs/4BJEzqgA9STnLAcuCej3keDLuWRr",
+	"oOqX3OYQTAMhOaFJsAsD+JoTDmKOpXq9ZDxT/wUxlvCLJBkEYX/OmtDYSUxELDerEgmZcI6xDzDneKt+",
+	"FwI4xRk4Bu/CgMOXgnCIg+mneqTloFrvtqLKFp8hkorsOc6A49cgMUn7Sokh4TiGphQLxlLAVM0t3845",
+	"YMHcelthMc+YJK3XDRopFnK+5FawcXr1qCEMGE0JBfdCufzmfsEhYjxWFJyvvzEK84gVVDbeEyohAd5T",
+	"vVW75aMlfa2uwDDTIt1kw2+m3wCncnW+gmjdt1VP+IrJMJBM4nQE/2ZcJYCfkwu6ZH0W9hn7MQ13iOYV",
+	"Cb8s74iQb+gGUpaDTybuYa7av9U/f+WwDKbBXya1J5pYNzRp6M6xw1OSEem2H1suBciH2dZwGFY2NstV",
+	"tMNaUqeqVpgmMMNC3DEeX8KXAoR0eNGCc6ByntuBTmtTuBsa0OG7R7JDwMktByzhWnlzL6teMB7unV1Y",
+	"3MuW9yDSg+KDThoSt8YSKv/xsh7XAMsjCq2Q5Dst9Zt5zmFJvu63MNE2NRvY0OxQqNgLm9rxa/iGUfDa",
+	"HShepL4jbYkjmCtXnFAydGgtID1QWV7N54zYaKXvTOxgWmQLu9m7Juj+5jhaK7UJoJHHZ3197iT99YXz",
+	"8dY9eusaPXYfvGaMLyBNBzaB9pTuSGyjvAFxu5YcuDsS6bBWEQnLpaq5LobfcM64A0rl4z2L6WEuuo0D",
+	"XfiUMPJUacYGKjbDEi+wUS3QIlN8sHUQ9pipdZd9kbI5PGKUQiR1wBIT0flpNpGLjpCM4wT2sX1lhrX4",
+	"7iiuEsIyF1YqqVfxq/Ud2QzE+0JiWYiOelziFLn2unutbAlWE/yMXQKOtwPYr+AwpD5NxCJHK70rDlcD",
+	"tKIwl4rhRgTal9MnjGVmSJiHydHaAk5BNGwHWB8wURhsgAsyxiN0Ja6nDlr0HUuIP8YYDIM4ZKD9ptNL",
+	"f1e+NxgUWVZPIQF+SDLb4LPFlUdkVshDnEDKkgTiOSvk6E3iWnh2feMFBY7KyKJcNGMbMC4t12khy5ww",
+	"jwmH3txCTYnZndJGCkudSpJkpf4S9WyUJJYllyTGz2i360k8HUWCB6Sejo3eZeZhx2VPoM5p2Q+uVSiI",
+	"U/LNFzSOPPD0wvbUc593zZXC5ulXiubVSYts30JErOcpu9tTAJnnuBBuIXfOhZWQHITyklcSS4dNFlsJ",
+	"QgXUKSYZjM1SBkN0XTHiBR3vhgQkmbKEDuwNx260duM2y4aPQtgTz2WfK+0lXkMK0qy6zwXFduhD/I9Z",
+	"9MP6u+OeQ5bqxXFuAOINJqnSqHOX7cdohbX9G60HzJEw1yeT98iK59reo0DcP8bK2XaNsKuUhgoczHZV",
+	"4LTEVkjI9iVVwu2nY4hYDHxcea4xr+H8fJnAAWp7nFiuF7nV4jVTiKpY2OZzOLew1ZsNW0N8SGDBzZQH",
+	"bbUbRg/MlR9e6yCec/1nroG46k9VGaAMpQ1LlaA9ug4F1gr3WW/W4KptRb2MUzn6wIt0/TUef+jpWQLg",
+	"gHPSiCYH7kHImGOzHGlVF9SE+1rRp3NUcCK3V8p726gBMAf+qpCr6hJPc6Mf15yvpMwVaxFjawLlcEKD",
+	"qX1UWnMaCOs2a7Tk5D+wDXY7HeCZy4wYRMRJbvZC8Gp2gZaMowxTnBCaIOs4QqSLRyJElZMWIcI0RkYo",
+	"FIM0YToiFMkVoI8Qg5QYvQd5x/gafSQxMHSpZwN/ppgiUh2LQTXy4yV6NbtoJKHT4OzZ82dn2hvnQHFO",
+	"gmnwq36k0j650oqb4JxMcCFXE4OXX5oJaM5MNqJQhxV/F3Ew7RT2A2NKEPJfLN5q78KotKDAeZ6SSE+d",
+	"fLZlNnPm7i1ROW8Pdm3kSF6AfmCcqhboxdnZozFRxUR63baxS9ZQuc92YfDyEdc2BUTHwh9xSmJNEYEd",
+	"EwaiyDLMt5V1NIrsPQhSGfHfBGpch0icCJ3FqR1wqwjUOEhV0u+3vq4JHMnordLIE9u6Xetw6F0PQKKI",
+	"IhBiWaTG4M+Pb/ALulEmRxGHGKhK93R0+vLFP4+/9iWWgPS9n0J4w/cG00+3TdgpX6qYi9SEOyJXqKzD",
+	"aEc3HnuskIPgU++PC4Nm/ceNgwRipPho77w3NG5tu8YJMiCyiW8ScEj7FqTpQTmmwJ0uF4fA51aenBMa",
+	"kRyniNj76CeB/3smEW6gK+6o/S3IltpbY2um/WZoJDlOM7wjQp5XKcDRDOFoLXAZQ49CKRFd+KmZCKcp",
+	"qtOVUuCqGNSVeXKvduhuCIHn1WUX5jgDCVyRtEGTCiPqkMnGwW2fHTbE76Yxt0dXp21T8isytgMUmF8e",
+	"H8x2VcokWrKCurActRgbb8RJbO9I/e5T5RKivEr9+UzauwR2KLgcY0JuZC//f6B9w+DvZ78+hZdEguJc",
+	"rJS3rCpEbXRdc5IkwBFGJVSQrg4ZXR0CNdth5UbZFdB4dn1zzrIM6/uXY8Hs8QPQxiXMKaUa1zcoMtpE",
+	"OIogl0+YbpTRp1U3YrzyUAyERroo8pxxiWbXN6fiSBUGEUZNzUmGMKpqNqOhXu6q/WfkVTnyBzlWkuEE",
+	"Jp9zSNr6rUo5C0KVdvrlxJ52f5+9eVv5k1M6HFOygRJ/otb3aGvKVZEtqO1cHjbndTX0KPYMLZkvBWib",
+	"WDpykMiYqtwPQEqt1af2SkoFqLLOKSG1KvXV2kFYIowSsgGKStuNBe43RmE4RbnRI04yqBvV6qyvKvqN",
+	"sj3dq3E2/zkNa+vES9tHV38HD5nQV1OtulB/qnip3zw7Kmx6vKqBAY0HJK3g/4dUZk8DoMZKCGuQ7sfo",
+	"kAea3Ks/O3P3kYKEPpRN38LxoBw6yXwz651Gotpu4PDBs+zaOBGUGHYtSnzOq3D4rv/mMf5ZDH4yLvDs",
+	"aVxgoW3z53GBjBsn5wO5weoQyEd4v0mzU8CXRLTu7v+fHeHo4K7Sxtggr1QzEhJLODUoqSC/zaE9WvdC",
+	"a6Ub34bAY1rjjnnb0GnFd6jBjEC2uagt+7+LNEVGDKS73xvyWum64k5U6r5f5ndkA8eXu/Whh0P2K+Ab",
+	"EgEiAmHN99DVpyJGQQiUc7aAEZow31nsVcWl/Rzj6BhoflsyrAzD+SPXtA9nQ21Jy8qAXRRFMs4wtkHm",
+	"Wcm4zzAfcqCvZhdXOUQPNUy3rakn7/UKkF0PiRwihAX6/erD+0GZmxPI0q7ekFx/lbUBvm0IL3QT6JDY",
+	"pk30mFDsNKK6zK9H2Kvndq23fsOzrsA9UxtpJ3Vv7ESaaxH/hYa9N2k1CfeV8aLfENaagfRnVWUs1u3d",
+	"kPBVTvIUEzdM/AW49ho41fsCEapAn6jHnkugDNMCp4h3hPLqTX8/Iwa6wuovlYNjRtqtT7SfuNrg+hrb",
+	"tXPVgBOoPriLABTukHIR1XfT7q4IY+/JPYlHZPul2fdHuSQeV+D2dskfM293dmp7DVz2Z7f1bKYjTPcp",
+	"OQPJSSSG/O4fdshekb/be8w4y0CuoBCo5KctjmOAy0m0j6R2P+6nW5WqNFtuP90qMwrgmxIpBU+DaTAJ",
+	"1HNLvdddW/f1EEbDsr3KdtJWyhY11rSy1drO+F536UIGVIbVVZII0ez6JjTVXEM4rtslLNkyoO9TVkxU",
+	"J6ydHRVqifJYsiTqY7hP5LdGWC1CJOrTzTBUm8ESs1bY3e7+FwAA//8ZTtUQzUgAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

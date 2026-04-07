@@ -14,6 +14,8 @@ security:
 tags:
   - name: auth
     description: Authentication, sessions, and API tokens
+  - name: cameras
+    description: Camera management, snapshots, PTZ, zones, and doorbell
   - name: discovery
     description: API discovery and documentation
   - name: health
@@ -256,6 +258,340 @@ paths:
               schema:
                 type: string
 
+  /api/cameras:
+    get:
+      operationId: listCameras
+      summary: List all cameras
+      tags: [cameras]
+      responses:
+        "200":
+          description: Camera list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CameraListEnvelope"
+
+  /api/cameras/{name}:
+    get:
+      operationId: getCamera
+      summary: Get camera detail
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Camera detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CameraDetail"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/snapshot:
+    get:
+      operationId: getCameraSnapshot
+      summary: Get live camera snapshot
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: JPEG snapshot
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/thumbnail:
+    get:
+      operationId: getCameraThumbnail
+      summary: Get recording thumbnail at a given time
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: t
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: JPEG thumbnail
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid time parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/ptz:
+    post:
+      operationId: sendPTZCommand
+      summary: Send a PTZ command to a camera
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PTZRequest"
+      responses:
+        "200":
+          description: PTZ command accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+        "400":
+          description: Invalid request or camera does not support PTZ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/doorbell:
+    post:
+      operationId: pressDoorbell
+      summary: Trigger a doorbell press event
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Doorbell event created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DoorbellResponse"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No snapshot available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/zones:
+    get:
+      operationId: listZones
+      summary: List zones for a camera
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Zone list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Zone"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createZone
+      summary: Create a zone for a camera
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateZoneRequest"
+      responses:
+        "201":
+          description: Zone created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/zones/{zone}:
+    put:
+      operationId: updateZone
+      summary: Update a zone
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateZoneRequest"
+      responses:
+        "200":
+          description: Zone updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera or zone not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteZone
+      summary: Delete a zone
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Zone deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusDeleted"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/zones/{zone}/presence:
+    get:
+      operationId: getZonePresence
+      summary: Get presence state for a zone
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Zone presence state
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ZonePresence"
+        "404":
+          description: Camera or zone not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -381,6 +717,165 @@ components:
         status:
           type: string
           enum: [ok]
+
+    StatusDeleted:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [deleted]
+
+    CameraInfo:
+      type: object
+      required: [name, online, has_motion, ptz]
+      properties:
+        name:
+          type: string
+        online:
+          type: boolean
+        has_motion:
+          type: boolean
+        ptz:
+          type: boolean
+
+    CameraListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraInfo"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    CameraDetail:
+      type: object
+      required: [name, online, has_motion, degraded, ptz, zone_count, recording]
+      properties:
+        name:
+          type: string
+        online:
+          type: boolean
+        has_motion:
+          type: boolean
+        degraded:
+          type: boolean
+        degraded_reason:
+          type: string
+        last_frame:
+          type: string
+          format: date-time
+        ptz:
+          type: boolean
+        zone_count:
+          type: integer
+        recording:
+          type: boolean
+
+    Zone:
+      type: object
+      required: [id, camera, name, points, labels, track_presence, face_recognition, enabled]
+      properties:
+        id:
+          type: integer
+        camera:
+          type: string
+        name:
+          type: string
+        points:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+        labels:
+          type: array
+          items:
+            type: string
+        track_presence:
+          type: boolean
+        face_recognition:
+          type: boolean
+        enabled:
+          type: boolean
+
+    CreateZoneRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        points:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+        x1:
+          type: number
+        y1:
+          type: number
+        x2:
+          type: number
+        y2:
+          type: number
+        labels:
+          type: array
+          items:
+            type: string
+        track_presence:
+          type: boolean
+        face_recognition:
+          type: boolean
+        enabled:
+          type: boolean
+
+    PTZRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [move, stop, zoom]
+        direction:
+          type: string
+          enum: [up, down, left, right, in, out]
+
+    ZonePresence:
+      type: object
+      required: [zone_id, label, present]
+      properties:
+        zone_id:
+          type: integer
+        label:
+          type: string
+        present:
+          type: boolean
+        last_seen:
+          type: string
+          format: date-time
+        last_changed:
+          type: string
+          format: date-time
+
+    DoorbellResponse:
+      type: object
+      required: [event_id, camera, person]
+      properties:
+        event_id:
+          type: string
+        camera:
+          type: string
+        person:
+          type: string
 
     ListEnvelope:
       type: object

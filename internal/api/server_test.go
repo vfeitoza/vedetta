@@ -228,12 +228,14 @@ func TestHandleListCameras_Empty(t *testing.T) {
 		t.Fatalf("GET /api/cameras: status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var body []map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+	var envelope struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(body) != 0 {
-		t.Errorf("cameras = %v, want empty", body)
+	if len(envelope.Items) != 0 {
+		t.Errorf("cameras = %v, want empty", envelope.Items)
 	}
 }
 
@@ -1515,20 +1517,22 @@ func TestListCamerasIncludesPTZ(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var cameras []struct {
-		Name string `json:"name"`
-		PTZ  bool   `json:"ptz"`
+	var envelope struct {
+		Items []struct {
+			Name string `json:"name"`
+			PTZ  bool   `json:"ptz"`
+		} `json:"items"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&cameras); err != nil {
+	if err := json.NewDecoder(w.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if len(cameras) != 2 {
-		t.Fatalf("got %d cameras, want 2", len(cameras))
+	if len(envelope.Items) != 2 {
+		t.Fatalf("got %d cameras, want 2", len(envelope.Items))
 	}
 
 	ptzByName := make(map[string]bool)
-	for _, c := range cameras {
+	for _, c := range envelope.Items {
 		ptzByName[c.Name] = c.PTZ
 	}
 
