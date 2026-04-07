@@ -297,7 +297,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 
 	slog.Info("native Go media pipeline active (no ffmpeg required)")
 
-	sub.recorder = recording.New(cfg.Recording, cfg.Events, db, sub.hub, cfg.Events.SnapshotPath)
+	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath)
 
 	// Register cameras for recording
 	for _, cam := range cfg.Cameras {
@@ -315,6 +315,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	sub.recorder.StartContinuousRecording(ctx)
 	sub.recorder.StartRetentionCleanup(ctx)
 	sub.recorder.StartStatsRefresh(ctx)
+	sub.recorder.StartRecompressionJob(ctx)
 
 	// Publish HA MQTT discovery for all enabled cameras
 	if sub.mqttClient != nil {

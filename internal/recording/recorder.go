@@ -18,12 +18,18 @@ import (
 
 // StorageStats contains aggregate storage information.
 type StorageStats struct {
-	TotalBytes      int64            `json:"total_bytes"`
-	SegmentCount    int              `json:"segment_count"`
-	CameraStats     map[string]int64 `json:"camera_stats"`
-	DiskAvailable   uint64           `json:"disk_available_bytes"`
-	DiskLow         bool             `json:"disk_low"`
-	RecordingPaused bool             `json:"recording_paused"`
+	TotalBytes      int64               `json:"total_bytes"`
+	SegmentCount    int                 `json:"segment_count"`
+	CameraStats     map[string]int64    `json:"camera_stats"`
+	DiskAvailable   uint64              `json:"disk_available_bytes"`
+	DiskLow         bool                `json:"disk_low"`
+	RecordingPaused bool                `json:"recording_paused"`
+	Recompression   RecompressionStats  `json:"recompression"`
+}
+
+// RecompressionStats summarises the tiered storage recompression feature.
+type RecompressionStats struct {
+	Enabled bool `json:"enabled"`
 }
 
 // Recorder manages saving video clips for detected events.
@@ -33,6 +39,7 @@ type Recorder struct {
 	db           *storage.DB
 	hub          *rtsp.Hub
 	segments     *SegmentRecorder
+	recompressor *Recompressor
 	cameraURLs   map[string]string // camera name → record RTSP URL
 	startTime    time.Time
 	snapshotPath string
@@ -42,7 +49,7 @@ type Recorder struct {
 	cachedStats StorageStats
 }
 
-func New(cfg config.RecordingConfig, eventCfg config.EventConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -57,6 +64,7 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, db *storage.DB
 		db:           db,
 		hub:          hub,
 		segments:     NewSegmentRecorder(cfg, db, hub),
+		recompressor: NewRecompressor(cfg.TieredStorage, cameras, db),
 		cameraURLs:   make(map[string]string),
 		startTime:    time.Now(),
 		snapshotPath: snapshotPath,
@@ -147,6 +155,11 @@ func (r *Recorder) Close() {
 	}
 }
 
+// StartRecompressionJob begins the tiered storage recompression goroutine.
+func (r *Recorder) StartRecompressionJob(ctx context.Context) {
+	r.recompressor.Start(ctx)
+}
+
 // StartStatsRefresh begins a background loop that periodically refreshes
 // cached storage stats. This prevents API handlers from blocking on DB queries.
 func (r *Recorder) StartStatsRefresh(ctx context.Context) {
@@ -198,6 +211,9 @@ func (r *Recorder) RefreshStats() {
 	stats.DiskAvailable = r.segments.DiskAvailable()
 	stats.DiskLow = stats.DiskAvailable < media.MinDiskSpace
 	stats.RecordingPaused = r.segments.AnyPaused()
+	stats.Recompression = RecompressionStats{
+		Enabled: r.config.TieredStorage.Enabled,
+	}
 
 	r.statsMu.Lock()
 	r.cachedStats = stats

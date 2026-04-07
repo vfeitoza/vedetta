@@ -639,6 +639,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 				"disk_available":   formatBytes(int64(storageStats.DiskAvailable)),
 				"disk_low":         storageStats.DiskLow,
 				"recording_paused": storageStats.RecordingPaused,
+				"recompression": map[string]any{
+					"enabled": storageStats.Recompression.Enabled,
+				},
 			},
 		},
 		"version": "0.1.0",

@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) (*Server, *storage.DB) {
 	mgr := camera.NewManager(nil, nil, config.MotionConfig{}, nil, nil, nil, nil, "", 85, "", nil, nil, "", nil)
 	rec := recording.New(config.RecordingConfig{
 		Path: t.TempDir(),
-	}, config.EventConfig{RetainDays: 90}, db, nil, "")
+	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "")
 
 	apiCfg := config.APIConfig{Host: "127.0.0.1", Port: 0}
 	srv := New(apiCfg, nil, db)
@@ -1359,7 +1359,7 @@ func newTestServerWithPTZ(t *testing.T) (*Server, *storage.DB) {
 
 	rec := recording.New(config.RecordingConfig{
 		Path: t.TempDir(),
-	}, config.EventConfig{RetainDays: 90}, db, nil, "")
+	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "")
 
 	// Mock ONVIF server that accepts any SOAP request
 	ptzServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
