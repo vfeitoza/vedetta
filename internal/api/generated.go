@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
@@ -120,10 +121,91 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for LogoutResponseStatus.
+const (
+	LoggedOut LogoutResponseStatus = "logged_out"
+)
+
+// Valid indicates whether the value is a known member of the LogoutResponseStatus enum.
+func (e LogoutResponseStatus) Valid() bool {
+	switch e {
+	case LoggedOut:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatusOkStatus.
+const (
+	Ok StatusOkStatus = "ok"
+)
+
+// Valid indicates whether the value is a known member of the StatusOkStatus enum.
+func (e StatusOkStatus) Valid() bool {
+	switch e {
+	case Ok:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TokenRevokedResponseStatus.
+const (
+	Revoked TokenRevokedResponseStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the TokenRevokedResponseStatus enum.
+func (e TokenRevokedResponseStatus) Valid() bool {
+	switch e {
+	case Revoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// AuthMeResponse defines model for AuthMeResponse.
+type AuthMeResponse struct {
+	CsrfToken *string    `json:"csrf_token,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Kind      string     `json:"kind"`
+	Scopes    []string   `json:"scopes"`
+	Username  string     `json:"username"`
+}
+
 // CameraHealthCheck defines model for CameraHealthCheck.
 type CameraHealthCheck struct {
 	Online int `json:"online"`
 	Total  int `json:"total"`
+}
+
+// ChangePasswordRequest defines model for ChangePasswordRequest.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// CreateTokenRequest defines model for CreateTokenRequest.
+type CreateTokenRequest struct {
+	Name   string    `json:"name"`
+	Scopes *[]string `json:"scopes,omitempty"`
+}
+
+// CreateTokenResponse defines model for CreateTokenResponse.
+type CreateTokenResponse struct {
+	CreatedAt   time.Time `json:"created_at"`
+	Id          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Scopes      []string  `json:"scopes"`
+	Token       string    `json:"token"`
+	TokenPrefix string    `json:"token_prefix"`
+}
+
+// Error defines model for Error.
+type Error struct {
+	Error string `json:"error"`
 }
 
 // HealthChecks defines model for HealthChecks.
@@ -169,6 +251,29 @@ type HealthResponse struct {
 // HealthResponseStatus defines model for HealthResponse.Status.
 type HealthResponseStatus string
 
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	Password string `json:"password"`
+	Remember *bool  `json:"remember,omitempty"`
+	Username string `json:"username"`
+}
+
+// LoginResponse defines model for LoginResponse.
+type LoginResponse struct {
+	CsrfToken string    `json:"csrf_token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Kind      string    `json:"kind"`
+	Username  string    `json:"username"`
+}
+
+// LogoutResponse defines model for LogoutResponse.
+type LogoutResponse struct {
+	Status LogoutResponseStatus `json:"status"`
+}
+
+// LogoutResponseStatus defines model for LogoutResponse.Status.
+type LogoutResponseStatus string
+
 // ReadyCameraCheck defines model for ReadyCameraCheck.
 type ReadyCameraCheck struct {
 	Degraded int `json:"degraded"`
@@ -197,6 +302,14 @@ type RecompressionStats struct {
 	SegmentsRecompressed int        `json:"segments_recompressed"`
 }
 
+// StatusOk defines model for StatusOk.
+type StatusOk struct {
+	Status StatusOkStatus `json:"status"`
+}
+
+// StatusOkStatus defines model for StatusOk.Status.
+type StatusOkStatus string
+
 // StorageHealthCheck defines model for StorageHealthCheck.
 type StorageHealthCheck struct {
 	DiskAvailable   string             `json:"disk_available"`
@@ -218,8 +331,37 @@ type SystemResponse struct {
 	Version      string `json:"version"`
 }
 
+// TokenRevokedResponse defines model for TokenRevokedResponse.
+type TokenRevokedResponse struct {
+	Status TokenRevokedResponseStatus `json:"status"`
+}
+
+// TokenRevokedResponseStatus defines model for TokenRevokedResponse.Status.
+type TokenRevokedResponseStatus string
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody = ChangePasswordRequest
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
+type CreateTokenJSONRequestBody = CreateTokenRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Change the current user's password
+	// (POST /api/auth/change-password)
+	ChangePassword(w http.ResponseWriter, r *http.Request)
+	// Authenticate with username and password
+	// (POST /api/auth/login)
+	Login(w http.ResponseWriter, r *http.Request)
+	// End the current session
+	// (POST /api/auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
+	// Get the current authenticated principal
+	// (GET /api/auth/me)
+	GetAuthMe(w http.ResponseWriter, r *http.Request)
 	// Full health check
 	// (GET /api/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -238,6 +380,12 @@ type ServerInterface interface {
 	// Trigger manual recompression
 	// (POST /api/system/recompress/trigger)
 	TriggerRecompression(w http.ResponseWriter, r *http.Request)
+	// Create a new API token
+	// (POST /api/tokens)
+	CreateToken(w http.ResponseWriter, r *http.Request)
+	// Revoke an API token
+	// (DELETE /api/tokens/{id})
+	DeleteToken(w http.ResponseWriter, r *http.Request, id int64)
 	// Prometheus metrics
 	// (GET /metrics)
 	GetMetrics(w http.ResponseWriter, r *http.Request)
@@ -251,6 +399,86 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthMe operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthMe(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +579,61 @@ func (siw *ServerInterfaceWrapper) TriggerRecompression(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.TriggerRecompression(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateToken(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteToken operation middleware
+func (siw *ServerInterfaceWrapper) DeleteToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteToken(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -502,15 +785,123 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("POST "+options.BaseURL+"/api/auth/change-password", wrapper.ChangePassword)
+	m.HandleFunc("POST "+options.BaseURL+"/api/auth/login", wrapper.Login)
+	m.HandleFunc("POST "+options.BaseURL+"/api/auth/logout", wrapper.Logout)
+	m.HandleFunc("GET "+options.BaseURL+"/api/auth/me", wrapper.GetAuthMe)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/live", wrapper.GetHealthLive)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/ready", wrapper.GetHealthReady)
 	m.HandleFunc("GET "+options.BaseURL+"/api/openapi.json", wrapper.GetOpenAPISpec)
 	m.HandleFunc("GET "+options.BaseURL+"/api/system", wrapper.GetSystem)
 	m.HandleFunc("POST "+options.BaseURL+"/api/system/recompress/trigger", wrapper.TriggerRecompression)
+	m.HandleFunc("POST "+options.BaseURL+"/api/tokens", wrapper.CreateToken)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/tokens/{id}", wrapper.DeleteToken)
 	m.HandleFunc("GET "+options.BaseURL+"/metrics", wrapper.GetMetrics)
 
 	return m
+}
+
+type ChangePasswordRequestObject struct {
+	Body *ChangePasswordJSONRequestBody
+}
+
+type ChangePasswordResponseObject interface {
+	VisitChangePasswordResponse(w http.ResponseWriter) error
+}
+
+type ChangePassword200JSONResponse StatusOk
+
+func (response ChangePassword200JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ChangePassword400JSONResponse Error
+
+func (response ChangePassword400JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type LoginRequestObject struct {
+	Body *LoginJSONRequestBody
+}
+
+type LoginResponseObject interface {
+	VisitLoginResponse(w http.ResponseWriter) error
+}
+
+type Login200JSONResponse LoginResponse
+
+func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type Login401JSONResponse Error
+
+func (response Login401JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type Login429JSONResponse Error
+
+func (response Login429JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type LogoutRequestObject struct {
+}
+
+type LogoutResponseObject interface {
+	VisitLogoutResponse(w http.ResponseWriter) error
+}
+
+type Logout200JSONResponse LogoutResponse
+
+func (response Logout200JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAuthMeRequestObject struct {
+}
+
+type GetAuthMeResponseObject interface {
+	VisitGetAuthMeResponse(w http.ResponseWriter) error
+}
+
+type GetAuthMe200JSONResponse AuthMeResponse
+
+func (response GetAuthMe200JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAuthMe401JSONResponse Error
+
+func (response GetAuthMe401JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type GetHealthRequestObject struct {
@@ -627,6 +1018,49 @@ func (response TriggerRecompression409TextResponse) VisitTriggerRecompressionRes
 	return err
 }
 
+type CreateTokenRequestObject struct {
+	Body *CreateTokenJSONRequestBody
+}
+
+type CreateTokenResponseObject interface {
+	VisitCreateTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateToken201JSONResponse CreateTokenResponse
+
+func (response CreateToken201JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateToken400JSONResponse Error
+
+func (response CreateToken400JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteTokenRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteTokenResponseObject interface {
+	VisitDeleteTokenResponse(w http.ResponseWriter) error
+}
+
+type DeleteToken200JSONResponse TokenRevokedResponse
+
+func (response DeleteToken200JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetMetricsRequestObject struct {
 }
 
@@ -646,6 +1080,18 @@ func (response GetMetrics200TextResponse) VisitGetMetricsResponse(w http.Respons
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Change the current user's password
+	// (POST /api/auth/change-password)
+	ChangePassword(ctx context.Context, request ChangePasswordRequestObject) (ChangePasswordResponseObject, error)
+	// Authenticate with username and password
+	// (POST /api/auth/login)
+	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// End the current session
+	// (POST /api/auth/logout)
+	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// Get the current authenticated principal
+	// (GET /api/auth/me)
+	GetAuthMe(ctx context.Context, request GetAuthMeRequestObject) (GetAuthMeResponseObject, error)
 	// Full health check
 	// (GET /api/health)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -664,6 +1110,12 @@ type StrictServerInterface interface {
 	// Trigger manual recompression
 	// (POST /api/system/recompress/trigger)
 	TriggerRecompression(ctx context.Context, request TriggerRecompressionRequestObject) (TriggerRecompressionResponseObject, error)
+	// Create a new API token
+	// (POST /api/tokens)
+	CreateToken(ctx context.Context, request CreateTokenRequestObject) (CreateTokenResponseObject, error)
+	// Revoke an API token
+	// (DELETE /api/tokens/{id})
+	DeleteToken(ctx context.Context, request DeleteTokenRequestObject) (DeleteTokenResponseObject, error)
 	// Prometheus metrics
 	// (GET /metrics)
 	GetMetrics(ctx context.Context, request GetMetricsRequestObject) (GetMetricsResponseObject, error)
@@ -696,6 +1148,116 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ChangePassword operation middleware
+func (sh *strictHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	var request ChangePasswordRequestObject
+
+	var body ChangePasswordJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangePassword(ctx, request.(ChangePasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangePassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangePasswordResponseObject); ok {
+		if err := validResponse.VisitChangePasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Login operation middleware
+func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var request LoginRequestObject
+
+	var body LoginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Login(ctx, request.(LoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Login")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LoginResponseObject); ok {
+		if err := validResponse.VisitLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Logout operation middleware
+func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	var request LogoutRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Logout(ctx, request.(LogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Logout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LogoutResponseObject); ok {
+		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthMe operation middleware
+func (sh *strictHandler) GetAuthMe(w http.ResponseWriter, r *http.Request) {
+	var request GetAuthMeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthMe(ctx, request.(GetAuthMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuthMeResponseObject); ok {
+		if err := validResponse.VisitGetAuthMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetHealth operation middleware
@@ -842,6 +1404,63 @@ func (sh *strictHandler) TriggerRecompression(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// CreateToken operation middleware
+func (sh *strictHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateTokenRequestObject
+
+	var body CreateTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateToken(ctx, request.(CreateTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTokenResponseObject); ok {
+		if err := validResponse.VisitCreateTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteToken operation middleware
+func (sh *strictHandler) DeleteToken(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteTokenRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteToken(ctx, request.(DeleteTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTokenResponseObject); ok {
+		if err := validResponse.VisitDeleteTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetMetrics operation middleware
 func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	var request GetMetricsRequestObject
@@ -869,27 +1488,38 @@ func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
+	"mxzk8DTG8pt5W+1ud/8LAAD//6m2z7j6JQAA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

@@ -12,12 +12,148 @@ security:
   - cookieAuth: []
 
 tags:
+  - name: auth
+    description: Authentication, sessions, and API tokens
   - name: discovery
     description: API discovery and documentation
   - name: health
     description: Health checks, system info, and metrics
 
 paths:
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Authenticate with username and password
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/auth/logout:
+    post:
+      operationId: logout
+      summary: End the current session
+      tags: [auth]
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResponse"
+
+  /api/auth/me:
+    get:
+      operationId: getAuthMe
+      summary: Get the current authenticated principal
+      tags: [auth]
+      responses:
+        "200":
+          description: Current principal info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/auth/change-password:
+    post:
+      operationId: changePassword
+      summary: Change the current user's password
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/tokens:
+    post:
+      operationId: createToken
+      summary: Create a new API token
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequest"
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTokenResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/tokens/{id}:
+    delete:
+      operationId: deleteToken
+      summary: Revoke an API token
+      tags: [auth]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenRevokedResponse"
+
   /api/openapi.json:
     get:
       operationId: getOpenAPISpec
@@ -131,6 +267,106 @@ components:
       name: session
 
   schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        remember:
+          type: boolean
+
+    LoginResponse:
+      type: object
+      required: [username, kind, csrf_token, expires_at]
+      properties:
+        username:
+          type: string
+        kind:
+          type: string
+        csrf_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    LogoutResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [logged_out]
+
+    AuthMeResponse:
+      type: object
+      required: [username, kind, scopes]
+      properties:
+        username:
+          type: string
+        kind:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+        csrf_token:
+          type: string
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+
+    CreateTokenRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+
+    CreateTokenResponse:
+      type: object
+      required: [id, name, token, token_prefix, scopes, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        token:
+          type: string
+        token_prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TokenRevokedResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [revoked]
+
     Error:
       type: object
       required: [error]

@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,11 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
+	"github.com/rvben/vedetta/internal/auth"
+	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/recording"
+	"github.com/rvben/vedetta/internal/storage"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type contractValidator struct {
@@ -128,6 +135,198 @@ func TestContract_GetSystem(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/system", nil)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+// newTestServerWithAuth creates a Server with auth enabled, a mux, and routes registered.
+// It returns the server, its handler (mux wrapped in auth middleware), and the auth checker.
+func newTestServerWithAuth(t *testing.T) (*Server, http.Handler, *auth.Checker) {
+	t.Helper()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("bcrypt: %v", err)
+	}
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	apiCfg := config.APIConfig{Exposure: "lan", Host: "127.0.0.1", Port: 0}
+	checker := auth.New(config.AuthConfig{
+		Users: []config.AuthUser{{
+			Username:     "admin",
+			PasswordHash: string(hash),
+		}},
+	}, apiCfg, db)
+	t.Cleanup(checker.Close)
+
+	rec := recording.New(config.RecordingConfig{
+		Path: t.TempDir(),
+	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "")
+
+	srv := New(apiCfg, checker, db)
+	srv.SetSubsystems(nil, rec, nil, nil, nil, "", "", nil, nil)
+
+	handler := authMiddleware(srv, srv.mux)
+	return srv, handler, checker
+}
+
+func TestContract_Login(t *testing.T) {
+	_, handler, _ := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	body := `{"username":"admin","password":"secret"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_Login_InvalidCredentials(t *testing.T) {
+	_, handler, _ := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	body := `{"username":"admin","password":"wrong"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_AuthMe(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	// Login to get a session
+	session, err := checker.Login("admin", "secret", "10.0.0.1", "test", false)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// Get session cookies
+	loginRec := httptest.NewRecorder()
+	checker.SetSessionCookies(loginRec, httptest.NewRequest(http.MethodPost, "http://vedetta.local/api/auth/login", nil), session)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	for _, cookie := range loginRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+
+	// Verify the response contains expected fields
+	var resp map[string]any
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["username"] != "admin" {
+		t.Errorf("username = %v, want admin", resp["username"])
+	}
+	if resp["kind"] != "session" {
+		t.Errorf("kind = %v, want session", resp["kind"])
+	}
+}
+
+func TestContract_Logout(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	session, err := checker.Login("admin", "secret", "10.0.0.1", "test", false)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	loginRec := httptest.NewRecorder()
+	checker.SetSessionCookies(loginRec, httptest.NewRequest(http.MethodPost, "http://vedetta.local/api/auth/login", nil), session)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	for _, cookie := range loginRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	req.Header.Set("X-CSRF-Token", session.CSRFToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_CreateToken(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	session, err := checker.Login("admin", "secret", "10.0.0.1", "test", false)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	loginRec := httptest.NewRecorder()
+	checker.SetSessionCookies(loginRec, httptest.NewRequest(http.MethodPost, "http://vedetta.local/api/auth/login", nil), session)
+
+	body := `{"name":"test-token","scopes":["read:cameras"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/tokens", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	req.Header.Set("X-CSRF-Token", session.CSRFToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+}
+
+func TestContract_DeleteToken(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+	cv := newContractValidator(t)
+
+	session, err := checker.Login("admin", "secret", "10.0.0.1", "test", false)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// Create a token first
+	token, _, err := checker.CreateToken("admin", "to-delete", nil, "10.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	loginRec := httptest.NewRecorder()
+	checker.SetSessionCookies(loginRec, httptest.NewRequest(http.MethodPost, "http://vedetta.local/api/auth/login", nil), session)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/tokens/%d", token.ID), nil)
+	for _, cookie := range loginRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	req.Header.Set("X-CSRF-Token", session.CSRFToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
