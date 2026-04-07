@@ -155,8 +155,13 @@ type RTSPServerConfig struct {
 	Port    int  `yaml:"port"`
 }
 
+type ProxyAuthConfig struct {
+	Header string `yaml:"header"`
+}
+
 type AuthConfig struct {
-	Users []AuthUser `yaml:"users"`
+	Users []AuthUser      `yaml:"users"`
+	Proxy ProxyAuthConfig `yaml:"proxy"`
 }
 
 type AuthUser struct {
@@ -266,6 +271,10 @@ func Load(path string) (*Config, error) {
 		if _, err := parseProxyPrefix(proxy); err != nil {
 			return nil, fmt.Errorf("api.trusted_proxies[%d]: %w", i, err)
 		}
+	}
+
+	if cfg.Auth.Proxy.Header != "" && len(cfg.API.TrustedProxies) == 0 {
+		return nil, fmt.Errorf("auth.proxy.header requires at least one api.trusted_proxies entry")
 	}
 
 	if len(cfg.Auth.Users) == 0 {
