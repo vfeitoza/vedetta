@@ -22,6 +22,10 @@ tags:
     description: Detection events, snapshots, clips, and identification
   - name: health
     description: Health checks, system info, and metrics
+  - name: people
+    description: People and face recognition management
+  - name: faces
+    description: Face detection, assignment, and cropping
   - name: recordings
     description: Recording segments, playback, calendar, and export
 
@@ -912,6 +916,306 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/people:
+    get:
+      operationId: listPeople
+      summary: List all known people
+      tags: [people]
+      responses:
+        "200":
+          description: People list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Person"
+
+  /api/people/{id}:
+    get:
+      operationId: getPerson
+      summary: Get person detail with recent faces
+      tags: [people]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Person detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonDetail"
+        "404":
+          description: Person not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: updatePerson
+      summary: Update a person's name or ignore status
+      tags: [people]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePersonRequest"
+      responses:
+        "200":
+          description: Person updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusUpdated"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deletePerson
+      summary: Delete a person
+      tags: [people]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Person deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusDeleted"
+        "400":
+          description: Invalid person ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/people/{id}/faces:
+    get:
+      operationId: listPersonFaces
+      summary: List faces belonging to a person
+      tags: [people]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Face list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Face"
+        "400":
+          description: Invalid person ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/people/{id}/events:
+    get:
+      operationId: listPersonEvents
+      summary: List events where this person was detected
+      tags: [people]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Event list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "404":
+          description: Person not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/people/merge:
+    post:
+      operationId: mergePeople
+      summary: Merge two people into one
+      tags: [people]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergePeopleRequest"
+      responses:
+        "200":
+          description: People merged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMerged"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/faces/unmatched:
+    get:
+      operationId: listUnmatchedFaces
+      summary: List faces not assigned to any person
+      tags: [faces]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Unmatched face list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Face"
+
+  /api/faces/{id}/assign:
+    put:
+      operationId: assignFace
+      summary: Assign a face to a person
+      tags: [faces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignFaceRequest"
+      responses:
+        "200":
+          description: Face assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignFaceResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/faces/{id}/crop:
+    get:
+      operationId: getFaceCrop
+      summary: Get cropped face image
+      tags: [faces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: JPEG face crop
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: No crop available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/faces/{id}/ignore:
+    post:
+      operationId: ignoreFace
+      summary: Delete/ignore a face
+      tags: [faces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Face ignored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusIgnored"
+        "400":
+          description: Invalid face ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/faces/backfill:
+    post:
+      operationId: backfillFaces
+      summary: Scan existing snapshots for faces
+      tags: [faces]
+      responses:
+        "200":
+          description: Backfill progress as newline-delimited JSON
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+
   /api/recordings/segments/{camera}:
     get:
       operationId: listSegments
@@ -1346,6 +1650,164 @@ components:
         status:
           type: string
           enum: [deleted]
+
+    StatusUpdated:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [updated]
+
+    StatusMerged:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [merged]
+
+    StatusIgnored:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ignored]
+
+    Person:
+      type: object
+      required: [id, name, ignore, face_count, appearance_count, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        ignore:
+          type: boolean
+        face_count:
+          type: integer
+        appearance_count:
+          type: integer
+        best_face_id:
+          type: integer
+          format: int64
+        source_event_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PersonDetailFace:
+      type: object
+      required: [id, camera, confidence, crop_path, timestamp]
+      properties:
+        id:
+          type: integer
+          format: int64
+        camera:
+          type: string
+        confidence:
+          type: number
+          format: double
+        similarity:
+          type: number
+          format: double
+        crop_path:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    PersonDetail:
+      type: object
+      required: [id, name, ignore, face_count, created_at, faces]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        ignore:
+          type: boolean
+        face_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        faces:
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonDetailFace"
+
+    Face:
+      type: object
+      required: [id, event_id, camera, confidence, timestamp, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        event_id:
+          type: string
+        camera:
+          type: string
+        person_id:
+          type: integer
+          format: int64
+        crop_path:
+          type: string
+        confidence:
+          type: number
+          format: double
+        similarity:
+          type: number
+          format: double
+        timestamp:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    UpdatePersonRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        ignore:
+          type: boolean
+
+    MergePeopleRequest:
+      type: object
+      required: [source_id, target_id]
+      properties:
+        source_id:
+          type: integer
+          format: int64
+        target_id:
+          type: integer
+          format: int64
+
+    AssignFaceRequest:
+      type: object
+      properties:
+        person_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    AssignFaceResponse:
+      type: object
+      required: [status, person_id]
+      properties:
+        status:
+          type: string
+          enum: [assigned]
+        person_id:
+          type: integer
+          format: int64
 
     CameraInfo:
       type: object
