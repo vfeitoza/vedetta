@@ -2265,7 +2265,7 @@ function openAccountModal() {
 
     var methodEl = el('account-auth-method');
     if (methodEl) {
-      var labels = { session: 'Local account', token: 'API token', proxy: 'Authenticated via reverse proxy' };
+      var labels = { session: 'Local account', token: 'API token', proxy: 'Single sign-on' };
       methodEl.textContent = labels[data.kind] || data.kind;
     }
 
