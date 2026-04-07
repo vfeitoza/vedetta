@@ -174,104 +174,28 @@ func NewSetupMode(cfg config.APIConfig, db *storage.DB, configPath string, setup
 	return s
 }
 
+// Compile-time check: *Server must implement the generated ServerInterface.
+var _ ServerInterface = (*Server)(nil)
+
 // registerRoutes registers all application routes on s.mux.
 // Called from New() and TransitionToFull().
 func (s *Server) registerRoutes() {
-	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	s.mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
-	s.mux.HandleFunc("POST /api/auth/change-password", s.handleChangePassword)
-	s.mux.HandleFunc("GET /api/tokens", s.handleListTokens)
-	s.mux.HandleFunc("POST /api/tokens", s.handleCreateToken)
-	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.handleDeleteToken)
+	// Generated API route wiring — registers all OpenAPI-defined endpoints.
+	// Path param extraction and query param parsing are handled by generated wrappers.
+	HandlerFromMux(s, s.mux)
 
-	// API endpoints
-	s.mux.HandleFunc("GET /api/cameras", s.handleListCameras)
-	s.mux.HandleFunc("GET /api/cameras/{name}", s.handleGetCamera)
-	s.mux.HandleFunc("GET /api/cameras/{name}/snapshot", s.handleSnapshot)
-	s.mux.HandleFunc("GET /api/events", s.handleListEvents)
-	s.mux.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
-	s.mux.HandleFunc("GET /api/events/{id}/snapshot", s.handleEventSnapshot)
-	s.mux.HandleFunc("GET /api/events/{id}/clip", s.handleEventClip)
-	s.mux.HandleFunc("POST /api/events/{id}/clip", s.handleReextractClip)
-	s.mux.HandleFunc("GET /api/events/counts", s.handleEventCounts)
-	s.mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPISpec)
-	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/health/live", s.handleHealthLive)
-	s.mux.HandleFunc("GET /api/health/ready", s.handleHealthReady)
-	s.mux.HandleFunc("GET /api/system", s.handleSystemAPI)
-	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
+	// Zone snapshot reuses camera snapshot handler (not in OpenAPI spec)
+	s.mux.HandleFunc("GET /api/cameras/{name}/zones/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		s.GetCameraSnapshot(w, r, r.PathValue("name"))
+	})
 
-	s.mux.HandleFunc("GET /api/recordings/calendar", s.handleRecordingsCalendar)
-	s.mux.HandleFunc("GET /api/recordings/summary", s.handleRecordingsSummary)
-
-	s.mux.HandleFunc("GET /api/cameras/{name}/timeline", s.handleCameraTimeline)
-	// Old progressive MP4 playback endpoint removed — replaced by HLS m3u8
-	s.mux.HandleFunc("GET /api/cameras/{name}/playback.m3u8", s.handlePlaybackM3U8)
-	s.mux.HandleFunc("GET /api/cameras/{name}/segments/{id}", s.handleSegment)
-	s.mux.HandleFunc("GET /api/cameras/{name}/segments/{id}/hls/init.mp4", s.handleSegmentInit)
-	s.mux.HandleFunc("GET /api/cameras/{name}/segments/{id}/hls/{segNum}", s.handleSegmentHLS)
-	s.mux.HandleFunc("GET /api/cameras/{name}/thumbnail", s.handleThumbnail)
-	s.mux.HandleFunc("GET /api/recordings/segments/{camera}", s.handleListSegments)
-	s.mux.HandleFunc("GET /api/recordings/export/{camera}", s.handleRecordingExport)
-
-	// Zone endpoints
-	s.mux.HandleFunc("GET /api/cameras/{name}/zones/snapshot", s.handleSnapshot) // reuse camera snapshot for zone overlay background
-	s.mux.HandleFunc("GET /api/cameras/{name}/zones", s.handleListZones)
-	s.mux.HandleFunc("POST /api/cameras/{name}/zones", s.handleCreateZone)
-	s.mux.HandleFunc("PUT /api/cameras/{name}/zones/{zone}", s.handleUpdateZone)
-	s.mux.HandleFunc("DELETE /api/cameras/{name}/zones/{zone}", s.handleDeleteZone)
-	s.mux.HandleFunc("GET /api/cameras/{name}/zones/{zone}/presence", s.handleZonePresence)
-
-	// People/Face endpoints
-	s.mux.HandleFunc("GET /api/people", s.handleListPeople)
-	s.mux.HandleFunc("GET /api/people/{id}", s.handleGetPerson)
-	s.mux.HandleFunc("PUT /api/people/{id}", s.handleUpdatePerson)
-	s.mux.HandleFunc("DELETE /api/people/{id}", s.handleDeletePerson)
-	s.mux.HandleFunc("GET /api/people/{id}/faces", s.handleListPersonFaces)
-	s.mux.HandleFunc("GET /api/people/{id}/events", s.handleListPersonEvents)
-	s.mux.HandleFunc("GET /api/faces/unmatched", s.handleListUnmatchedFaces)
-	s.mux.HandleFunc("PUT /api/faces/{id}/assign", s.handleAssignFace)
-	s.mux.HandleFunc("GET /api/faces/{id}/crop", s.handleFaceCrop)
-	s.mux.HandleFunc("POST /api/faces/{id}/ignore", s.handleIgnoreFace)
-	s.mux.HandleFunc("POST /api/faces/backfill", s.handleFaceBackfill)
-	s.mux.HandleFunc("POST /api/people/merge", s.handleMergePeople)
-
-	// Object re-identification
-	s.mux.HandleFunc("GET /api/objects", s.handleListObjects)
-	s.mux.HandleFunc("POST /api/objects", s.handleCreateObject)
-	s.mux.HandleFunc("PUT /api/objects/{id}", s.handleUpdateObject)
-	s.mux.HandleFunc("DELETE /api/objects/{id}", s.handleDeleteObject)
-	s.mux.HandleFunc("GET /api/objects/{id}/sightings", s.handleObjectSightings)
-	s.mux.HandleFunc("GET /api/objects/{id}/crop", s.handleObjectCrop)
-	s.mux.HandleFunc("GET /api/objects/{id}/references", s.handleObjectReferences)
-	s.mux.HandleFunc("POST /api/objects/{id}/references", s.handleAddObjectReference)
-	s.mux.HandleFunc("DELETE /api/objects/references/{id}", s.handleDeleteObjectReference)
-	s.mux.HandleFunc("DELETE /api/objects/sightings/{id}", s.handleDismissSighting)
-	s.mux.HandleFunc("POST /api/events/{id}/identify", s.handleIdentifyEvent)
-
-	s.mux.HandleFunc("GET /api/events/{id}/detection-crop", s.handleEventDetectionCrop)
-	s.mux.HandleFunc("POST /api/events/{id}/track-person", s.handleTrackPerson)
-	s.mux.HandleFunc("POST /api/events/{id}/assign-person", s.handleAssignPersonToEvent)
-
-	// Doorbell + real-time events
-	s.mux.HandleFunc("POST /api/cameras/{name}/doorbell", s.handleDoorbellPress)
-	s.mux.HandleFunc("POST /api/cameras/{name}/ptz", s.handlePTZ)
-	s.mux.HandleFunc("GET /api/events/stream", s.handleSSE)
-
-	// Streaming endpoints
-	s.mux.HandleFunc("POST /api/cameras/{name}/webrtc/offer", s.handleWebRTCOffer)
-	s.mux.HandleFunc("GET /api/cameras/{name}/mse/ws", s.handleMSEWebSocket)
-	s.mux.HandleFunc("GET /api/cameras/{name}/mjpeg", s.handleMJPEG)
-
-	// HTML partial endpoints for htmx
+	// HTML partial endpoints for htmx (not in OpenAPI spec)
 	s.mux.HandleFunc("GET /partials/camera-grid", s.handleCameraGridPartial)
 	s.mux.HandleFunc("GET /partials/dashboard-stats", s.handleDashboardStatsPartial)
 	s.mux.HandleFunc("GET /partials/events-gallery", s.handleEventsGalleryPartial)
 	s.mux.HandleFunc("GET /partials/event/{id}", s.handleEventDetailPartial)
 	s.mux.HandleFunc("GET /partials/system-status", s.handleSystemStatusPartial)
 	s.mux.HandleFunc("GET /partials/system", s.handleSystemPartial)
-	s.mux.HandleFunc("POST /api/system/recompress/trigger", s.handleRecompressTrigger)
 
 	// Setup status endpoint (returns "running" in normal mode)
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {

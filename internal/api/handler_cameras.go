@@ -16,7 +16,7 @@ import (
 	"github.com/rvben/vedetta/internal/media"
 )
 
-func (s *Server) handleListCameras(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ListCameras(w http.ResponseWriter, _ *http.Request) {
 	statuses := s.cameraStatuses()
 	type cameraInfo struct {
 		Name      string `json:"name"`
@@ -38,8 +38,7 @@ func (s *Server) handleListCameras(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetCamera(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -61,8 +60,7 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handlePTZ(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) SendPTZCommand(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -130,8 +128,7 @@ func (s *Server) handlePTZ(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetCameraSnapshot(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -154,25 +151,14 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleThumbnail(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetCameraThumbnail(w http.ResponseWriter, r *http.Request, name string, params GetCameraThumbnailParams) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
 		return
 	}
 
-	startStr := r.URL.Query().Get("t")
-	if startStr == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "t parameter required (RFC3339)"})
-		return
-	}
-
-	t, err := time.Parse(time.RFC3339, startStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid time format"})
-		return
-	}
+	t := params.T
 
 	// Find the segment containing the timestamp
 	segments, err := s.db.QuerySegments(name, t, t.Add(1*time.Second))
@@ -203,8 +189,7 @@ func (s *Server) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	w.Write(jpegData)
 }
 
-func (s *Server) handleDoorbellPress(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) PressDoorbell(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -298,8 +283,7 @@ func (s *Server) handleDoorbellPress(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) ListZones(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -323,8 +307,7 @@ func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) CreateZone(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -378,9 +361,8 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, z)
 }
 
-func (s *Server) handleUpdateZone(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	zoneName := r.PathValue("zone")
+func (s *Server) UpdateZone(w http.ResponseWriter, r *http.Request, name string, zone string) {
+	zoneName := zone
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -461,9 +443,8 @@ func (s *Server) handleUpdateZone(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, z)
 }
 
-func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	zoneName := r.PathValue("zone")
+func (s *Server) DeleteZone(w http.ResponseWriter, r *http.Request, name string, zone string) {
+	zoneName := zone
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -480,21 +461,19 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) handleZonePresence(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	zoneName := r.PathValue("zone")
+func (s *Server) GetZonePresence(w http.ResponseWriter, r *http.Request, name string, zone string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
 		return
 	}
 
-	zone, err := s.db.GetZone(name, zoneName)
+	zoneRecord, err := s.db.GetZone(name, zone)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if zone == nil {
+	if zoneRecord == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "zone not found"})
 		return
 	}
@@ -505,7 +484,7 @@ func (s *Server) handleZonePresence(w http.ResponseWriter, r *http.Request) {
 
 	var presence []camera.ZonePresence
 	for key, zp := range allPresence {
-		if key.ZoneID == zone.ID {
+		if key.ZoneID == zoneRecord.ID {
 			presence = append(presence, zp)
 		}
 	}

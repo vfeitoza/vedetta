@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/rvben/vedetta/internal/auth"
 )
 
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if s.auth == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authentication unavailable"})
 		return
@@ -52,7 +51,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	principal := principalFromContext(r.Context())
 	if principal == nil || principal.Kind != auth.AuthKindSession {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session authentication required"})
@@ -66,7 +65,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
-func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+func (s *Server) GetAuthMe(w http.ResponseWriter, r *http.Request) {
 	principal := principalFromContext(r.Context())
 	if principal == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -84,7 +83,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateToken(w http.ResponseWriter, r *http.Request) {
 	principal := principalFromContext(r.Context())
 	if principal == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -124,15 +123,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
+func (s *Server) DeleteToken(w http.ResponseWriter, r *http.Request, id int64) {
 	principal := principalFromContext(r.Context())
 	if principal == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid token ID"})
 		return
 	}
 	if err := s.auth.RevokeToken(id, principal.Username); err != nil {
@@ -142,7 +136,7 @@ func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
-func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListTokens(w http.ResponseWriter, r *http.Request) {
 	principal := principalFromContext(r.Context())
 	if principal == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -181,7 +175,7 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	principal := principalFromContext(r.Context())
 	if principal == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

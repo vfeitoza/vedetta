@@ -11,7 +11,7 @@ import (
 	"github.com/rvben/vedetta/internal/recording"
 )
 
-func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 	spec, err := GetSwagger()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load spec"})
@@ -23,7 +23,7 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(spec)
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 	status := "ok"
 
 	// Database check — read-only, should be fast even under load
@@ -85,14 +85,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleHealthLive(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetHealthLive(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"uptime": formatDuration(time.Since(startTime)),
 	})
 }
 
-func (s *Server) handleHealthReady(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetHealthReady(w http.ResponseWriter, _ *http.Request) {
 	statusCode := http.StatusOK
 	status := "ready"
 
@@ -147,7 +147,7 @@ func (s *Server) handleHealthReady(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 
 	cameraStatuses := s.cameraStatuses()
@@ -201,7 +201,7 @@ func promLabel(value string) string {
 	return replacer.Replace(value)
 }
 
-func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetSystem(w http.ResponseWriter, _ *http.Request) {
 	statuses := s.cameraStatuses()
 	onlineCount := 0
 	for _, st := range statuses {
@@ -223,7 +223,7 @@ func (s *Server) handleSystemAPI(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleRecompressTrigger(w http.ResponseWriter, r *http.Request) {
+func (s *Server) TriggerRecompression(w http.ResponseWriter, r *http.Request) {
 	ctx := s.ctx
 	if ctx == nil {
 		ctx = context.Background()

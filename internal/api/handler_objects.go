@@ -7,13 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-func (s *Server) handleListObjects(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ListObjects(w http.ResponseWriter, _ *http.Request) {
 	objects, err := s.db.ListKnownObjects()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -31,7 +30,7 @@ func (s *Server) handleListObjects(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleCreateObject(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 	if s.objectEmbedder == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
 		return
@@ -77,40 +76,35 @@ func (s *Server) handleCreateObject(w http.ResponseWriter, r *http.Request) {
 		Label:    event.Label,
 		Centroid: detect.Float32ToBytes(embedding),
 	}
-	id, err := s.db.SaveKnownObject(obj)
+	objID, err := s.db.SaveKnownObject(obj)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	cropDir := filepath.Join(s.snapshotPath, "objects")
-	cropPath := s.objectEmbedder.SaveCrop(img, event.Box, cropDir, id)
+	cropPath := s.objectEmbedder.SaveCrop(img, event.Box, cropDir, objID)
 	if cropPath != "" {
-		_ = s.db.UpdateKnownObjectCrop(id, cropPath)
+		_ = s.db.UpdateKnownObjectCrop(objID, cropPath)
 	}
 
 	// Save as first reference
 	s.db.SaveObjectReference(storage.ObjectReference{
-		ObjectID:  id,
+		ObjectID:  objID,
 		EventID:   req.EventID,
 		Embedding: detect.Float32ToBytes(embedding),
 		CropPath:  cropPath,
 	})
 
 	// Background re-match: tag recent events with this new object
-	go s.rematchRecentEvents(id)
+	go s.rematchRecentEvents(objID)
 
-	obj.ID = id
+	obj.ID = objID
 	obj.CropPath = cropPath
 	writeJSON(w, http.StatusCreated, obj)
 }
 
-func (s *Server) handleUpdateObject(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
+func (s *Server) UpdateObject(w http.ResponseWriter, r *http.Request, id int64) {
 	var req struct {
 		Name           *string  `json:"name"`
 		MatchThreshold *float64 `json:"match_threshold"`
@@ -134,12 +128,7 @@ func (s *Server) handleUpdateObject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
-func (s *Server) handleDismissSighting(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sighting ID"})
-		return
-	}
+func (s *Server) DismissSighting(w http.ResponseWriter, r *http.Request, id int64) {
 	sighting, err := s.db.GetObjectSighting(id)
 	if err != nil || sighting == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sighting not found"})
@@ -157,13 +146,7 @@ func (s *Server) handleDismissSighting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
 }
 
-func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
-
+func (s *Server) DeleteObject(w http.ResponseWriter, r *http.Request, id int64) {
 	obj, err := s.db.GetKnownObject(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -184,17 +167,10 @@ func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) handleObjectSightings(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
+func (s *Server) ListObjectSightings(w http.ResponseWriter, r *http.Request, id int64, params ListObjectSightingsParams) {
 	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 {
-			limit = v
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 	sightings, err := s.db.ListObjectSightings(id, limit)
 	if err != nil {
@@ -213,21 +189,15 @@ func (s *Server) handleObjectSightings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleObjectCrop(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
-
-	// Serve specific reference crop if ?ref= is provided
-	if refIDStr := r.URL.Query().Get("ref"); refIDStr != "" {
+func (s *Server) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64, params GetObjectCropParams) {
+	// Serve specific reference crop if ref param is provided
+	if params.Ref != nil {
 		refs, err := s.db.ListObjectReferences(id)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		refID, _ := strconv.ParseInt(refIDStr, 10, 64)
+		refID := *params.Ref
 		for _, ref := range refs {
 			if ref.ID == refID && ref.CropPath != "" {
 				http.ServeFile(w, r, ref.CropPath)
@@ -246,12 +216,7 @@ func (s *Server) handleObjectCrop(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, obj.CropPath)
 }
 
-func (s *Server) handleObjectReferences(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
+func (s *Server) ListObjectReferences(w http.ResponseWriter, r *http.Request, id int64) {
 	refs, err := s.db.ListObjectReferences(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -269,17 +234,13 @@ func (s *Server) handleObjectReferences(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *Server) handleAddObjectReference(w http.ResponseWriter, r *http.Request) {
+func (s *Server) AddObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
 	if s.objectEmbedder == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
 		return
 	}
 
-	objectID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid object ID"})
-		return
-	}
+	objectID := id
 
 	obj, err := s.db.GetKnownObject(objectID)
 	if err != nil || obj == nil {
@@ -340,12 +301,7 @@ func (s *Server) handleAddObjectReference(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func (s *Server) handleDeleteObjectReference(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reference ID"})
-		return
-	}
+func (s *Server) DeleteObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeleteObjectReference(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

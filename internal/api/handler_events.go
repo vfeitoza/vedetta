@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
@@ -20,30 +19,33 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
-	cameraFilter := r.URL.Query().Get("camera")
-	labelFilter := r.URL.Query().Get("label")
-	zoneFilter := r.URL.Query().Get("zone")
-	objectFilter := r.URL.Query().Get("object")
+func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
+	var cameraFilter, labelFilter, zoneFilter, objectFilter string
+	if params.Camera != nil {
+		cameraFilter = *params.Camera
+	}
+	if params.Label != nil {
+		labelFilter = *params.Label
+	}
+	if params.Zone != nil {
+		zoneFilter = *params.Zone
+	}
+	if params.Object != nil {
+		objectFilter = *params.Object
+	}
 	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 
 	offset := 0
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
-			offset = parsed
-		}
+	if params.Offset != nil && *params.Offset >= 0 {
+		offset = *params.Offset
 	}
 
 	var sinceTime time.Time
-	if s := r.URL.Query().Get("since"); s != "" {
-		if parsed, err := time.Parse(time.RFC3339, s); err == nil {
-			sinceTime = parsed
-		}
+	if params.Since != nil {
+		sinceTime = *params.Since
 	}
 
 	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, zoneFilter, objectFilter, limit, offset)
@@ -79,8 +81,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetEvent(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -93,8 +94,7 @@ func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, event)
 }
 
-func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetEventSnapshot(w http.ResponseWriter, r *http.Request, id string, params GetEventSnapshotParams) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -106,9 +106,9 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve raw file for downloads or if ?raw=1
-	if r.URL.Query().Get("download") != "" || r.URL.Query().Get("raw") != "" {
+	if params.Download != nil || params.Raw != nil {
 		filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
-		if r.URL.Query().Get("download") != "" {
+		if params.Download != nil {
 			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		}
 		http.ServeFile(w, r, event.SnapshotPath)
@@ -138,8 +138,7 @@ func (s *Server) handleEventSnapshot(w http.ResponseWriter, r *http.Request) {
 	jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
 }
 
-func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetEventClip(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -154,8 +153,7 @@ func (s *Server) handleEventClip(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, event.ClipPath)
 }
 
-func (s *Server) handleEventDetectionCrop(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetEventDetectionCrop(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil || event == nil || !event.SnapshotAvailable {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
@@ -188,8 +186,7 @@ func (s *Server) handleEventDetectionCrop(w http.ResponseWriter, r *http.Request
 	jpeg.Encode(w, crop, &jpeg.Options{Quality: 90})
 }
 
-func (s *Server) handleReextractClip(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -214,7 +211,7 @@ func (s *Server) handleReextractClip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "event": id})
 }
 
-func (s *Server) handleEventCounts(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetEventCounts(w http.ResponseWriter, _ *http.Request) {
 	total, _ := s.db.CountEvents()
 	byLabel, _ := s.db.CountEventsByLabel()
 	byCamera, _ := s.db.CountEventsByCamera()
@@ -226,7 +223,7 @@ func (s *Server) handleEventCounts(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+func (s *Server) GetEventStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -290,13 +287,13 @@ func (s *Server) broadcastSSE(eventType string, data any) {
 	}
 }
 
-func (s *Server) handleIdentifyEvent(w http.ResponseWriter, r *http.Request) {
+func (s *Server) IdentifyEvent(w http.ResponseWriter, r *http.Request, id string) {
 	if s.objectEmbedder == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
 		return
 	}
 
-	eventID := r.PathValue("id")
+	eventID := id
 	event, err := s.db.GetEventByID(eventID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -353,8 +350,8 @@ func (s *Server) handleIdentifyEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, matches)
 }
 
-func (s *Server) handleTrackPerson(w http.ResponseWriter, r *http.Request) {
-	eventID := r.PathValue("id")
+func (s *Server) TrackPerson(w http.ResponseWriter, r *http.Request, id string) {
+	eventID := id
 
 	var req struct {
 		Name string `json:"name"`
@@ -464,8 +461,8 @@ func (s *Server) handleTrackPerson(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleAssignPersonToEvent(w http.ResponseWriter, r *http.Request) {
-	eventID := r.PathValue("id")
+func (s *Server) AssignPersonToEvent(w http.ResponseWriter, r *http.Request, id string) {
+	eventID := id
 
 	var req struct {
 		PersonID int64 `json:"person_id"`

@@ -10,8 +10,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func (s *Server) handleWebRTCOffer(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) PostWebRTCOffer(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -36,8 +35,7 @@ func (s *Server) handleWebRTCOffer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, answer)
 }
 
-func (s *Server) handleMSEWebSocket(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -48,8 +46,7 @@ func (s *Server) handleMSEWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.mse.HandleWebSocket(w, r, name, rtspURL)
 }
 
-func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetMJPEG(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})

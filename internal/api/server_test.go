@@ -773,27 +773,15 @@ func TestHandleRecordingsSummary_WithData(t *testing.T) {
 // --- Edge case tests ---
 
 func TestHandleListEvents_InvalidLimit(t *testing.T) {
-	srv, db := newTestServer(t)
-	now := time.Now().UTC().Truncate(time.Second)
-	seedEvent(t, db, "lim-1", "cam1", "person", 0.9, now)
+	srv, _ := newTestServer(t)
 
-	// Invalid limit should fall back to default (50)
+	// The generated OpenAPI wrapper rejects non-integer limit with 400
 	req := httptest.NewRequest(http.MethodGet, "/api/events?limit=abc", nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	var body struct {
-		Items []camera.Event `json:"items"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Items) != 1 {
-		t.Errorf("got %d events, want 1", len(body.Items))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 

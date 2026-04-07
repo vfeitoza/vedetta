@@ -7,29 +7,25 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/recording"
 )
 
-func (s *Server) handleListSegments(w http.ResponseWriter, r *http.Request) {
-	cameraName := r.PathValue("camera")
-	cam := s.cameras.GetCamera(cameraName)
+func (s *Server) ListSegments(w http.ResponseWriter, r *http.Request, camera string, params ListSegmentsParams) {
+	cam := s.cameras.GetCamera(camera)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
 		return
 	}
 
 	date := time.Now().UTC()
-	if dateStr := r.URL.Query().Get("date"); dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			date = parsed
-		}
+	if params.Date != nil {
+		date = params.Date.Time
 	}
 
-	segments, err := s.db.GetSegmentsForDate(cameraName, date)
+	segments, err := s.db.GetSegmentsForDate(camera, date)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -62,8 +58,7 @@ func (s *Server) handleListSegments(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleCameraTimeline(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetCameraTimeline(w http.ResponseWriter, r *http.Request, name string, params GetCameraTimelineParams) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
@@ -71,10 +66,8 @@ func (s *Server) handleCameraTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	date := time.Now().UTC()
-	if dateStr := r.URL.Query().Get("date"); dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			date = parsed
-		}
+	if params.Date != nil {
+		date = params.Date.Time
 	}
 
 	segments, err := s.db.GetSegmentsForDate(name, date)
@@ -143,31 +136,18 @@ func (s *Server) handleCameraTimeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handlePlaybackM3U8(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *Server) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name string, params GetCameraPlaybackParams) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
 		return
 	}
 
-	startStr := r.URL.Query().Get("start")
-	if startStr == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start parameter required"})
-		return
-	}
-
-	start, err := time.Parse(time.RFC3339, startStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid start time format"})
-		return
-	}
+	start := params.Start
 
 	durationSec := 600
-	if ds := r.URL.Query().Get("duration"); ds != "" {
-		if d, err := strconv.Atoi(ds); err == nil && d > 0 {
-			durationSec = d
-		}
+	if params.Duration != nil && *params.Duration > 0 {
+		durationSec = *params.Duration
 	}
 	if durationSec > 3600 {
 		durationSec = 3600
@@ -203,7 +183,7 @@ func (s *Server) handlePlaybackM3U8(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cache the segment refs so handleSegmentHLS can look them up
+	// Cache the segment refs so GetSegmentHLS can look them up
 	for _, seg := range segments {
 		cacheKey := fmt.Sprintf("%s:%d", name, seg.ID)
 		s.hlsSegmentCache.Store(cacheKey, result.Segments)
@@ -216,16 +196,7 @@ func (s *Server) handlePlaybackM3U8(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	idStr := r.PathValue("id")
-
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid segment ID"})
-		return
-	}
-
+func (s *Server) GetSegment(w http.ResponseWriter, r *http.Request, name string, id int64) {
 	seg, err := s.db.GetSegmentByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -239,17 +210,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, seg.Path)
 }
 
-// handleSegmentInit serves the fMP4 init segment (ftyp+moov) for HLS playback.
-func (s *Server) handleSegmentInit(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	idStr := r.PathValue("id")
-
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid segment ID"})
-		return
-	}
-
+// GetSegmentInit serves the fMP4 init segment (ftyp+moov) for HLS playback.
+func (s *Server) GetSegmentInit(w http.ResponseWriter, r *http.Request, name string, id int64) {
 	seg, err := s.db.GetSegmentByID(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -307,26 +269,10 @@ func (s *Server) handleSegmentInit(w http.ResponseWriter, r *http.Request) {
 	w.Write(initData)
 }
 
-// handleSegmentHLS serves a re-segmented fMP4 chunk for HLS playback.
+// GetSegmentHLS serves a re-segmented fMP4 chunk for HLS playback.
 // It reads the raw moof+mdat bytes from disk, unmarshals them, and re-marshals
 // as clean fMP4 that MSE/hls.js can consume.
-func (s *Server) handleSegmentHLS(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	idStr := r.PathValue("id")
-	segNumStr := r.PathValue("segNum")
-
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid segment ID"})
-		return
-	}
-
-	segNum, err := strconv.Atoi(segNumStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid segment number"})
-		return
-	}
-
+func (s *Server) GetSegmentHLS(w http.ResponseWriter, r *http.Request, name string, id int64, segNum int) {
 	// Look up cached segment refs
 	cacheKey := fmt.Sprintf("%s:%d", name, id)
 	refsVal, ok := s.hlsSegmentCache.Load(cacheKey)
@@ -351,13 +297,15 @@ func (s *Server) handleSegmentHLS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request) {
-	cameraFilter := r.URL.Query().Get("camera")
-	monthStr := r.URL.Query().Get("month")
+func (s *Server) GetRecordingsCalendar(w http.ResponseWriter, r *http.Request, params GetRecordingsCalendarParams) {
+	var cameraFilter string
+	if params.Camera != nil {
+		cameraFilter = *params.Camera
+	}
 
 	year, month := time.Now().Year(), int(time.Now().Month())
-	if monthStr != "" {
-		if parsed, err := time.Parse("2006-01", monthStr); err == nil {
+	if params.Month != nil {
+		if parsed, err := time.Parse("2006-01", *params.Month); err == nil {
 			year = parsed.Year()
 			month = int(parsed.Month())
 		}
@@ -375,14 +323,10 @@ func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"days": days})
 }
 
-func (s *Server) handleRecordingsSummary(w http.ResponseWriter, r *http.Request) {
-	dateStr := r.URL.Query().Get("date")
-
+func (s *Server) GetRecordingsSummary(w http.ResponseWriter, r *http.Request, params GetRecordingsSummaryParams) {
 	date := time.Now().UTC()
-	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			date = parsed
-		}
+	if params.Date != nil {
+		date = params.Date.Time
 	}
 
 	// Get all segments for the date across all cameras.
@@ -443,26 +387,9 @@ func (s *Server) handleRecordingsSummary(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
-	cameraName := r.PathValue("camera")
-
-	startStr := r.URL.Query().Get("start")
-	endStr := r.URL.Query().Get("end")
-	if startStr == "" || endStr == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start and end parameters required (RFC3339)"})
-		return
-	}
-
-	start, err := time.Parse(time.RFC3339, startStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid start time, use RFC3339"})
-		return
-	}
-	end, err := time.Parse(time.RFC3339, endStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid end time, use RFC3339"})
-		return
-	}
+func (s *Server) ExportRecording(w http.ResponseWriter, r *http.Request, camera string, params ExportRecordingParams) {
+	start := params.Start
+	end := params.End
 
 	if !end.After(start) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "end must be after start"})
@@ -482,7 +409,7 @@ func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
 	}
 	exportCh := make(chan exportResult, 1)
 	go func() {
-		res, err := s.recorder.PrepareExport(cameraName, start, end)
+		res, err := s.recorder.PrepareExport(camera, start, end)
 		exportCh <- exportResult{res, err}
 	}()
 
@@ -491,7 +418,7 @@ func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
 	case res := <-exportCh:
 		if res.err != nil {
 			slog.Error("recording export failed",
-				"camera", cameraName,
+				"camera", camera,
 				"start", start.Format(time.RFC3339),
 				"end", end.Format(time.RFC3339),
 				"error", res.err,
@@ -502,7 +429,7 @@ func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
 		defer res.result.Close()
 
 		filename := fmt.Sprintf("%s_%s_%s.mp4",
-			cameraName,
+			camera,
 			start.Format("2006-01-02_15-04-05"),
 			end.Format("15-04-05"),
 		)
@@ -515,7 +442,7 @@ func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
 
 	case <-time.After(exportTimeout):
 		slog.Error("recording export timed out",
-			"camera", cameraName,
+			"camera", camera,
 			"start", start.Format(time.RFC3339),
 			"end", end.Format(time.RFC3339),
 			"timeout", exportTimeout,
@@ -524,7 +451,7 @@ func (s *Server) handleRecordingExport(w http.ResponseWriter, r *http.Request) {
 
 	case <-r.Context().Done():
 		slog.Info("recording export cancelled by client",
-			"camera", cameraName,
+			"camera", camera,
 		)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-func (s *Server) handleListPeople(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ListPeople(w http.ResponseWriter, _ *http.Request) {
 	people, err := s.db.ListPeople()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -74,12 +73,7 @@ func (s *Server) handleListPeople(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleGetPerson(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid person ID"})
-		return
-	}
+func (s *Server) GetPerson(w http.ResponseWriter, r *http.Request, id int64) {
 	person, err := s.db.GetPerson(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -121,12 +115,7 @@ func (s *Server) handleGetPerson(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid person ID"})
-		return
-	}
+func (s *Server) UpdatePerson(w http.ResponseWriter, r *http.Request, id int64) {
 	var req struct {
 		Name   *string `json:"name"`
 		Ignore *bool   `json:"ignore"`
@@ -151,12 +140,7 @@ func (s *Server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
-func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid person ID"})
-		return
-	}
+func (s *Server) DeletePerson(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeletePerson(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -164,7 +148,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) handleMergePeople(w http.ResponseWriter, r *http.Request) {
+func (s *Server) MergePeople(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TargetID int64 `json:"target_id"`
 		SourceID int64 `json:"source_id"`
@@ -218,17 +202,10 @@ func (s *Server) handleMergePeople(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "merged"})
 }
 
-func (s *Server) handleListPersonFaces(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid person ID"})
-		return
-	}
+func (s *Server) ListPersonFaces(w http.ResponseWriter, r *http.Request, id int64, params ListPersonFacesParams) {
 	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 	faces, err := s.db.ListFacesByPerson(id, limit)
 	if err != nil {
@@ -247,12 +224,7 @@ func (s *Server) handleListPersonFaces(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleListPersonEvents(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid person ID"})
-		return
-	}
+func (s *Server) ListPersonEvents(w http.ResponseWriter, r *http.Request, id int64) {
 	person, err := s.db.GetPerson(id)
 	if err != nil || person == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "person not found"})
@@ -285,12 +257,10 @@ func (s *Server) handleListPersonEvents(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *Server) handleListUnmatchedFaces(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListUnmatchedFaces(w http.ResponseWriter, r *http.Request, params ListUnmatchedFacesParams) {
 	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 	faces, err := s.db.ListUnmatchedFaces(limit)
 	if err != nil {
@@ -309,12 +279,8 @@ func (s *Server) handleListUnmatchedFaces(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func (s *Server) handleAssignFace(w http.ResponseWriter, r *http.Request) {
-	faceID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid face ID"})
-		return
-	}
+func (s *Server) AssignFace(w http.ResponseWriter, r *http.Request, id int64) {
+	faceID := id
 	var req struct {
 		PersonID int64  `json:"person_id"`
 		Name     string `json:"name"`
@@ -351,12 +317,7 @@ func (s *Server) handleAssignFace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "assigned", "person_id": personID})
 }
 
-func (s *Server) handleIgnoreFace(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid face ID"})
-		return
-	}
+func (s *Server) IgnoreFace(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeleteFace(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -364,12 +325,7 @@ func (s *Server) handleIgnoreFace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 }
 
-func (s *Server) handleFaceCrop(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid face ID"})
-		return
-	}
+func (s *Server) GetFaceCrop(w http.ResponseWriter, r *http.Request, id int64) {
 	cropPath, err := s.db.GetFaceCropPath(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -384,7 +340,7 @@ func (s *Server) handleFaceCrop(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, cropPath)
 }
 
-func (s *Server) handleFaceBackfill(w http.ResponseWriter, r *http.Request) {
+func (s *Server) BackfillFaces(w http.ResponseWriter, r *http.Request) {
 	if s.faceRecognizer == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "face recognition not available"})
 		return
