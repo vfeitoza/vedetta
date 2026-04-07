@@ -269,11 +269,18 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	defer dec.Close()
 
 	// Create H264 encoder
+	OpenH264Lock()
 	var ppEnc *openh264.ISVCEncoder
 	if ret := openh264.WelsCreateSVCEncoder(&ppEnc); ret != 0 || ppEnc == nil {
+		OpenH264Unlock()
 		return fmt.Errorf("WelsCreateSVCEncoder failed: %d", ret)
 	}
-	defer openh264.WelsDestroySVCEncoder(ppEnc)
+	OpenH264Unlock()
+	defer func() {
+		OpenH264Lock()
+		openh264.WelsDestroySVCEncoder(ppEnc)
+		OpenH264Unlock()
+	}()
 
 	videoTS := trackTimeScales[uint32(videoTrackID)]
 	if videoTS == 0 {
@@ -299,10 +306,17 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		ITargetBitrate: targetBitrate(outW, outH),
 		FMaxFrameRate:  fps,
 	}
+	OpenH264Lock()
 	if r := ppEnc.Initialize(&encParam); r != 0 {
+		OpenH264Unlock()
 		return fmt.Errorf("encoder Initialize failed: %d", r)
 	}
-	defer ppEnc.Uninitialize()
+	OpenH264Unlock()
+	defer func() {
+		OpenH264Lock()
+		ppEnc.Uninitialize()
+		OpenH264Unlock()
+	}()
 
 	out, err := os.Create(dst)
 	if err != nil {
@@ -420,10 +434,10 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			encSrcPic.PData[2] = (*uint8)(unsafe.Pointer(&scaled.Cr[0]))
 
 			encInfo := openh264.SFrameBSInfo{}
-			if ret := ppEnc.EncodeFrame(&encSrcPic, &encInfo); ret == openh264.CmResultSuccess &&
-				encInfo.EFrameType != openh264.VideoFrameTypeSkip {
-
-				var nalBytes []byte
+			OpenH264Lock()
+			encRet := ppEnc.EncodeFrame(&encSrcPic, &encInfo)
+			var nalBytes []byte
+			if encRet == openh264.CmResultSuccess && encInfo.EFrameType != openh264.VideoFrameTypeSkip {
 				for iLayer := 0; iLayer < int(encInfo.ILayerNum); iLayer++ {
 					layer := &encInfo.SLayerInfo[iLayer]
 					var layerSize int32
@@ -433,6 +447,10 @@ func transcodeFile(src, dst string, outW, outH int) error {
 					}
 					nalBytes = append(nalBytes, unsafe.Slice(layer.PBsBuf, layerSize)...)
 				}
+			}
+			OpenH264Unlock()
+
+			if encRet == openh264.CmResultSuccess && encInfo.EFrameType != openh264.VideoFrameTypeSkip {
 
 				if outSPS == nil {
 					outSPS, outPPS = extractSPSPPS(nalBytes)

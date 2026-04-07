@@ -15,6 +15,11 @@ var (
 	openh264Once    sync.Once
 	openh264Loaded  bool
 	openh264LoadErr error
+
+	// openh264Mu serializes all OpenH264 C library calls. The purego
+	// bindings use dlopen'd function pointers that share global state,
+	// making concurrent calls from multiple goroutines unsafe.
+	openh264Mu sync.Mutex
 )
 
 // openH264LibPaths returns candidate paths for the OpenH264 shared library.
@@ -107,6 +112,9 @@ func NewH264Decoder() *H264Decoder {
 		return nil
 	}
 
+	openh264Mu.Lock()
+	defer openh264Mu.Unlock()
+
 	var dec *openh264.ISVCDecoder
 	if ret := openh264.WelsCreateDecoder(&dec); ret != 0 || dec == nil {
 		slog.Error("WelsCreateDecoder failed", "ret", ret)
@@ -130,6 +138,9 @@ func (d *H264Decoder) Decode(nalData []byte) *image.YCbCr {
 	if d == nil || d.decoder == nil || len(nalData) == 0 {
 		return nil
 	}
+
+	openh264Mu.Lock()
+	defer openh264Mu.Unlock()
 
 	var dst [3][]byte
 	var bufInfo openh264.SBufferInfo
@@ -182,6 +193,9 @@ func (d *H264Decoder) Flush() *image.YCbCr {
 		return nil
 	}
 
+	openh264Mu.Lock()
+	defer openh264Mu.Unlock()
+
 	var dst [3][]byte
 	var bufInfo openh264.SBufferInfo
 
@@ -225,6 +239,8 @@ func (d *H264Decoder) Flush() *image.YCbCr {
 // Close releases the decoder resources.
 func (d *H264Decoder) Close() {
 	if d != nil && d.decoder != nil {
+		openh264Mu.Lock()
+		defer openh264Mu.Unlock()
 		d.decoder.Uninitialize()
 		openh264.WelsDestroyDecoder(d.decoder)
 		d.decoder = nil
@@ -235,6 +251,12 @@ func (d *H264Decoder) Close() {
 func OpenH264Available() bool {
 	return ensureOpenH264()
 }
+
+// OpenH264Lock acquires the global OpenH264 mutex. Callers that use the
+// encoder (or any other OpenH264 API not wrapped by H264Decoder) must
+// hold this lock for the duration of each C library call.
+func OpenH264Lock()   { openh264Mu.Lock() }
+func OpenH264Unlock() { openh264Mu.Unlock() }
 
 // ycbcrToRGB24Scaled converts a YCbCr image to RGB24 at the target resolution.
 func ycbcrToRGB24Scaled(img *image.YCbCr, targetW, targetH int) []byte {
