@@ -21,12 +21,15 @@ func needsNormalization(s string) bool {
 
 // SegmentRecord represents a recorded video segment stored in the database.
 type SegmentRecord struct {
-	ID        int64
-	Camera    string
-	Path      string
-	StartTime time.Time
-	EndTime   time.Time
-	SizeBytes int64
+	ID                 int64
+	Camera             string
+	Path               string
+	StartTime          time.Time
+	EndTime            time.Time
+	SizeBytes          int64
+	Recompressed       bool
+	RecompressedAt     time.Time
+	RecompressFailures int
 }
 
 // MotionBucket represents a single minute-level motion activity score for a camera.
@@ -236,6 +239,9 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE known_objects ADD COLUMN match_threshold REAL")
 	_, _ = db.Exec("ALTER TABLE events ADD COLUMN sub_label TEXT")
 	_, _ = db.Exec("ALTER TABLE auth_sessions ADD COLUMN idle_ttl_seconds INTEGER NOT NULL DEFAULT 1800")
+	_, _ = db.Exec("ALTER TABLE segments ADD COLUMN recompressed BOOLEAN NOT NULL DEFAULT FALSE")
+	_, _ = db.Exec("ALTER TABLE segments ADD COLUMN recompressed_at DATETIME")
+	_, _ = db.Exec("ALTER TABLE segments ADD COLUMN recompress_failures INT NOT NULL DEFAULT 0")
 
 	// Normalize timestamps to UTC RFC3339 format for consistent SQLite comparisons.
 	// The modernc.org/sqlite driver stores time.Time using Go's String() which includes
@@ -513,7 +519,7 @@ func (d *DB) QuerySegments(cameraName string, from, to time.Time) ([]SegmentReco
 	// works regardless of whether they were stored in Go's String() format
 	// ("2006-01-02 15:04:05 +0000 UTC") or RFC3339 ("2006-01-02T15:04:05Z").
 	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
 		  AND replace(start_time, 'T', ' ') < replace(?, 'T', ' ')
@@ -538,7 +544,7 @@ func (d *DB) DeleteSegment(path string) error {
 // GetAllSegments returns all segment records for a given camera.
 func (d *DB) GetAllSegments(cameraName string) ([]SegmentRecord, error) {
 	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
 		ORDER BY start_time`,
@@ -555,16 +561,21 @@ func (d *DB) GetAllSegments(cameraName string) ([]SegmentRecord, error) {
 // GetSegmentByPath returns a single segment record by its file path, or nil if not found.
 func (d *DB) GetSegmentByPath(path string) (*SegmentRecord, error) {
 	row := d.db.QueryRow(`
-		SELECT id, camera, path, start_time, end_time, size_bytes
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments WHERE path = ?`, path)
 
 	var seg SegmentRecord
-	err := row.Scan(&seg.ID, &seg.Camera, &seg.Path, &seg.StartTime, &seg.EndTime, &seg.SizeBytes)
+	var recompressedAt sql.NullTime
+	err := row.Scan(&seg.ID, &seg.Camera, &seg.Path, &seg.StartTime, &seg.EndTime, &seg.SizeBytes,
+		&seg.Recompressed, &recompressedAt, &seg.RecompressFailures)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if recompressedAt.Valid {
+		seg.RecompressedAt = recompressedAt.Time
 	}
 	return &seg, nil
 }
@@ -572,14 +583,19 @@ func (d *DB) GetSegmentByPath(path string) (*SegmentRecord, error) {
 // GetSegmentByID returns a single segment record by its primary key, or nil if not found.
 func (d *DB) GetSegmentByID(id int64) (*SegmentRecord, error) {
 	row := d.db.QueryRow(
-		`SELECT id, camera, path, start_time, end_time, size_bytes FROM segments WHERE id = ?`, id)
+		`SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures FROM segments WHERE id = ?`, id)
 	var s SegmentRecord
-	err := row.Scan(&s.ID, &s.Camera, &s.Path, &s.StartTime, &s.EndTime, &s.SizeBytes)
+	var recompressedAt sql.NullTime
+	err := row.Scan(&s.ID, &s.Camera, &s.Path, &s.StartTime, &s.EndTime, &s.SizeBytes,
+		&s.Recompressed, &recompressedAt, &s.RecompressFailures)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if recompressedAt.Valid {
+		s.RecompressedAt = recompressedAt.Time
 	}
 	return &s, nil
 }
@@ -651,7 +667,7 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 	var err error
 	if cameraName != "" {
 		rows, err = d.db.Query(`
-			SELECT id, camera, path, start_time, end_time, size_bytes
+			SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 			FROM segments
 			WHERE camera = ? AND replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
 			ORDER BY start_time`,
@@ -659,7 +675,7 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 		)
 	} else {
 		rows, err = d.db.Query(`
-			SELECT id, camera, path, start_time, end_time, size_bytes
+			SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 			FROM segments
 			WHERE replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
 			ORDER BY start_time`,
@@ -730,7 +746,7 @@ func (d *DB) SegmentBytesByCamera() (map[string]int64, error) {
 // GetOldestSegments returns the N oldest segments across all cameras, ordered by start_time.
 func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		ORDER BY start_time ASC
 		LIMIT ?`, limit)
@@ -740,6 +756,49 @@ func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	defer func() { _ = rows.Close() }()
 
 	return scanSegments(rows)
+}
+
+// GetSegmentsForRecompression returns segments eligible for recompression:
+// not yet recompressed, fewer than 3 failures, end_time before olderThan,
+// ordered oldest first.
+func (d *DB) GetSegmentsForRecompression(cameraName string, olderThan time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ?
+		  AND recompressed = FALSE
+		  AND recompress_failures < 3
+		  AND replace(end_time, 'T', ' ') < ?
+		ORDER BY end_time ASC`,
+		cameraName, utc(olderThan).Format(layout),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// MarkSegmentRecompressed updates a segment after successful recompression.
+func (d *DB) MarkSegmentRecompressed(id int64, newSizeBytes int64) error {
+	_, err := d.db.Exec(`
+		UPDATE segments
+		SET recompressed = TRUE, recompressed_at = ?, size_bytes = ?
+		WHERE id = ?`,
+		utc(time.Now()), newSizeBytes, id,
+	)
+	return err
+}
+
+// IncrementSegmentRecompressFailures increments the failure counter for a segment.
+// Once it reaches 3, the segment is excluded from future recompression queries.
+func (d *DB) IncrementSegmentRecompressFailures(id int64) error {
+	_, err := d.db.Exec(
+		"UPDATE segments SET recompress_failures = recompress_failures + 1 WHERE id = ?",
+		id,
+	)
+	return err
 }
 
 // GetRecordingDays returns sorted day numbers that have segments for the given camera and month.
@@ -879,8 +938,16 @@ func scanSegments(rows *sql.Rows) ([]SegmentRecord, error) {
 	var segments []SegmentRecord
 	for rows.Next() {
 		var seg SegmentRecord
-		if err := rows.Scan(&seg.ID, &seg.Camera, &seg.Path, &seg.StartTime, &seg.EndTime, &seg.SizeBytes); err != nil {
+		var recompressedAt sql.NullTime
+		if err := rows.Scan(
+			&seg.ID, &seg.Camera, &seg.Path,
+			&seg.StartTime, &seg.EndTime, &seg.SizeBytes,
+			&seg.Recompressed, &recompressedAt, &seg.RecompressFailures,
+		); err != nil {
 			return nil, err
+		}
+		if recompressedAt.Valid {
+			seg.RecompressedAt = recompressedAt.Time
 		}
 		segments = append(segments, seg)
 	}
