@@ -46,3 +46,67 @@ func TestScaleYCbCr_SameSize(t *testing.T) {
 		t.Errorf("got %dx%d, want 1280x720", got.Rect.Dx(), got.Rect.Dy())
 	}
 }
+
+func TestShouldTranscode_SkipsIfAlreadySmall(t *testing.T) {
+	// 720p source, 720p target → skip
+	skip, outW, outH := shouldTranscode(1280, 720, 1280, 720)
+	if !skip {
+		t.Error("expected skip=true for same-size source")
+	}
+	_ = outW
+	_ = outH
+}
+
+func TestShouldTranscode_SkipsIfBelowTarget(t *testing.T) {
+	// 640x480 source, 1280x720 target → source smaller, skip
+	skip, _, _ := shouldTranscode(640, 480, 1280, 720)
+	if !skip {
+		t.Error("expected skip=true when source is smaller than target")
+	}
+}
+
+func TestShouldTranscode_SkipsBelowAreaThreshold(t *testing.T) {
+	// 1280x800 source, 1280x720 target → area reduction ~10%, skip
+	skip, _, _ := shouldTranscode(1280, 800, 1280, 720)
+	if !skip {
+		t.Error("expected skip=true when area reduction < 25%")
+	}
+}
+
+func TestShouldTranscode_Transcodes1080p(t *testing.T) {
+	// 1920x1080 source, 1280x720 target → 56% reduction, transcode
+	skip, outW, outH := shouldTranscode(1920, 1080, 1280, 720)
+	if skip {
+		t.Error("expected skip=false for 1080p → 720p")
+	}
+	if outW != 1280 || outH != 720 {
+		t.Errorf("got %dx%d, want 1280x720", outW, outH)
+	}
+}
+
+func TestShouldTranscode_Preserves4K(t *testing.T) {
+	// 2560x1440 source, 1280x720 target → 75% reduction, transcode
+	skip, outW, outH := shouldTranscode(2560, 1440, 1280, 720)
+	if skip {
+		t.Error("expected skip=false for 4K → 720p")
+	}
+	if outW != 1280 || outH != 720 {
+		t.Errorf("got %dx%d, want 1280x720", outW, outH)
+	}
+}
+
+func TestReadSourceResolution(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.mp4"
+
+	// writeSyntheticFMP4 uses SPS bytes that decode to 128x96
+	writeSyntheticFMP4(t, path, 3, 3000)
+
+	width, height, err := readSourceResolution(path)
+	if err != nil {
+		t.Fatalf("readSourceResolution: %v", err)
+	}
+	if width != 128 || height != 96 {
+		t.Errorf("got %dx%d, want 128x96", width, height)
+	}
+}
