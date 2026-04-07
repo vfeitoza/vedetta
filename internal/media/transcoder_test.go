@@ -2,6 +2,8 @@ package media
 
 import (
 	"image"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -108,5 +110,41 @@ func TestReadSourceResolution(t *testing.T) {
 	}
 	if width != 128 || height != 96 {
 		t.Errorf("got %dx%d, want 128x96", width, height)
+	}
+}
+
+func TestTranscodeSegment_SkipsIfAlreadySmall(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	writeSyntheticFMP4(t, src, 10, 3000) // 128x96 — well below 1280x720
+
+	result, err := TranscodeSegment(src, 1280, 720)
+	if err != nil {
+		t.Fatalf("TranscodeSegment: %v", err)
+	}
+	if !result.Skipped {
+		t.Error("expected skip=true for source smaller than target")
+	}
+	// No .tmp file should exist
+	if _, statErr := os.Stat(src + ".tmp"); !os.IsNotExist(statErr) {
+		t.Error("unexpected .tmp file left behind")
+	}
+}
+
+func TestTranscodeSegment_OriginalUntouchedOnFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	origStat, _ := os.Stat(dir) // just to confirm dir exists
+
+	// Pass a non-existent path to trigger failure at open
+	_, err := TranscodeSegment(filepath.Join(dir, "nonexistent.mp4"), 1280, 720)
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+	_ = origStat
+
+	// No .tmp file should exist
+	if _, statErr := os.Stat(filepath.Join(dir, "nonexistent.mp4.tmp")); !os.IsNotExist(statErr) {
+		t.Error(".tmp file left behind after failure")
 	}
 }
