@@ -38,6 +38,17 @@ func authMiddleware(s *Server, next http.Handler) http.Handler {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+
+		// Login page: redirect if already authenticated, serve if not.
+		if r.URL.Path == "/login.html" {
+			if principal != nil {
+				http.Redirect(w, r, "/", http.StatusFound)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if principal == nil {
 			handleUnauthorized(w, r)
 			return
@@ -65,8 +76,6 @@ func applySecurityHeaders(w http.ResponseWriter) {
 
 func isPublicPath(r *http.Request) bool {
 	switch {
-	case r.URL.Path == "/login.html":
-		return true
 	case r.URL.Path == "/favicon.svg":
 		return true
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/login":
