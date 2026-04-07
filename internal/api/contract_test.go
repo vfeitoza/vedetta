@@ -668,6 +668,29 @@ func TestContract_ListUnmatchedFaces(t *testing.T) {
 	cv.validate(req, rec)
 }
 
+func TestContract_ListObjects(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/objects", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+
+	// Verify bare array response
+	var resp []any
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v (body: %s)", err, rec.Body.String())
+	}
+	if len(resp) != 0 {
+		t.Errorf("expected empty array, got %d items", len(resp))
+	}
+}
+
 func TestContract_CameraTimeline(t *testing.T) {
 	srv, db := newTestServer(t)
 	cv := newContractValidator(t)

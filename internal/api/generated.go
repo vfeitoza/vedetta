@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
@@ -219,6 +221,21 @@ func (e StatusDeletedStatus) Valid() bool {
 	}
 }
 
+// Defines values for StatusDismissedStatus.
+const (
+	Dismissed StatusDismissedStatus = "dismissed"
+)
+
+// Valid indicates whether the value is a known member of the StatusDismissedStatus enum.
+func (e StatusDismissedStatus) Valid() bool {
+	switch e {
+	case Dismissed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusIgnoredStatus.
 const (
 	Ignored StatusIgnoredStatus = "ignored"
@@ -315,6 +332,18 @@ func (e TrackPersonResponseMethod) Valid() bool {
 	}
 }
 
+// AddObjectReferenceRequest defines model for AddObjectReferenceRequest.
+type AddObjectReferenceRequest struct {
+	EventId string `json:"event_id"`
+}
+
+// AddObjectReferenceResponse defines model for AddObjectReferenceResponse.
+type AddObjectReferenceResponse struct {
+	CropPath *string `json:"crop_path,omitempty"`
+	Id       int64   `json:"id"`
+	ObjectId int64   `json:"object_id"`
+}
+
 // AssignFaceRequest defines model for AssignFaceRequest.
 type AssignFaceRequest struct {
 	Name     *string `json:"name,omitempty"`
@@ -392,6 +421,12 @@ type CameraListEnvelope struct {
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+}
+
+// CreateObjectRequest defines model for CreateObjectRequest.
+type CreateObjectRequest struct {
+	EventId string `json:"event_id"`
+	Name    string `json:"name"`
 }
 
 // CreateTokenRequest defines model for CreateTokenRequest.
@@ -526,6 +561,16 @@ type HealthResponse struct {
 // HealthResponseStatus defines model for HealthResponse.Status.
 type HealthResponseStatus string
 
+// KnownObject defines model for KnownObject.
+type KnownObject struct {
+	CreatedAt      time.Time `json:"created_at"`
+	CropPath       *string   `json:"crop_path,omitempty"`
+	Id             int64     `json:"id"`
+	Label          string    `json:"label"`
+	MatchThreshold *float64  `json:"match_threshold,omitempty"`
+	Name           string    `json:"name"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -553,6 +598,15 @@ type LogoutResponseStatus string
 type MergePeopleRequest struct {
 	SourceId int64 `json:"source_id"`
 	TargetId int64 `json:"target_id"`
+}
+
+// ObjectReference defines model for ObjectReference.
+type ObjectReference struct {
+	CreatedAt time.Time `json:"created_at"`
+	CropPath  *string   `json:"crop_path,omitempty"`
+	EventId   *string   `json:"event_id,omitempty"`
+	Id        int64     `json:"id"`
+	ObjectId  int64     `json:"object_id"`
 }
 
 // ObjectSighting defines model for ObjectSighting.
@@ -669,6 +723,18 @@ type ReextractClipResponse struct {
 	Status string `json:"status"`
 }
 
+// SDPAnswer defines model for SDPAnswer.
+type SDPAnswer struct {
+	Sdp  string `json:"sdp"`
+	Type string `json:"type"`
+}
+
+// SDPOffer defines model for SDPOffer.
+type SDPOffer struct {
+	Sdp  string `json:"sdp"`
+	Type string `json:"type"`
+}
+
 // SegmentInfo defines model for SegmentInfo.
 type SegmentInfo struct {
 	EndTime   time.Time `json:"end_time"`
@@ -693,6 +759,14 @@ type StatusDeleted struct {
 
 // StatusDeletedStatus defines model for StatusDeleted.Status.
 type StatusDeletedStatus string
+
+// StatusDismissed defines model for StatusDismissed.
+type StatusDismissed struct {
+	Status StatusDismissedStatus `json:"status"`
+}
+
+// StatusDismissedStatus defines model for StatusDismissed.Status.
+type StatusDismissedStatus string
 
 // StatusIgnored defines model for StatusIgnored.
 type StatusIgnored struct {
@@ -798,6 +872,12 @@ type TrackPersonResponse struct {
 // TrackPersonResponseMethod defines model for TrackPersonResponse.Method.
 type TrackPersonResponseMethod string
 
+// UpdateObjectRequest defines model for UpdateObjectRequest.
+type UpdateObjectRequest struct {
+	MatchThreshold *float64 `json:"match_threshold,omitempty"`
+	Name           *string  `json:"name,omitempty"`
+}
+
 // UpdatePersonRequest defines model for UpdatePersonRequest.
 type UpdatePersonRequest struct {
 	Ignore *bool   `json:"ignore,omitempty"`
@@ -868,6 +948,17 @@ type ListUnmatchedFacesParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetObjectCropParams defines parameters for GetObjectCrop.
+type GetObjectCropParams struct {
+	// Ref Optional reference ID to get a specific reference crop
+	Ref *int64 `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
+// ListObjectSightingsParams defines parameters for ListObjectSightings.
+type ListObjectSightingsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListPersonFacesParams defines parameters for ListPersonFaces.
 type ListPersonFacesParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
@@ -906,6 +997,9 @@ type LoginJSONRequestBody = LoginRequest
 // SendPTZCommandJSONRequestBody defines body for SendPTZCommand for application/json ContentType.
 type SendPTZCommandJSONRequestBody = PTZRequest
 
+// PostWebRTCOfferJSONRequestBody defines body for PostWebRTCOffer for application/json ContentType.
+type PostWebRTCOfferJSONRequestBody = SDPOffer
+
 // CreateZoneJSONRequestBody defines body for CreateZone for application/json ContentType.
 type CreateZoneJSONRequestBody = CreateZoneRequest
 
@@ -920,6 +1014,15 @@ type TrackPersonJSONRequestBody = TrackPersonRequest
 
 // AssignFaceJSONRequestBody defines body for AssignFace for application/json ContentType.
 type AssignFaceJSONRequestBody = AssignFaceRequest
+
+// CreateObjectJSONRequestBody defines body for CreateObject for application/json ContentType.
+type CreateObjectJSONRequestBody = CreateObjectRequest
+
+// UpdateObjectJSONRequestBody defines body for UpdateObject for application/json ContentType.
+type UpdateObjectJSONRequestBody = UpdateObjectRequest
+
+// AddObjectReferenceJSONRequestBody defines body for AddObjectReference for application/json ContentType.
+type AddObjectReferenceJSONRequestBody = AddObjectReferenceRequest
 
 // MergePeopleJSONRequestBody defines body for MergePeople for application/json ContentType.
 type MergePeopleJSONRequestBody = MergePeopleRequest
@@ -953,6 +1056,12 @@ type ServerInterface interface {
 	// Trigger a doorbell press event
 	// (POST /api/cameras/{name}/doorbell)
 	PressDoorbell(w http.ResponseWriter, r *http.Request, name string)
+	// MJPEG live stream
+	// (GET /api/cameras/{name}/mjpeg)
+	GetMJPEG(w http.ResponseWriter, r *http.Request, name string)
+	// WebSocket endpoint for MSE live streaming
+	// (GET /api/cameras/{name}/mse/ws)
+	GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name string)
 	// Generate HLS playlist for camera playback
 	// (GET /api/cameras/{name}/playback.m3u8)
 	GetCameraPlayback(w http.ResponseWriter, r *http.Request, name string, params GetCameraPlaybackParams)
@@ -977,6 +1086,9 @@ type ServerInterface interface {
 	// Get timeline data for a camera on a given date
 	// (GET /api/cameras/{name}/timeline)
 	GetCameraTimeline(w http.ResponseWriter, r *http.Request, name string, params GetCameraTimelineParams)
+	// Send a WebRTC SDP offer and receive an SDP answer
+	// (POST /api/cameras/{name}/webrtc/offer)
+	PostWebRTCOffer(w http.ResponseWriter, r *http.Request, name string)
 	// List zones for a camera
 	// (GET /api/cameras/{name}/zones)
 	ListZones(w http.ResponseWriter, r *http.Request, name string)
@@ -1049,6 +1161,36 @@ type ServerInterface interface {
 	// Readiness probe
 	// (GET /api/health/ready)
 	GetHealthReady(w http.ResponseWriter, r *http.Request)
+	// List all known objects
+	// (GET /api/objects)
+	ListObjects(w http.ResponseWriter, r *http.Request)
+	// Create a known object from an event detection
+	// (POST /api/objects)
+	CreateObject(w http.ResponseWriter, r *http.Request)
+	// Delete an object reference image
+	// (DELETE /api/objects/references/{id})
+	DeleteObjectReference(w http.ResponseWriter, r *http.Request, id int64)
+	// Dismiss an object sighting
+	// (DELETE /api/objects/sightings/{id})
+	DismissSighting(w http.ResponseWriter, r *http.Request, id int64)
+	// Delete a known object
+	// (DELETE /api/objects/{id})
+	DeleteObject(w http.ResponseWriter, r *http.Request, id int64)
+	// Update a known object's name or match threshold
+	// (PUT /api/objects/{id})
+	UpdateObject(w http.ResponseWriter, r *http.Request, id int64)
+	// Get cropped image of a known object
+	// (GET /api/objects/{id}/crop)
+	GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64, params GetObjectCropParams)
+	// List reference images for a known object
+	// (GET /api/objects/{id}/references)
+	ListObjectReferences(w http.ResponseWriter, r *http.Request, id int64)
+	// Add a reference image to a known object from an event
+	// (POST /api/objects/{id}/references)
+	AddObjectReference(w http.ResponseWriter, r *http.Request, id int64)
+	// List sightings of a known object
+	// (GET /api/objects/{id}/sightings)
+	ListObjectSightings(w http.ResponseWriter, r *http.Request, id int64, params ListObjectSightingsParams)
 	// OpenAPI specification
 	// (GET /api/openapi.json)
 	GetOpenAPISpec(w http.ResponseWriter, r *http.Request)
@@ -1270,6 +1412,72 @@ func (siw *ServerInterfaceWrapper) PressDoorbell(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PressDoorbell(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMJPEG operation middleware
+func (siw *ServerInterfaceWrapper) GetMJPEG(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMJPEG(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMSEWebSocket operation middleware
+func (siw *ServerInterfaceWrapper) GetMSEWebSocket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMSEWebSocket(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1625,6 +1833,39 @@ func (siw *ServerInterfaceWrapper) GetCameraTimeline(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCameraTimeline(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostWebRTCOffer operation middleware
+func (siw *ServerInterfaceWrapper) PostWebRTCOffer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostWebRTCOffer(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2442,6 +2683,336 @@ func (siw *ServerInterfaceWrapper) GetHealthReady(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListObjects operation middleware
+func (siw *ServerInterfaceWrapper) ListObjects(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListObjects(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateObject operation middleware
+func (siw *ServerInterfaceWrapper) CreateObject(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateObject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteObjectReference operation middleware
+func (siw *ServerInterfaceWrapper) DeleteObjectReference(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteObjectReference(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DismissSighting operation middleware
+func (siw *ServerInterfaceWrapper) DismissSighting(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DismissSighting(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteObject operation middleware
+func (siw *ServerInterfaceWrapper) DeleteObject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteObject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateObject operation middleware
+func (siw *ServerInterfaceWrapper) UpdateObject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateObject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetObjectCrop operation middleware
+func (siw *ServerInterfaceWrapper) GetObjectCrop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetObjectCropParams
+
+	// ------------- Optional query parameter "ref" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ref", r.URL.Query(), &params.Ref, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetObjectCrop(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListObjectReferences operation middleware
+func (siw *ServerInterfaceWrapper) ListObjectReferences(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListObjectReferences(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddObjectReference operation middleware
+func (siw *ServerInterfaceWrapper) AddObjectReference(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddObjectReference(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListObjectSightings operation middleware
+func (siw *ServerInterfaceWrapper) ListObjectSightings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListObjectSightingsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListObjectSightings(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetOpenAPISpec operation middleware
 func (siw *ServerInterfaceWrapper) GetOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 
@@ -3112,6 +3683,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras", wrapper.ListCameras)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}", wrapper.GetCamera)
 	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/doorbell", wrapper.PressDoorbell)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/mjpeg", wrapper.GetMJPEG)
+	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/mse/ws", wrapper.GetMSEWebSocket)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/playback.m3u8", wrapper.GetCameraPlayback)
 	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/ptz", wrapper.SendPTZCommand)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/segments/{id}", wrapper.GetSegment)
@@ -3120,6 +3693,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/snapshot", wrapper.GetCameraSnapshot)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/thumbnail", wrapper.GetCameraThumbnail)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/timeline", wrapper.GetCameraTimeline)
+	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/webrtc/offer", wrapper.PostWebRTCOffer)
 	m.HandleFunc("GET "+options.BaseURL+"/api/cameras/{name}/zones", wrapper.ListZones)
 	m.HandleFunc("POST "+options.BaseURL+"/api/cameras/{name}/zones", wrapper.CreateZone)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/cameras/{name}/zones/{zone}", wrapper.DeleteZone)
@@ -3144,6 +3718,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/live", wrapper.GetHealthLive)
 	m.HandleFunc("GET "+options.BaseURL+"/api/health/ready", wrapper.GetHealthReady)
+	m.HandleFunc("GET "+options.BaseURL+"/api/objects", wrapper.ListObjects)
+	m.HandleFunc("POST "+options.BaseURL+"/api/objects", wrapper.CreateObject)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/objects/references/{id}", wrapper.DeleteObjectReference)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/objects/sightings/{id}", wrapper.DismissSighting)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/objects/{id}", wrapper.DeleteObject)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/objects/{id}", wrapper.UpdateObject)
+	m.HandleFunc("GET "+options.BaseURL+"/api/objects/{id}/crop", wrapper.GetObjectCrop)
+	m.HandleFunc("GET "+options.BaseURL+"/api/objects/{id}/references", wrapper.ListObjectReferences)
+	m.HandleFunc("POST "+options.BaseURL+"/api/objects/{id}/references", wrapper.AddObjectReference)
+	m.HandleFunc("GET "+options.BaseURL+"/api/objects/{id}/sightings", wrapper.ListObjectSightings)
 	m.HandleFunc("GET "+options.BaseURL+"/api/openapi.json", wrapper.GetOpenAPISpec)
 	m.HandleFunc("GET "+options.BaseURL+"/api/people", wrapper.ListPeople)
 	m.HandleFunc("POST "+options.BaseURL+"/api/people/merge", wrapper.MergePeople)
@@ -3340,6 +3924,59 @@ type PressDoorbell503JSONResponse Error
 func (response PressDoorbell503JSONResponse) VisitPressDoorbellResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetMJPEGRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetMJPEGResponseObject interface {
+	VisitGetMJPEGResponse(w http.ResponseWriter) error
+}
+
+type GetMJPEG200MultipartResponse func(writer *multipart.Writer) error
+
+func (response GetMJPEG200MultipartResponse) VisitGetMJPEGResponse(w http.ResponseWriter) error {
+	writer := multipart.NewWriter(w)
+	w.Header().Set("Content-Type", mime.FormatMediaType("multipart/x-mixed-replace", map[string]string{"boundary": writer.Boundary()}))
+	w.WriteHeader(200)
+
+	defer writer.Close()
+	return response(writer)
+}
+
+type GetMJPEG404JSONResponse Error
+
+func (response GetMJPEG404JSONResponse) VisitGetMJPEGResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetMSEWebSocketRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetMSEWebSocketResponseObject interface {
+	VisitGetMSEWebSocketResponse(w http.ResponseWriter) error
+}
+
+type GetMSEWebSocket101Response struct {
+}
+
+func (response GetMSEWebSocket101Response) VisitGetMSEWebSocketResponse(w http.ResponseWriter) error {
+	w.WriteHeader(101)
+	return nil
+}
+
+type GetMSEWebSocket404JSONResponse Error
+
+func (response GetMSEWebSocket404JSONResponse) VisitGetMSEWebSocketResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -3668,6 +4305,42 @@ func (response GetCameraTimeline200JSONResponse) VisitGetCameraTimelineResponse(
 type GetCameraTimeline404JSONResponse Error
 
 func (response GetCameraTimeline404JSONResponse) VisitGetCameraTimelineResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostWebRTCOfferRequestObject struct {
+	Name string `json:"name"`
+	Body *PostWebRTCOfferJSONRequestBody
+}
+
+type PostWebRTCOfferResponseObject interface {
+	VisitPostWebRTCOfferResponse(w http.ResponseWriter) error
+}
+
+type PostWebRTCOffer200JSONResponse SDPAnswer
+
+func (response PostWebRTCOffer200JSONResponse) VisitPostWebRTCOfferResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostWebRTCOffer400JSONResponse Error
+
+func (response PostWebRTCOffer400JSONResponse) VisitPostWebRTCOfferResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostWebRTCOffer404JSONResponse Error
+
+func (response PostWebRTCOffer404JSONResponse) VisitPostWebRTCOfferResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
@@ -4343,6 +5016,297 @@ func (response GetHealthReady503JSONResponse) VisitGetHealthReadyResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListObjectsRequestObject struct {
+}
+
+type ListObjectsResponseObject interface {
+	VisitListObjectsResponse(w http.ResponseWriter) error
+}
+
+type ListObjects200JSONResponse []KnownObject
+
+func (response ListObjects200JSONResponse) VisitListObjectsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateObjectRequestObject struct {
+	Body *CreateObjectJSONRequestBody
+}
+
+type CreateObjectResponseObject interface {
+	VisitCreateObjectResponse(w http.ResponseWriter) error
+}
+
+type CreateObject201JSONResponse KnownObject
+
+func (response CreateObject201JSONResponse) VisitCreateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateObject400JSONResponse Error
+
+func (response CreateObject400JSONResponse) VisitCreateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateObject404JSONResponse Error
+
+func (response CreateObject404JSONResponse) VisitCreateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateObject503JSONResponse Error
+
+func (response CreateObject503JSONResponse) VisitCreateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteObjectReferenceRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteObjectReferenceResponseObject interface {
+	VisitDeleteObjectReferenceResponse(w http.ResponseWriter) error
+}
+
+type DeleteObjectReference200JSONResponse StatusDeleted
+
+func (response DeleteObjectReference200JSONResponse) VisitDeleteObjectReferenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DismissSightingRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DismissSightingResponseObject interface {
+	VisitDismissSightingResponse(w http.ResponseWriter) error
+}
+
+type DismissSighting200JSONResponse StatusDismissed
+
+func (response DismissSighting200JSONResponse) VisitDismissSightingResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DismissSighting404JSONResponse Error
+
+func (response DismissSighting404JSONResponse) VisitDismissSightingResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteObjectRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteObjectResponseObject interface {
+	VisitDeleteObjectResponse(w http.ResponseWriter) error
+}
+
+type DeleteObject200JSONResponse StatusDeleted
+
+func (response DeleteObject200JSONResponse) VisitDeleteObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteObject404JSONResponse Error
+
+func (response DeleteObject404JSONResponse) VisitDeleteObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateObjectRequestObject struct {
+	Id   int64 `json:"id"`
+	Body *UpdateObjectJSONRequestBody
+}
+
+type UpdateObjectResponseObject interface {
+	VisitUpdateObjectResponse(w http.ResponseWriter) error
+}
+
+type UpdateObject200JSONResponse StatusUpdated
+
+func (response UpdateObject200JSONResponse) VisitUpdateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateObject400JSONResponse Error
+
+func (response UpdateObject400JSONResponse) VisitUpdateObjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetObjectCropRequestObject struct {
+	Id     int64 `json:"id"`
+	Params GetObjectCropParams
+}
+
+type GetObjectCropResponseObject interface {
+	VisitGetObjectCropResponse(w http.ResponseWriter) error
+}
+
+type GetObjectCrop200ImagejpegResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetObjectCrop200ImagejpegResponse) VisitGetObjectCropResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "image/jpeg")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetObjectCrop404JSONResponse Error
+
+func (response GetObjectCrop404JSONResponse) VisitGetObjectCropResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListObjectReferencesRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type ListObjectReferencesResponseObject interface {
+	VisitListObjectReferencesResponse(w http.ResponseWriter) error
+}
+
+type ListObjectReferences200JSONResponse []ObjectReference
+
+func (response ListObjectReferences200JSONResponse) VisitListObjectReferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListObjectReferences400JSONResponse Error
+
+func (response ListObjectReferences400JSONResponse) VisitListObjectReferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddObjectReferenceRequestObject struct {
+	Id   int64 `json:"id"`
+	Body *AddObjectReferenceJSONRequestBody
+}
+
+type AddObjectReferenceResponseObject interface {
+	VisitAddObjectReferenceResponse(w http.ResponseWriter) error
+}
+
+type AddObjectReference201JSONResponse AddObjectReferenceResponse
+
+func (response AddObjectReference201JSONResponse) VisitAddObjectReferenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddObjectReference400JSONResponse Error
+
+func (response AddObjectReference400JSONResponse) VisitAddObjectReferenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddObjectReference404JSONResponse Error
+
+func (response AddObjectReference404JSONResponse) VisitAddObjectReferenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddObjectReference503JSONResponse Error
+
+func (response AddObjectReference503JSONResponse) VisitAddObjectReferenceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListObjectSightingsRequestObject struct {
+	Id     int64 `json:"id"`
+	Params ListObjectSightingsParams
+}
+
+type ListObjectSightingsResponseObject interface {
+	VisitListObjectSightingsResponse(w http.ResponseWriter) error
+}
+
+type ListObjectSightings200JSONResponse []ObjectSighting
+
+func (response ListObjectSightings200JSONResponse) VisitListObjectSightingsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListObjectSightings400JSONResponse Error
+
+func (response ListObjectSightings400JSONResponse) VisitListObjectSightingsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetOpenAPISpecRequestObject struct {
 }
 
@@ -4755,6 +5719,12 @@ type StrictServerInterface interface {
 	// Trigger a doorbell press event
 	// (POST /api/cameras/{name}/doorbell)
 	PressDoorbell(ctx context.Context, request PressDoorbellRequestObject) (PressDoorbellResponseObject, error)
+	// MJPEG live stream
+	// (GET /api/cameras/{name}/mjpeg)
+	GetMJPEG(ctx context.Context, request GetMJPEGRequestObject) (GetMJPEGResponseObject, error)
+	// WebSocket endpoint for MSE live streaming
+	// (GET /api/cameras/{name}/mse/ws)
+	GetMSEWebSocket(ctx context.Context, request GetMSEWebSocketRequestObject) (GetMSEWebSocketResponseObject, error)
 	// Generate HLS playlist for camera playback
 	// (GET /api/cameras/{name}/playback.m3u8)
 	GetCameraPlayback(ctx context.Context, request GetCameraPlaybackRequestObject) (GetCameraPlaybackResponseObject, error)
@@ -4779,6 +5749,9 @@ type StrictServerInterface interface {
 	// Get timeline data for a camera on a given date
 	// (GET /api/cameras/{name}/timeline)
 	GetCameraTimeline(ctx context.Context, request GetCameraTimelineRequestObject) (GetCameraTimelineResponseObject, error)
+	// Send a WebRTC SDP offer and receive an SDP answer
+	// (POST /api/cameras/{name}/webrtc/offer)
+	PostWebRTCOffer(ctx context.Context, request PostWebRTCOfferRequestObject) (PostWebRTCOfferResponseObject, error)
 	// List zones for a camera
 	// (GET /api/cameras/{name}/zones)
 	ListZones(ctx context.Context, request ListZonesRequestObject) (ListZonesResponseObject, error)
@@ -4851,6 +5824,36 @@ type StrictServerInterface interface {
 	// Readiness probe
 	// (GET /api/health/ready)
 	GetHealthReady(ctx context.Context, request GetHealthReadyRequestObject) (GetHealthReadyResponseObject, error)
+	// List all known objects
+	// (GET /api/objects)
+	ListObjects(ctx context.Context, request ListObjectsRequestObject) (ListObjectsResponseObject, error)
+	// Create a known object from an event detection
+	// (POST /api/objects)
+	CreateObject(ctx context.Context, request CreateObjectRequestObject) (CreateObjectResponseObject, error)
+	// Delete an object reference image
+	// (DELETE /api/objects/references/{id})
+	DeleteObjectReference(ctx context.Context, request DeleteObjectReferenceRequestObject) (DeleteObjectReferenceResponseObject, error)
+	// Dismiss an object sighting
+	// (DELETE /api/objects/sightings/{id})
+	DismissSighting(ctx context.Context, request DismissSightingRequestObject) (DismissSightingResponseObject, error)
+	// Delete a known object
+	// (DELETE /api/objects/{id})
+	DeleteObject(ctx context.Context, request DeleteObjectRequestObject) (DeleteObjectResponseObject, error)
+	// Update a known object's name or match threshold
+	// (PUT /api/objects/{id})
+	UpdateObject(ctx context.Context, request UpdateObjectRequestObject) (UpdateObjectResponseObject, error)
+	// Get cropped image of a known object
+	// (GET /api/objects/{id}/crop)
+	GetObjectCrop(ctx context.Context, request GetObjectCropRequestObject) (GetObjectCropResponseObject, error)
+	// List reference images for a known object
+	// (GET /api/objects/{id}/references)
+	ListObjectReferences(ctx context.Context, request ListObjectReferencesRequestObject) (ListObjectReferencesResponseObject, error)
+	// Add a reference image to a known object from an event
+	// (POST /api/objects/{id}/references)
+	AddObjectReference(ctx context.Context, request AddObjectReferenceRequestObject) (AddObjectReferenceResponseObject, error)
+	// List sightings of a known object
+	// (GET /api/objects/{id}/sightings)
+	ListObjectSightings(ctx context.Context, request ListObjectSightingsRequestObject) (ListObjectSightingsResponseObject, error)
 	// OpenAPI specification
 	// (GET /api/openapi.json)
 	GetOpenAPISpec(ctx context.Context, request GetOpenAPISpecRequestObject) (GetOpenAPISpecResponseObject, error)
@@ -5119,6 +6122,58 @@ func (sh *strictHandler) PressDoorbell(w http.ResponseWriter, r *http.Request, n
 	}
 }
 
+// GetMJPEG operation middleware
+func (sh *strictHandler) GetMJPEG(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetMJPEGRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMJPEG(ctx, request.(GetMJPEGRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMJPEG")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMJPEGResponseObject); ok {
+		if err := validResponse.VisitGetMJPEGResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMSEWebSocket operation middleware
+func (sh *strictHandler) GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetMSEWebSocketRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMSEWebSocket(ctx, request.(GetMSEWebSocketRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMSEWebSocket")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMSEWebSocketResponseObject); ok {
+		if err := validResponse.VisitGetMSEWebSocketResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetCameraPlayback operation middleware
 func (sh *strictHandler) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name string, params GetCameraPlaybackParams) {
 	var request GetCameraPlaybackRequestObject
@@ -5334,6 +6389,39 @@ func (sh *strictHandler) GetCameraTimeline(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetCameraTimelineResponseObject); ok {
 		if err := validResponse.VisitGetCameraTimelineResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PostWebRTCOffer operation middleware
+func (sh *strictHandler) PostWebRTCOffer(w http.ResponseWriter, r *http.Request, name string) {
+	var request PostWebRTCOfferRequestObject
+
+	request.Name = name
+
+	var body PostWebRTCOfferJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PostWebRTCOffer(ctx, request.(PostWebRTCOfferRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostWebRTCOffer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PostWebRTCOfferResponseObject); ok {
+		if err := validResponse.VisitPostWebRTCOfferResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5992,6 +7080,285 @@ func (sh *strictHandler) GetHealthReady(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// ListObjects operation middleware
+func (sh *strictHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
+	var request ListObjectsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListObjects(ctx, request.(ListObjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListObjects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListObjectsResponseObject); ok {
+		if err := validResponse.VisitListObjectsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateObject operation middleware
+func (sh *strictHandler) CreateObject(w http.ResponseWriter, r *http.Request) {
+	var request CreateObjectRequestObject
+
+	var body CreateObjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateObject(ctx, request.(CreateObjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateObject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateObjectResponseObject); ok {
+		if err := validResponse.VisitCreateObjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteObjectReference operation middleware
+func (sh *strictHandler) DeleteObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteObjectReferenceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteObjectReference(ctx, request.(DeleteObjectReferenceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteObjectReference")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteObjectReferenceResponseObject); ok {
+		if err := validResponse.VisitDeleteObjectReferenceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DismissSighting operation middleware
+func (sh *strictHandler) DismissSighting(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DismissSightingRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DismissSighting(ctx, request.(DismissSightingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DismissSighting")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DismissSightingResponseObject); ok {
+		if err := validResponse.VisitDismissSightingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteObject operation middleware
+func (sh *strictHandler) DeleteObject(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteObjectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteObject(ctx, request.(DeleteObjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteObject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteObjectResponseObject); ok {
+		if err := validResponse.VisitDeleteObjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateObject operation middleware
+func (sh *strictHandler) UpdateObject(w http.ResponseWriter, r *http.Request, id int64) {
+	var request UpdateObjectRequestObject
+
+	request.Id = id
+
+	var body UpdateObjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateObject(ctx, request.(UpdateObjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateObject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateObjectResponseObject); ok {
+		if err := validResponse.VisitUpdateObjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetObjectCrop operation middleware
+func (sh *strictHandler) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64, params GetObjectCropParams) {
+	var request GetObjectCropRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetObjectCrop(ctx, request.(GetObjectCropRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetObjectCrop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetObjectCropResponseObject); ok {
+		if err := validResponse.VisitGetObjectCropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListObjectReferences operation middleware
+func (sh *strictHandler) ListObjectReferences(w http.ResponseWriter, r *http.Request, id int64) {
+	var request ListObjectReferencesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListObjectReferences(ctx, request.(ListObjectReferencesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListObjectReferences")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListObjectReferencesResponseObject); ok {
+		if err := validResponse.VisitListObjectReferencesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddObjectReference operation middleware
+func (sh *strictHandler) AddObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
+	var request AddObjectReferenceRequestObject
+
+	request.Id = id
+
+	var body AddObjectReferenceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddObjectReference(ctx, request.(AddObjectReferenceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddObjectReference")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddObjectReferenceResponseObject); ok {
+		if err := validResponse.VisitAddObjectReferenceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListObjectSightings operation middleware
+func (sh *strictHandler) ListObjectSightings(w http.ResponseWriter, r *http.Request, id int64, params ListObjectSightingsParams) {
+	var request ListObjectSightingsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListObjectSightings(ctx, request.(ListObjectSightingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListObjectSightings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListObjectSightingsResponseObject); ok {
+		if err := validResponse.VisitListObjectSightingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetOpenAPISpec operation middleware
 func (sh *strictHandler) GetOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	var request GetOpenAPISpecRequestObject
@@ -6447,101 +7814,114 @@ func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

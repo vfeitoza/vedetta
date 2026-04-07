@@ -26,8 +26,12 @@ tags:
     description: People and face recognition management
   - name: faces
     description: Face detection, assignment, and cropping
+  - name: objects
+    description: Object re-identification and known object management
   - name: recordings
     description: Recording segments, playback, calendar, and export
+  - name: streaming
+    description: Live camera streaming (WebRTC, MSE, MJPEG)
 
 paths:
   /api/auth/login:
@@ -1517,6 +1521,378 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/cameras/{name}/webrtc/offer:
+    post:
+      operationId: postWebRTCOffer
+      summary: Send a WebRTC SDP offer and receive an SDP answer
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SDPOffer"
+      responses:
+        "200":
+          description: SDP answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SDPAnswer"
+        "400":
+          description: Invalid SDP offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/mse/ws:
+    get:
+      operationId: getMSEWebSocket
+      summary: WebSocket endpoint for MSE live streaming
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade for MSE streaming
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/mjpeg:
+    get:
+      operationId: getMJPEG
+      summary: MJPEG live stream
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: MJPEG stream
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects:
+    get:
+      operationId: listObjects
+      summary: List all known objects
+      tags: [objects]
+      responses:
+        "200":
+          description: Object list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnownObject"
+    post:
+      operationId: createObject
+      summary: Create a known object from an event detection
+      tags: [objects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateObjectRequest"
+      responses:
+        "201":
+          description: Object created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnownObject"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Event snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Object re-identification not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects/{id}:
+    put:
+      operationId: updateObject
+      summary: Update a known object's name or match threshold
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateObjectRequest"
+      responses:
+        "200":
+          description: Object updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusUpdated"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteObject
+      summary: Delete a known object
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Object deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusDeleted"
+        "404":
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects/{id}/sightings:
+    get:
+      operationId: listObjectSightings
+      summary: List sightings of a known object
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Sighting list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ObjectSighting"
+        "400":
+          description: Invalid object ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects/{id}/crop:
+    get:
+      operationId: getObjectCrop
+      summary: Get cropped image of a known object
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: ref
+          in: query
+          description: Optional reference ID to get a specific reference crop
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: JPEG crop image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Crop not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects/{id}/references:
+    get:
+      operationId: listObjectReferences
+      summary: List reference images for a known object
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Reference list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ObjectReference"
+        "400":
+          description: Invalid object ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: addObjectReference
+      summary: Add a reference image to a known object from an event
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddObjectReferenceRequest"
+      responses:
+        "201":
+          description: Reference added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddObjectReferenceResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Object or event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Object re-identification not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/objects/references/{id}:
+    delete:
+      operationId: deleteObjectReference
+      summary: Delete an object reference image
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Reference deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusDeleted"
+
+  /api/objects/sightings/{id}:
+    delete:
+      operationId: dismissSighting
+      summary: Dismiss an object sighting
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Sighting dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusDismissed"
+        "404":
+          description: Sighting not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1674,6 +2050,108 @@ components:
         status:
           type: string
           enum: [ignored]
+
+    StatusDismissed:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [dismissed]
+
+    KnownObject:
+      type: object
+      required: [id, name, label, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        label:
+          type: string
+        crop_path:
+          type: string
+        match_threshold:
+          type: number
+          format: double
+        created_at:
+          type: string
+          format: date-time
+
+    CreateObjectRequest:
+      type: object
+      required: [event_id, name]
+      properties:
+        event_id:
+          type: string
+        name:
+          type: string
+
+    UpdateObjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        match_threshold:
+          type: number
+          format: double
+
+    ObjectReference:
+      type: object
+      required: [id, object_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        object_id:
+          type: integer
+          format: int64
+        event_id:
+          type: string
+        crop_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AddObjectReferenceRequest:
+      type: object
+      required: [event_id]
+      properties:
+        event_id:
+          type: string
+
+    AddObjectReferenceResponse:
+      type: object
+      required: [id, object_id]
+      properties:
+        id:
+          type: integer
+          format: int64
+        object_id:
+          type: integer
+          format: int64
+        crop_path:
+          type: string
+
+    SDPOffer:
+      type: object
+      required: [type, sdp]
+      properties:
+        type:
+          type: string
+        sdp:
+          type: string
+
+    SDPAnswer:
+      type: object
+      required: [type, sdp]
+      properties:
+        type:
+          type: string
+        sdp:
+          type: string
 
     Person:
       type: object
