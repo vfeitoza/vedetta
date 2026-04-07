@@ -50,18 +50,17 @@ func (r *Recompressor) Start(ctx context.Context) {
 	}()
 }
 
-// eligibleCameras returns camera names that have tiered storage enabled.
-func (r *Recompressor) eligibleCameras(now time.Time) []string {
-	_ = now
-	var names []string
+// eligibleCameras returns the effective tiered storage config for each camera
+// that has tiered storage enabled, keyed by camera name.
+func (r *Recompressor) eligibleCameras() map[string]config.TieredStorageConfig {
+	result := make(map[string]config.TieredStorageConfig)
 	for _, cam := range r.cameras {
 		eff := cam.EffectiveTieredStorage(r.cfg)
-		if !eff.Enabled {
-			continue
+		if eff.Enabled {
+			result[cam.Name] = eff
 		}
-		names = append(names, cam.Name)
 	}
-	return names
+	return result
 }
 
 // processOne picks the oldest eligible segment across all enabled cameras and transcodes it.
@@ -69,23 +68,19 @@ func (r *Recompressor) processOne() {
 	now := time.Now()
 
 	var bestSeg *storage.SegmentRecord
-	for _, cam := range r.cameras {
-		eff := cam.EffectiveTieredStorage(r.cfg)
-		if !eff.Enabled {
-			continue
-		}
+	for camName, eff := range r.eligibleCameras() {
 		cutoff := now.Add(-time.Duration(eff.AfterDays) * 24 * time.Hour)
-		segs, err := r.db.GetSegmentsForRecompression(cam.Name, cutoff)
+		segs, err := r.db.GetSegmentsForRecompression(camName, cutoff)
 		if err != nil {
-			slog.Warn("recompression: query failed", "camera", cam.Name, "error", err)
+			slog.Warn("recompression: query failed", "camera", camName, "error", err)
 			continue
 		}
 		if len(segs) == 0 {
 			continue
 		}
-		seg := segs[0]
-		if bestSeg == nil || seg.EndTime.Before(bestSeg.EndTime) {
-			bestSeg = &seg
+		candidate := segs[0]
+		if bestSeg == nil || candidate.EndTime.Before(bestSeg.EndTime) {
+			bestSeg = &candidate
 		}
 	}
 
@@ -105,6 +100,7 @@ func (r *Recompressor) processOne() {
 			"camera", bestSeg.Camera,
 			"path", bestSeg.Path,
 			"error", err,
+			"retry", bestSeg.RecompressFailures+1,
 		)
 		if dbErr := r.db.IncrementSegmentRecompressFailures(bestSeg.ID); dbErr != nil {
 			slog.Error("recompression: failed to increment failure count", "id", bestSeg.ID, "error", dbErr)

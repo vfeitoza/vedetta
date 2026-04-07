@@ -82,29 +82,22 @@ func TestRecompressionJob_RespectsScheduleWindow(t *testing.T) {
 
 func TestRecompressionJob_SkipsDisabledCamera(t *testing.T) {
 	_, db := newTestRecompressor(t)
-	dir := t.TempDir()
 
-	seg := storage.SegmentRecord{
-		Camera:    "cam_disabled",
-		Path:      filepath.Join(dir, "seg.mp4"),
-		StartTime: time.Now().Add(-48 * time.Hour),
-		EndTime:   time.Now().Add(-47 * time.Hour),
-		SizeBytes: 1000,
-	}
-	if err := db.SaveSegment(seg); err != nil {
-		t.Fatalf("SaveSegment: %v", err)
-	}
-
+	// Global tiered storage is enabled, but cam_disabled has enabled: false override.
 	cfg := config.TieredStorageConfig{Enabled: true, AfterDays: 1, Schedule: "02:00-05:00"}
+	disabled := false
 	cameras := []config.CameraConfig{
-		{Name: "cam1"},
+		{Name: "cam_enabled"},
+		{Name: "cam_disabled", TieredStorage: config.CameraTieredStorageConfig{Enabled: &disabled}},
 	}
 	r := NewRecompressor(cfg, cameras, db)
-	eligible := r.eligibleCameras(time.Now())
-	for _, cam := range eligible {
-		if cam == "cam_disabled" {
-			t.Error("cam_disabled should not be eligible")
-		}
+	eligible := r.eligibleCameras()
+
+	if _, ok := eligible["cam_disabled"]; ok {
+		t.Error("cam_disabled should not be eligible when enabled=false")
+	}
+	if _, ok := eligible["cam_enabled"]; !ok {
+		t.Error("cam_enabled should be eligible")
 	}
 }
 
