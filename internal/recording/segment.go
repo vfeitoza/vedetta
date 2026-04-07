@@ -216,9 +216,10 @@ func (sr *SegmentRecorder) ScanExistingSegments(cameraName, segDir string) {
 	// Clean up stale temp files
 	tempEntries, _ := os.ReadDir(segDir)
 	for _, entry := range tempEntries {
-		if strings.HasSuffix(entry.Name(), ".remux.mp4") {
-			tmpPath := filepath.Join(segDir, entry.Name())
-			slog.Warn("removing stale remux temp file", "path", tmpPath)
+		name := entry.Name()
+		if strings.HasSuffix(name, ".remux.mp4") || strings.HasSuffix(name, ".mp4.tmp") {
+			tmpPath := filepath.Join(segDir, name)
+			slog.Warn("removing stale temp file", "path", tmpPath)
 			_ = os.Remove(tmpPath)
 		}
 	}
