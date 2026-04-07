@@ -2247,6 +2247,8 @@ document.addEventListener('click', function(e) {
 });
 
 // ─── Account Modal ───
+var _accountKind = 'session';
+
 function openAccountModal() {
   var backdrop = el('account-backdrop');
   var modal = el('account-modal');
@@ -2256,12 +2258,25 @@ function openAccountModal() {
     if (!resp.ok) return;
     return resp.json();
   }).then(function(data) {
-    if (data && data.username) {
-      el('account-username').textContent = data.username;
+    if (!data) return;
+    _accountKind = data.kind || 'session';
+
+    el('account-username').textContent = data.username || '';
+
+    var methodEl = el('account-auth-method');
+    if (methodEl) {
+      var labels = { session: 'Local account', token: 'API token', proxy: 'Authenticated via reverse proxy' };
+      methodEl.textContent = labels[data.kind] || data.kind;
     }
+
     var cpSection = el('change-password-section');
     if (cpSection) {
-      cpSection.style.display = (data && data.kind === 'proxy') ? 'none' : '';
+      cpSection.style.display = data.kind === 'proxy' ? 'none' : '';
+    }
+
+    var logoutBtn = el('account-logout-btn');
+    if (logoutBtn) {
+      logoutBtn.style.display = data.kind === 'proxy' ? 'none' : '';
     }
   });
 
@@ -2286,46 +2301,58 @@ function closeAccountModal() {
 }
 
 (function() {
+  // Change password form
   var form = document.getElementById('change-password-form');
-  if (!form) return;
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var status = document.getElementById('cp-status');
-    var newPw = document.getElementById('cp-new').value;
-    var confirmPw = document.getElementById('cp-confirm').value;
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var status = document.getElementById('cp-status');
+      var newPw = document.getElementById('cp-new').value;
+      var confirmPw = document.getElementById('cp-confirm').value;
 
-    if (newPw !== confirmPw) {
-      status.textContent = 'New passwords do not match.';
-      status.style.color = 'var(--danger, #ff7d7d)';
-      return;
-    }
-
-    status.textContent = 'Updating...';
-    status.style.color = 'var(--text-secondary)';
-
-    fetch('/api/auth/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        current_password: document.getElementById('cp-current').value,
-        new_password: newPw
-      })
-    }).then(function(resp) {
-      return resp.json().then(function(body) { return { ok: resp.ok, body: body }; });
-    }).then(function(result) {
-      if (result.ok) {
-        status.textContent = 'Password updated successfully.';
-        status.style.color = 'var(--success, #5dff7d)';
-        form.reset();
-      } else {
-        status.textContent = result.body.error || 'Failed to update password.';
+      if (newPw !== confirmPw) {
+        status.textContent = 'New passwords do not match.';
         status.style.color = 'var(--danger, #ff7d7d)';
+        return;
       }
-    }).catch(function() {
-      status.textContent = 'Network error. Please try again.';
-      status.style.color = 'var(--danger, #ff7d7d)';
+
+      status.textContent = 'Updating...';
+      status.style.color = 'var(--text-secondary)';
+
+      fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: document.getElementById('cp-current').value,
+          new_password: newPw
+        })
+      }).then(function(resp) {
+        return resp.json().then(function(body) { return { ok: resp.ok, body: body }; });
+      }).then(function(result) {
+        if (result.ok) {
+          status.textContent = 'Password updated successfully.';
+          status.style.color = 'var(--success, #5dff7d)';
+          form.reset();
+        } else {
+          status.textContent = result.body.error || 'Failed to update password.';
+          status.style.color = 'var(--danger, #ff7d7d)';
+        }
+      }).catch(function() {
+        status.textContent = 'Network error. Please try again.';
+        status.style.color = 'var(--danger, #ff7d7d)';
+      });
     });
-  });
+  }
+
+  // Logout button
+  var logoutBtn = document.getElementById('account-logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function() {
+      fetch('/api/auth/logout', { method: 'POST' }).then(function() {
+        location.href = '/login.html';
+      });
+    });
+  }
 })();
 
 // ─── Real-time Playhead Animation ───

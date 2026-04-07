@@ -187,22 +187,26 @@
       </button>
     </div>
     <div class="shortcut-modal-body" style="display:block">
-      <div style="margin-bottom:1rem">
+      <div style="margin-bottom:1.25rem">
         <span class="stat-label">SIGNED IN AS</span>
         <div id="account-username" style="font-weight:600;margin-top:0.25rem"></div>
+        <div id="account-auth-method" style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:0.25rem"></div>
       </div>
       <div id="change-password-section">
-      <h3 style="font-size:var(--text-sm);margin-bottom:0.75rem">Change Password</h3>
-      <form id="change-password-form">
-        <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">Current Password</label>
-        <input type="password" id="cp-current" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required>
-        <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">New Password</label>
-        <input type="password" id="cp-new" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required minlength="8">
-        <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">Confirm New Password</label>
-        <input type="password" id="cp-confirm" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required minlength="8">
-        <div id="cp-status" style="min-height:1.3rem;font-size:var(--text-sm);margin-bottom:0.5rem"></div>
-        <button type="submit" class="btn btn-primary" style="width:100%">Update Password</button>
-      </form>
+        <h3 style="font-size:var(--text-sm);margin-bottom:0.75rem">Change Password</h3>
+        <form id="change-password-form">
+          <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">Current Password</label>
+          <input type="password" id="cp-current" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required>
+          <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">New Password</label>
+          <input type="password" id="cp-new" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required minlength="8">
+          <label style="display:block;margin-bottom:0.25rem;font-size:var(--text-sm);color:var(--text-secondary)">Confirm New Password</label>
+          <input type="password" id="cp-confirm" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--surface-2);border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--text-sm)" required minlength="8">
+          <div id="cp-status" style="min-height:1.3rem;font-size:var(--text-sm);margin-bottom:0.5rem"></div>
+          <button type="submit" class="btn btn-primary" style="width:100%">Update Password</button>
+        </form>
+      </div>
+      <div id="account-actions" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-subtle)">
+        <button id="account-logout-btn" class="btn btn-ghost" style="width:100%;color:var(--text-secondary);font-size:var(--text-sm)">Sign Out</button>
       </div>
     </div>
   </div>
