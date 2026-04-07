@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -676,8 +677,13 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 		initBoxes, fragments, trackTimeScales, err := indexFile(f)
 		f.Close()
 		if err != nil {
-			// Skip unreadable segments (in-progress writes, corrupted files)
-			continue
+			// On EOF the file is still being written. Keep any fragments already
+			// parsed so in-progress segments contribute their complete GOPs to the
+			// playlist. Skip only if no usable data was recovered or the error is
+			// unrelated to truncation.
+			if (!errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF)) || len(fragments) == 0 {
+				continue
+			}
 		}
 
 		var initSize int64
