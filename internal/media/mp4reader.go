@@ -9,11 +9,32 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	gomp4 "github.com/abema/go-mp4"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4"
 )
+
+// hlsInUsePaths tracks fMP4 file paths currently being served via HLS.
+// The recompression job checks this before replacing a file.
+var hlsInUsePaths sync.Map
+
+// markHLSPathInUse registers a file path as actively being served.
+func markHLSPathInUse(path string) {
+	hlsInUsePaths.Store(path, struct{}{})
+}
+
+// unmarkHLSPathInUse removes a file path from the in-use set.
+func unmarkHLSPathInUse(path string) {
+	hlsInUsePaths.Delete(path)
+}
+
+// HLSPathInUse reports whether a file is currently being served via HLS.
+func HLSPathInUse(path string) bool {
+	_, ok := hlsInUsePaths.Load(path)
+	return ok
+}
 
 // ProbeDuration reads the duration of an MP4 file.
 // For standard MP4: reads moov/mvhd. For fMP4: computes from fragments.
@@ -814,6 +835,9 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 // can consume. This is needed because per-GOP recordings use multi-track moofs
 // (video+audio trafs in a single moof) which browsers reject.
 func ServeHLSSegment(w io.Writer, filePath string, byteStart, byteEnd int64) error {
+	markHLSPathInUse(filePath)
+	defer unmarkHLSPathInUse(filePath)
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
