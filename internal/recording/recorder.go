@@ -30,6 +30,7 @@ type StorageStats struct {
 // RecompressionStats summarises the tiered storage recompression feature.
 type RecompressionStats struct {
 	Enabled              bool      `json:"enabled"`
+	IsRunning            bool      `json:"is_running"`
 	LastRun              time.Time `json:"last_run,omitempty"`
 	SegmentsRecompressed int64     `json:"segments_recompressed"`
 	BytesReclaimed       int64     `json:"bytes_reclaimed"`
@@ -217,6 +218,7 @@ func (r *Recorder) RefreshStats() {
 	rStats := r.recompressor.Stats()
 	stats.Recompression = RecompressionStats{
 		Enabled:              r.config.TieredStorage.Enabled,
+		IsRunning:            rStats.IsRunning,
 		LastRun:              rStats.LastRun,
 		SegmentsRecompressed: rStats.SegmentsRecompressed,
 		BytesReclaimed:       rStats.BytesReclaimed,
@@ -349,6 +351,19 @@ func (r *Recorder) PrepareExport(cameraName string, from, to time.Time) (*Export
 		File:    f,
 		tmpPath: tmpPath,
 	}, nil
+}
+
+// TriggerRecompression starts a full recompression pass in the background.
+// Returns an error if a pass is already running or tiered storage is disabled.
+func (r *Recorder) TriggerRecompression(ctx context.Context) error {
+	if !r.config.TieredStorage.Enabled {
+		return fmt.Errorf("tiered storage is not enabled")
+	}
+	if r.recompressor.isRunning.Load() {
+		return fmt.Errorf("recompression already running")
+	}
+	go r.recompressor.RunNow(ctx)
+	return nil
 }
 
 // ListSegmentsForDate returns segments for a camera on a specific date.

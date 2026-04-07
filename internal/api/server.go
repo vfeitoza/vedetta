@@ -280,6 +280,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /partials/event/{id}", s.handleEventDetailPartial)
 	s.mux.HandleFunc("GET /partials/system-status", s.handleSystemStatusPartial)
 	s.mux.HandleFunc("GET /partials/system", s.handleSystemPartial)
+	s.mux.HandleFunc("POST /api/system/recompress/trigger", s.handleRecompressTrigger)
 
 	// Setup status endpoint (returns "running" in normal mode)
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {
@@ -2425,31 +2426,47 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	type sysData struct {
-		Version     string
-		Uptime      string
-		Decoder     string
-		GoVersion   string
-		CameraCount int
-		OnlineCount int
-		Statuses    []camera.CameraStatus
-		TotalBytes  int64
-		TotalStr    string
-		SegCount    int
-		Storage     []storageEntry
+		Version              string
+		Uptime               string
+		Decoder              string
+		GoVersion            string
+		CameraCount          int
+		OnlineCount          int
+		Statuses             []camera.CameraStatus
+		TotalBytes           int64
+		TotalStr             string
+		SegCount             int
+		Storage              []storageEntry
+		RecompressEnabled    bool
+		RecompressRunning    bool
+		RecompressLastRun    string
+		RecompressSegments   int64
+		RecompressBytesSaved string
+	}
+
+	rc := stats.Recompression
+	lastRunStr := "never"
+	if !rc.LastRun.IsZero() {
+		lastRunStr = rc.LastRun.Format("2006-01-02 15:04")
 	}
 
 	data := sysData{
-		Version:     "0.1.0",
-		Uptime:      uptimeStr,
-		Decoder:     decoderName,
-		GoVersion:   runtime.Version(),
-		CameraCount: len(statuses),
-		OnlineCount: onlineCount,
-		Statuses:    statuses,
-		TotalBytes:  totalBytes,
-		TotalStr:    formatBytes(totalBytes),
-		SegCount:    stats.SegmentCount,
-		Storage:     storageEntries,
+		Version:              "0.1.0",
+		Uptime:               uptimeStr,
+		Decoder:              decoderName,
+		GoVersion:            runtime.Version(),
+		CameraCount:          len(statuses),
+		OnlineCount:          onlineCount,
+		Statuses:             statuses,
+		TotalBytes:           totalBytes,
+		TotalStr:             formatBytes(totalBytes),
+		SegCount:             stats.SegmentCount,
+		Storage:              storageEntries,
+		RecompressEnabled:    rc.Enabled,
+		RecompressRunning:    rc.IsRunning,
+		RecompressLastRun:    lastRunStr,
+		RecompressSegments:   rc.SegmentsRecompressed,
+		RecompressBytesSaved: formatBytes(rc.BytesReclaimed),
 	}
 
 	tmpl := template.Must(template.New("system").Funcs(s.funcMap).Parse(systemPartialTemplate))
@@ -2503,7 +2520,36 @@ const systemPartialTemplate = `<div class="sys-card">
       <div class="storage-bar"><div class="storage-bar-fill" style="width: {{printf "%.0f" .Percent}}%"></div></div>
     </div>{{end}}
   </div>
-</div>`
+</div>
+{{if .RecompressEnabled}}<div class="sys-card">
+  <div class="sys-card-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    Recompression
+  </div>
+  <div class="sys-card-body">
+    <div class="sys-row"><span class="key">Last run</span><span class="val">{{.RecompressLastRun}}</span></div>
+    <div class="sys-row"><span class="key">Segments</span><span class="val">{{.RecompressSegments}}</span></div>
+    <div class="sys-row"><span class="key">Space saved</span><span class="val">{{.RecompressBytesSaved}}</span></div>
+    <div style="margin-top: 0.75rem">
+      {{if .RecompressRunning}}
+      <button class="btn btn-sm" disabled>Running…</button>
+      {{else}}
+      <button class="btn btn-sm"
+        hx-post="/api/system/recompress/trigger"
+        hx-swap="none"
+        hx-on::after-request="if(event.detail.successful){this.textContent='Started';this.disabled=true}else{this.textContent='Already running'}">Run now</button>
+      {{end}}
+    </div>
+  </div>
+</div>{{end}}`
+
+func (s *Server) handleRecompressTrigger(w http.ResponseWriter, r *http.Request) {
+	if err := s.recorder.TriggerRecompression(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
 
 func (s *Server) handleRecordingsCalendar(w http.ResponseWriter, r *http.Request) {
 	cameraFilter := r.URL.Query().Get("camera")

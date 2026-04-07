@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rvben/vedetta/internal/config"
@@ -17,10 +18,11 @@ type Recompressor struct {
 	cameras []config.CameraConfig
 	db      *storage.DB
 
-	mu                  sync.Mutex
-	lastRun             time.Time
+	isRunning            atomic.Bool
+	mu                   sync.Mutex
+	lastRun              time.Time
 	segmentsRecompressed int64
-	bytesReclaimed      int64
+	bytesReclaimed       int64
 }
 
 // NewRecompressor creates a Recompressor with the given config and camera list.
@@ -33,6 +35,7 @@ type RecompressorStats struct {
 	LastRun              time.Time
 	SegmentsRecompressed int64
 	BytesReclaimed       int64
+	IsRunning            bool
 }
 
 // Stats returns a snapshot of the recompressor's runtime counters.
@@ -43,6 +46,7 @@ func (r *Recompressor) Stats() RecompressorStats {
 		LastRun:              r.lastRun,
 		SegmentsRecompressed: r.segmentsRecompressed,
 		BytesReclaimed:       r.bytesReclaimed,
+		IsRunning:            r.isRunning.Load(),
 	}
 }
 
@@ -87,8 +91,35 @@ func (r *Recompressor) eligibleCameras() map[string]config.TieredStorageConfig {
 	return result
 }
 
+// RunNow runs a full recompression pass outside the schedule window.
+// It returns immediately if a pass is already running.
+// The pass continues until no more eligible segments remain.
+func (r *Recompressor) RunNow(ctx context.Context) {
+	if !r.isRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer r.isRunning.Store(false)
+
+	slog.Info("recompression: manual pass started")
+	processed := 0
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("recompression: manual pass cancelled", "processed", processed)
+			return
+		default:
+		}
+		if !r.processOne() {
+			break
+		}
+		processed++
+	}
+	slog.Info("recompression: manual pass completed", "processed", processed)
+}
+
 // processOne picks the oldest eligible segment across all enabled cameras and transcodes it.
-func (r *Recompressor) processOne() {
+// Returns true if a segment was processed, false if nothing was eligible.
+func (r *Recompressor) processOne() bool {
 	now := time.Now()
 
 	var bestSeg *storage.SegmentRecord
@@ -109,12 +140,12 @@ func (r *Recompressor) processOne() {
 	}
 
 	if bestSeg == nil {
-		return
+		return false
 	}
 
 	if media.HLSPathInUse(bestSeg.Path) {
 		slog.Debug("recompression: skipping in-use segment", "path", bestSeg.Path)
-		return
+		return false
 	}
 
 	start := time.Now()
@@ -129,7 +160,7 @@ func (r *Recompressor) processOne() {
 		if dbErr := r.db.IncrementSegmentRecompressFailures(bestSeg.ID); dbErr != nil {
 			slog.Error("recompression: failed to increment failure count", "id", bestSeg.ID, "error", dbErr)
 		}
-		return
+		return true
 	}
 
 	if result.Skipped {
@@ -138,12 +169,12 @@ func (r *Recompressor) processOne() {
 			slog.Error("recompression: failed to mark skipped segment", "id", bestSeg.ID, "error", err)
 		}
 		slog.Debug("recompression: skipped (already small enough)", "path", bestSeg.Path)
-		return
+		return true
 	}
 
 	if err := r.db.MarkSegmentRecompressed(bestSeg.ID, result.NewSize); err != nil {
 		slog.Error("recompression: failed to mark segment recompressed", "id", bestSeg.ID, "error", err)
-		return
+		return true
 	}
 
 	saved := result.OriginalSize - result.NewSize
@@ -161,4 +192,5 @@ func (r *Recompressor) processOne() {
 		"saved_mb", saved/(1024*1024),
 		"duration", time.Since(start).Round(time.Second),
 	)
+	return true
 }
