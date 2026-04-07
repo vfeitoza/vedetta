@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -515,6 +516,107 @@ func TestLoadOrDefaultInvalidFile(t *testing.T) {
 	}
 	if setupMode {
 		t.Error("setupMode should be false on error")
+	}
+}
+
+func TestTieredStorageDefaults(t *testing.T) {
+	path := writeConfig(t, `
+cameras:
+  - name: cam1
+    url: rtsp://localhost/stream
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ts := cfg.Recording.TieredStorage
+	if ts.Enabled {
+		t.Error("expected tiered_storage.enabled = false by default")
+	}
+	if ts.AfterDays != 1 {
+		t.Errorf("after_days = %d, want 1", ts.AfterDays)
+	}
+	if ts.TargetWidth != 1280 {
+		t.Errorf("target_width = %d, want 1280", ts.TargetWidth)
+	}
+	if ts.TargetHeight != 720 {
+		t.Errorf("target_height = %d, want 720", ts.TargetHeight)
+	}
+	if ts.Schedule != "02:00-05:00" {
+		t.Errorf("schedule = %q, want \"02:00-05:00\"", ts.Schedule)
+	}
+}
+
+func TestTieredStoragePerCameraInheritance(t *testing.T) {
+	path := writeConfig(t, `
+cameras:
+  - name: cam_default
+    url: rtsp://localhost/stream
+  - name: cam_override_days
+    url: rtsp://localhost/stream
+    tiered_storage:
+      after_days: 3
+  - name: cam_disabled
+    url: rtsp://localhost/stream
+    tiered_storage:
+      enabled: false
+recording:
+  tiered_storage:
+    enabled: true
+    after_days: 1
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	global := cfg.Recording.TieredStorage
+
+	def := cfg.Cameras[0].EffectiveTieredStorage(global)
+	if !def.Enabled || def.AfterDays != 1 {
+		t.Errorf("cam_default: got enabled=%v after_days=%d, want true/1", def.Enabled, def.AfterDays)
+	}
+
+	over := cfg.Cameras[1].EffectiveTieredStorage(global)
+	if !over.Enabled || over.AfterDays != 3 {
+		t.Errorf("cam_override_days: got enabled=%v after_days=%d, want true/3", over.Enabled, over.AfterDays)
+	}
+
+	dis := cfg.Cameras[2].EffectiveTieredStorage(global)
+	if dis.Enabled {
+		t.Error("cam_disabled: expected enabled=false")
+	}
+}
+
+func TestTieredStorageScheduleParse(t *testing.T) {
+	tests := []struct {
+		schedule string
+		nowHour  int
+		nowMin   int
+		want     bool
+		wantErr  bool
+	}{
+		{"02:00-05:00", 3, 0, true, false},
+		{"02:00-05:00", 10, 0, false, false},
+		{"02:00-05:00", 2, 0, true, false},
+		{"02:00-05:00", 5, 0, false, false},
+		{"23:00-01:00", 23, 30, true, false},
+		{"23:00-01:00", 0, 30, true, false},
+		{"23:00-01:00", 12, 0, false, false},
+		{"bad", 0, 0, false, true},
+		{"25:00-05:00", 0, 0, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.schedule+"@"+fmt.Sprintf("%02d:%02d", tt.nowHour, tt.nowMin), func(t *testing.T) {
+			now := time.Date(2026, 1, 1, tt.nowHour, tt.nowMin, 0, 0, time.Local)
+			got, err := InScheduleWindow(tt.schedule, now)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("InScheduleWindow(%q, %02d:%02d) = %v, want %v",
+					tt.schedule, tt.nowHour, tt.nowMin, got, tt.want)
+			}
+		})
 	}
 }
 

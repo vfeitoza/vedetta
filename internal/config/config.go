@@ -25,14 +25,15 @@ type Config struct {
 }
 
 type CameraConfig struct {
-	Name      string             `yaml:"name"`
-	URL       string             `yaml:"url"`
-	RecordURL string             `yaml:"record_url"` // Separate high-res stream for recording (optional, defaults to URL)
-	Detect    DetectStreamConfig `yaml:"detect"`
-	Record    StreamConfig       `yaml:"record"`
-	Zones     []Zone             `yaml:"zones"`
-	Enabled   *bool              `yaml:"enabled"`
-	Doorbell  DoorbellConfig     `yaml:"doorbell"`
+	Name          string                    `yaml:"name"`
+	URL           string                    `yaml:"url"`
+	RecordURL     string                    `yaml:"record_url"` // Separate high-res stream for recording (optional, defaults to URL)
+	Detect        DetectStreamConfig        `yaml:"detect"`
+	Record        StreamConfig              `yaml:"record"`
+	Zones         []Zone                    `yaml:"zones"`
+	Enabled       *bool                     `yaml:"enabled"`
+	Doorbell      DoorbellConfig            `yaml:"doorbell"`
+	TieredStorage CameraTieredStorageConfig `yaml:"tiered_storage"`
 }
 
 type DoorbellConfig struct {
@@ -86,16 +87,33 @@ type MotionConfig struct {
 }
 
 type RecordingConfig struct {
-	Path             string        `yaml:"path"`
-	PreCapture       time.Duration `yaml:"pre_capture"`
-	PostCapture      time.Duration `yaml:"post_capture"`
-	MaxEventDuration time.Duration `yaml:"max_event_duration"` // Cap on dynamic event clip length (default 2m)
-	RetainDays       int           `yaml:"retain_days"`
-	EventRetain      int           `yaml:"event_retain_days"` // Keep event clips longer than continuous
-	SegmentLength    time.Duration `yaml:"segment_length"`
-	Continuous       bool          `yaml:"continuous"`  // Record continuously, not just events
-	MaxStorage       string        `yaml:"max_storage"` // Human-readable max storage (e.g. "10GB", "500MB"); 0 or empty = unlimited
+	Path             string              `yaml:"path"`
+	PreCapture       time.Duration       `yaml:"pre_capture"`
+	PostCapture      time.Duration       `yaml:"post_capture"`
+	MaxEventDuration time.Duration       `yaml:"max_event_duration"` // Cap on dynamic event clip length (default 2m)
+	RetainDays       int                 `yaml:"retain_days"`
+	EventRetain      int                 `yaml:"event_retain_days"` // Keep event clips longer than continuous
+	SegmentLength    time.Duration       `yaml:"segment_length"`
+	Continuous       bool                `yaml:"continuous"`     // Record continuously, not just events
+	MaxStorage       string              `yaml:"max_storage"`    // Human-readable max storage (e.g. "10GB", "500MB"); 0 or empty = unlimited
+	TieredStorage    TieredStorageConfig `yaml:"tiered_storage"`
 	maxStorageBytes  int64
+}
+
+// TieredStorageConfig controls scheduled overnight recompression of old segments.
+type TieredStorageConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	AfterDays    int    `yaml:"after_days"`
+	TargetWidth  int    `yaml:"target_width"`
+	TargetHeight int    `yaml:"target_height"`
+	Schedule     string `yaml:"schedule"` // "HH:MM-HH:MM", local time, may span midnight
+}
+
+// CameraTieredStorageConfig holds per-camera overrides for tiered storage.
+// Nil pointer fields inherit from the global TieredStorageConfig.
+type CameraTieredStorageConfig struct {
+	Enabled   *bool `yaml:"enabled"`
+	AfterDays *int  `yaml:"after_days"`
 }
 
 // MaxStorageBytes returns the parsed max storage limit in bytes.
@@ -169,6 +187,13 @@ func Defaults() *Config {
 			EventRetain:      30,
 			SegmentLength:    10 * time.Minute,
 			Continuous:       true,
+			TieredStorage: TieredStorageConfig{
+				Enabled:      false,
+				AfterDays:    1,
+				TargetWidth:  1280,
+				TargetHeight: 720,
+				Schedule:     "02:00-05:00",
+			},
 		},
 		Events: EventConfig{
 			CooldownSeconds: 30,
@@ -362,4 +387,61 @@ func parseProxyPrefix(value string) (netip.Prefix, error) {
 		return netip.Prefix{}, fmt.Errorf("invalid proxy CIDR or IP %q", value)
 	}
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
+}
+
+// ParseScheduleWindow parses a "HH:MM-HH:MM" schedule string into start and end
+// clock times as minutes-since-midnight. Returns an error on invalid format.
+// The window may span midnight (e.g. "23:00-01:00").
+func ParseScheduleWindow(s string) (startMin, endMin int, err error) {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid schedule %q: expected HH:MM-HH:MM", s)
+	}
+	parse := func(t string) (int, error) {
+		var h, m int
+		if _, err := fmt.Sscanf(t, "%d:%d", &h, &m); err != nil {
+			return 0, fmt.Errorf("invalid time %q", t)
+		}
+		if h < 0 || h > 23 || m < 0 || m > 59 {
+			return 0, fmt.Errorf("time %q out of range", t)
+		}
+		return h*60 + m, nil
+	}
+	startMin, err = parse(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	endMin, err = parse(parts[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return startMin, endMin, nil
+}
+
+// InScheduleWindow reports whether now (local time) falls within the schedule window.
+// Handles windows that span midnight (e.g. "23:00-01:00").
+func InScheduleWindow(schedule string, now time.Time) (bool, error) {
+	startMin, endMin, err := ParseScheduleWindow(schedule)
+	if err != nil {
+		return false, err
+	}
+	nowMin := now.Hour()*60 + now.Minute()
+	if startMin <= endMin {
+		return nowMin >= startMin && nowMin < endMin, nil
+	}
+	// Spans midnight
+	return nowMin >= startMin || nowMin < endMin, nil
+}
+
+// EffectiveTieredStorage returns the effective tiered storage config for this camera,
+// applying per-camera overrides on top of the global config.
+func (c CameraConfig) EffectiveTieredStorage(global TieredStorageConfig) TieredStorageConfig {
+	result := global
+	if c.TieredStorage.Enabled != nil {
+		result.Enabled = *c.TieredStorage.Enabled
+	}
+	if c.TieredStorage.AfterDays != nil {
+		result.AfterDays = *c.TieredStorage.AfterDays
+	}
+	return result
 }
