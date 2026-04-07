@@ -469,11 +469,17 @@ func utc(t time.Time) time.Time {
 	return t.UTC().Round(0)
 }
 
-// SaveSegment inserts or replaces a segment record in the database.
+// SaveSegment inserts or updates a segment record in the database.
+// On conflict with an existing path, only the mutable fields (start_time, end_time,
+// size_bytes) are updated — recompression state is preserved.
 func (d *DB) SaveSegment(seg SegmentRecord) error {
 	_, err := d.db.Exec(`
-		INSERT OR REPLACE INTO segments (camera, path, start_time, end_time, size_bytes)
-		VALUES (?, ?, ?, ?, ?)`,
+		INSERT INTO segments (camera, path, start_time, end_time, size_bytes)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			start_time = excluded.start_time,
+			end_time   = excluded.end_time,
+			size_bytes = excluded.size_bytes`,
 		seg.Camera, seg.Path, utc(seg.StartTime), utc(seg.EndTime), seg.SizeBytes,
 	)
 	return err

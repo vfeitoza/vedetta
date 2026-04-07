@@ -1179,3 +1179,122 @@ func TestNew_WALModeIsSet(t *testing.T) {
 		t.Errorf("journal_mode = %q, want %q", mode, "wal")
 	}
 }
+
+// saveTestSegment saves a segment and returns its database ID.
+func saveTestSegment(t *testing.T, db *DB, cam, path string, start, end time.Time, size int64) int64 {
+	t.Helper()
+	mustSaveSegment(t, db, makeSegment(cam, path, start, end, size))
+	seg, err := db.GetSegmentByPath(path)
+	if err != nil || seg == nil {
+		t.Fatalf("saveTestSegment: could not retrieve saved segment %s: %v", path, err)
+	}
+	return seg.ID
+}
+
+// --- Recompression methods ---
+
+func TestGetSegmentsForRecompression(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+
+	// Eligible: old enough, not recompressed, 0 failures.
+	saveTestSegment(t, db, "cam1", "/tmp/a.mp4", now.Add(-48*time.Hour), now.Add(-47*time.Hour), 1000)
+
+	// Not eligible: already recompressed.
+	id2 := saveTestSegment(t, db, "cam1", "/tmp/b.mp4", now.Add(-48*time.Hour), now.Add(-46*time.Hour), 1000)
+	_ = db.MarkSegmentRecompressed(id2, 500)
+
+	// Not eligible: 3 failures.
+	id3 := saveTestSegment(t, db, "cam1", "/tmp/c.mp4", now.Add(-48*time.Hour), now.Add(-45*time.Hour), 1000)
+	for range 3 {
+		_ = db.IncrementSegmentRecompressFailures(id3)
+	}
+
+	// Not eligible: too recent (end_time after cutoff).
+	saveTestSegment(t, db, "cam1", "/tmp/d.mp4", now.Add(-2*time.Hour), now.Add(-time.Hour), 1000)
+
+	cutoff := now.Add(-24 * time.Hour)
+	segs, err := db.GetSegmentsForRecompression("cam1", cutoff)
+	if err != nil {
+		t.Fatalf("GetSegmentsForRecompression: %v", err)
+	}
+	if len(segs) != 1 {
+		t.Fatalf("expected 1 eligible segment, got %d", len(segs))
+	}
+	if segs[0].Path != "/tmp/a.mp4" {
+		t.Errorf("expected /tmp/a.mp4, got %s", segs[0].Path)
+	}
+}
+
+func TestMarkSegmentRecompressed(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+	id := saveTestSegment(t, db, "cam1", "/tmp/seg.mp4", now.Add(-48*time.Hour), now.Add(-47*time.Hour), 1000)
+
+	if err := db.MarkSegmentRecompressed(id, 500); err != nil {
+		t.Fatalf("MarkSegmentRecompressed: %v", err)
+	}
+
+	seg, err := db.GetSegmentByID(id)
+	if err != nil {
+		t.Fatalf("GetSegmentByID: %v", err)
+	}
+	if !seg.Recompressed {
+		t.Error("expected Recompressed=true")
+	}
+	if seg.SizeBytes != 500 {
+		t.Errorf("SizeBytes = %d, want 500", seg.SizeBytes)
+	}
+	if seg.RecompressedAt.IsZero() {
+		t.Error("expected RecompressedAt to be set")
+	}
+}
+
+func TestIncrementSegmentRecompressFailures(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+	id := saveTestSegment(t, db, "cam1", "/tmp/seg.mp4", now.Add(-48*time.Hour), now.Add(-47*time.Hour), 1000)
+
+	for i := range 3 {
+		if err := db.IncrementSegmentRecompressFailures(id); err != nil {
+			t.Fatalf("increment %d: %v", i, err)
+		}
+	}
+
+	// After 3 failures, the segment must not appear in recompression queries.
+	cutoff := now.Add(-24 * time.Hour)
+	segs, _ := db.GetSegmentsForRecompression("cam1", cutoff)
+	for _, s := range segs {
+		if s.ID == id {
+			t.Error("segment with 3 failures should not be eligible for recompression")
+		}
+	}
+}
+
+func TestSaveSegment_PreservesRecompressionState(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+	path := "/tmp/seg.mp4"
+
+	id := saveTestSegment(t, db, "cam1", path, now.Add(-48*time.Hour), now.Add(-47*time.Hour), 1000)
+	if err := db.MarkSegmentRecompressed(id, 500); err != nil {
+		t.Fatalf("MarkSegmentRecompressed: %v", err)
+	}
+
+	// Re-save the segment (simulating a size_bytes update after close).
+	mustSaveSegment(t, db, makeSegment("cam1", path, now.Add(-48*time.Hour), now.Add(-47*time.Hour), 999))
+
+	seg, err := db.GetSegmentByID(id)
+	if err != nil {
+		t.Fatalf("GetSegmentByID: %v", err)
+	}
+	if !seg.Recompressed {
+		t.Error("SaveSegment must not reset Recompressed to false")
+	}
+	if seg.RecompressedAt.IsZero() {
+		t.Error("SaveSegment must not clear RecompressedAt")
+	}
+	if seg.SizeBytes != 999 {
+		t.Errorf("SizeBytes = %d, want 999", seg.SizeBytes)
+	}
+}
