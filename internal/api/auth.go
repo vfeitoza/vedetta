@@ -82,6 +82,8 @@ func isPublicPath(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodGet && (r.URL.Path == "/api/health/live" || r.URL.Path == "/api/health/ready"):
 		return true
+	case r.Method == http.MethodGet && r.URL.Path == "/api/openapi.json":
+		return true
 	default:
 		return false
 	}

@@ -208,6 +208,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/events/{id}/clip", s.handleEventClip)
 	s.mux.HandleFunc("POST /api/events/{id}/clip", s.handleReextractClip)
 	s.mux.HandleFunc("GET /api/events/counts", s.handleEventCounts)
+	s.mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPISpec)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/health/live", s.handleHealthLive)
 	s.mux.HandleFunc("GET /api/health/ready", s.handleHealthReady)
@@ -599,6 +600,18 @@ func (s *Server) cameraStatuses() []camera.CameraStatus {
 }
 
 // --- JSON API handlers ---
+
+func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
+	spec, err := GetSwagger()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load spec"})
+		return
+	}
+	// Clear servers so clients use relative URLs
+	spec.Servers = nil
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(spec)
+}
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	status := "ok"
