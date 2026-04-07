@@ -392,24 +392,37 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			continue
 		}
 
-		// Prepend SPS and PPS from the init segment so the decoder can
-		// initialise its parameter sets before decoding the slice. Without
-		// this, out-of-band parameter sets (stored only in the avcC box) are
-		// never seen by the decoder and every IDR frame fails to decode.
-		if !sliceContainsSPSOrPPS(annexB) {
-			var spsPPS []byte
-			startCode := []byte{0, 0, 0, 1}
-			spsPPS = append(spsPPS, startCode...)
-			spsPPS = append(spsPPS, srcH264Codec.SPS...)
-			spsPPS = append(spsPPS, startCode...)
-			spsPPS = append(spsPPS, srcH264Codec.PPS...)
-			annexB = append(spsPPS, annexB...)
-		}
+		// Reorder NALs: SPS and PPS must precede slice data for the decoder
+		// to initialise. Recordings may place SPS/PPS at the end of a GOP
+		// (intended for the next GOP), so we extract them and always prepend
+		// the init segment's SPS/PPS before all slice NALs.
+		annexB = reorderAnnexBWithSPSPPS(annexB, srcH264Codec.SPS, srcH264Codec.PPS)
 
 		var newVideoSamples []*fmp4.Sample
 		pinner := &runtime.Pinner{}
 
-		frame := dec.Decode(annexB)
+		// Build an access unit containing only SPS, PPS, and the IDR slice.
+		// P-frames are discarded — the recompressed file stores one keyframe
+		// per GOP. This keeps memory bounded and avoids decoding 30+ frames
+		// per GOP just to discard them.
+		startCode := []byte{0, 0, 0, 1}
+		var idrAU []byte
+		for _, nal := range splitAnnexB(annexB) {
+			if len(nal) == 0 {
+				continue
+			}
+			nalType := nal[0] & 0x1f
+			switch nalType {
+			case 7, 8, 5: // SPS, PPS, IDR
+				idrAU = append(idrAU, startCode...)
+				idrAU = append(idrAU, nal...)
+			}
+		}
+		if len(idrAU) == 0 {
+			continue
+		}
+
+		frame := dec.Decode(idrAU)
 		if frame == nil {
 			frame = dec.Flush()
 		}
@@ -508,15 +521,34 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	}
 
 	for _, gop := range gops {
+		// Validate samples before marshalling — nil payloads panic the fmp4 library
+		validVideo := make([]*fmp4.Sample, 0, len(gop.videoSamples))
+		for _, s := range gop.videoSamples {
+			if len(s.Payload) > 0 {
+				validVideo = append(validVideo, s)
+			}
+		}
+		if len(validVideo) == 0 {
+			continue
+		}
+
 		tracks := []*fmp4.PartTrack{
-			{ID: videoTrackID, BaseTime: gop.videoBase, Samples: gop.videoSamples},
+			{ID: videoTrackID, BaseTime: gop.videoBase, Samples: validVideo},
 		}
 		if audioTrackID != 0 && len(gop.audioSamples) > 0 {
-			tracks = append(tracks, &fmp4.PartTrack{
-				ID:       audioTrackID,
-				BaseTime: gop.audioBase,
-				Samples:  gop.audioSamples,
-			})
+			validAudio := make([]*fmp4.Sample, 0, len(gop.audioSamples))
+			for _, s := range gop.audioSamples {
+				if len(s.Payload) > 0 {
+					validAudio = append(validAudio, s)
+				}
+			}
+			if len(validAudio) > 0 {
+				tracks = append(tracks, &fmp4.PartTrack{
+					ID:       audioTrackID,
+					BaseTime: gop.audioBase,
+					Samples:  validAudio,
+				})
+			}
 		}
 		part := fmp4.Part{SequenceNumber: gop.seqNum, Tracks: tracks}
 		if err := part.Marshal(out); err != nil {
@@ -539,6 +571,31 @@ func targetBitrate(w, h int) int32 {
 	default:
 		return 300_000
 	}
+}
+
+// reorderAnnexBWithSPSPPS ensures SPS and PPS precede all slice NALs.
+// It strips any in-stream SPS/PPS and prepends the canonical ones from
+// the init segment. This handles recordings where SPS/PPS appear after
+// slice data (at the end of a GOP, intended for the next GOP).
+func reorderAnnexBWithSPSPPS(annexB, sps, pps []byte) []byte {
+	startCode := []byte{0, 0, 0, 1}
+	var out []byte
+	out = append(out, startCode...)
+	out = append(out, sps...)
+	out = append(out, startCode...)
+	out = append(out, pps...)
+	for _, nal := range splitAnnexB(annexB) {
+		if len(nal) == 0 {
+			continue
+		}
+		nalType := nal[0] & 0x1f
+		if nalType == 7 || nalType == 8 {
+			continue // skip in-stream SPS/PPS, we already prepended
+		}
+		out = append(out, startCode...)
+		out = append(out, nal...)
+	}
+	return out
 }
 
 // sliceContainsSPSOrPPS reports whether any NAL unit in the Annex B stream is
