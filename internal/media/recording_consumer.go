@@ -47,8 +47,9 @@ type RecordingConsumer struct {
 	segDir     string
 	disk       *DiskSpace
 
-	pktCh chan rtpMsg
-	done  chan struct{}
+	pktCh  chan rtpMsg
+	done   chan struct{}
+	closed atomic.Bool
 
 	mu              sync.Mutex
 	writer          *SegmentWriter
@@ -93,6 +94,9 @@ func (rc *RecordingConsumer) Paused() bool {
 
 // OnVideoRTP enqueues a video RTP packet for async processing.
 func (rc *RecordingConsumer) OnVideoRTP(pkt *rtp.Packet) {
+	if rc.closed.Load() {
+		return
+	}
 	select {
 	case rc.pktCh <- rtpMsg{pkt: pkt, video: true}:
 	default:
@@ -102,6 +106,9 @@ func (rc *RecordingConsumer) OnVideoRTP(pkt *rtp.Packet) {
 
 // OnAudioRTP enqueues an audio RTP packet for async processing.
 func (rc *RecordingConsumer) OnAudioRTP(pkt *rtp.Packet) {
+	if rc.closed.Load() {
+		return
+	}
 	select {
 	case rc.pktCh <- rtpMsg{pkt: pkt, video: false}:
 	default:
@@ -117,6 +124,7 @@ func (rc *RecordingConsumer) OnDisconnect() {
 
 // Close finalizes the current segment and stops the processing goroutine.
 func (rc *RecordingConsumer) Close() {
+	rc.closed.Store(true)
 	close(rc.pktCh)
 	<-rc.done // wait for processLoop to finish
 
