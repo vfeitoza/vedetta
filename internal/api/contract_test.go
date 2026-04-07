@@ -644,13 +644,20 @@ func TestContract_ListPeople(t *testing.T) {
 	}
 	cv.validate(req, rec)
 
-	// Verify bare array response
-	var resp []any
+	// Verify envelope response
+	var resp map[string]any
 	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v (body: %s)", err, rec.Body.String())
 	}
-	if len(resp) != 0 {
-		t.Errorf("expected empty array, got %d items", len(resp))
+	items, ok := resp["items"].([]any)
+	if !ok {
+		t.Fatal("expected 'items' array in envelope")
+	}
+	if len(items) != 0 {
+		t.Errorf("expected empty items array, got %d items", len(items))
+	}
+	if resp["total"] != float64(0) {
+		t.Errorf("expected total=0, got %v", resp["total"])
 	}
 }
 
@@ -681,13 +688,20 @@ func TestContract_ListObjects(t *testing.T) {
 	}
 	cv.validate(req, rec)
 
-	// Verify bare array response
-	var resp []any
+	// Verify envelope response
+	var resp map[string]any
 	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v (body: %s)", err, rec.Body.String())
 	}
-	if len(resp) != 0 {
-		t.Errorf("expected empty array, got %d items", len(resp))
+	items, ok := resp["items"].([]any)
+	if !ok {
+		t.Fatal("expected 'items' array in envelope")
+	}
+	if len(items) != 0 {
+		t.Errorf("expected empty items array, got %d items", len(items))
+	}
+	if resp["total"] != float64(0) {
+		t.Errorf("expected total=0, got %v", resp["total"])
 	}
 }
 

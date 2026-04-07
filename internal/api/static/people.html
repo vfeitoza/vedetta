@@ -207,9 +207,10 @@
     var assigningFaceId = null;
 
     function loadPeople() {
-      fetch('/api/people').then(function(r) { return r.json(); }).then(function(people) {
-        peopleData = people || [];
-        renderPeople(people || []);
+      fetch('/api/people').then(function(r) { return r.json(); }).then(function(data) {
+        var people = data.items || data || [];
+        peopleData = people;
+        renderPeople(people);
       }).catch(function() {
         document.getElementById('people-grid').innerHTML = '<div class="loading-state">Failed to load people.</div>';
       });
@@ -272,8 +273,8 @@
       el.innerHTML = '<div class="loading-state" style="padding:0.5rem">Loading...</div>';
 
       Promise.all([
-        fetch('/api/people/' + personId + '/faces?limit=50').then(function(r) { return r.json(); }),
-        fetch('/api/people/' + personId + '/events').then(function(r) { return r.json(); })
+        fetch('/api/people/' + personId + '/faces?limit=50').then(function(r) { return r.json(); }).then(function(d) { return d.items || d || []; }),
+        fetch('/api/people/' + personId + '/events').then(function(r) { return r.json(); }).then(function(d) { return d.items || d || []; })
       ]).then(function(results) {
         var faces = results[0] || [];
         var events = results[1] || [];
@@ -410,8 +411,9 @@
     var _unmatchedFaces = [];
 
     function loadUnmatched() {
-      fetch('/api/faces/unmatched?limit=50').then(function(r) { return r.json(); }).then(function(faces) {
-        _unmatchedFaces = faces || [];
+      fetch('/api/faces/unmatched?limit=50').then(function(r) { return r.json(); }).then(function(data) {
+        var faces = data.items || data || [];
+        _unmatchedFaces = faces;
         var section = document.getElementById('unmatched-section');
         var grid = document.getElementById('unmatched-grid');
         if (!_unmatchedFaces.length) {
@@ -600,7 +602,7 @@
         if (typeof toast === 'function') toast('"' + name + '" created');
         // Refresh people data for future chips
         fetch('/api/people').then(function(r) { return r.json(); }).then(function(data) {
-          _unidentifiedPeople = (data || []).filter(function(p) { return p.name && !p.ignore; });
+          _unidentifiedPeople = (data.items || data || []).filter(function(p) { return p.name && !p.ignore; });
         });
         _idModalEvents.splice(_idModalIndex, 1);
         if (_idModalEvents.length === 0) { closeIdModal(); loadPeople(); loadUnmatched(); loadUnidentified(); return; }

@@ -2791,7 +2791,7 @@ function loadIdentifyGrid() {
 
   if (label === 'person') {
     fetch('/api/people').then(function(r) { return r.json(); }).then(function(data) {
-      _identifyData = (data.people || data || []).filter(function(p) { return p.name && !p.ignore; });
+      _identifyData = ((data.items || data.people || data) || []).filter(function(p) { return p.name && !p.ignore; });
       // Deduplicate by name (keep first)
       var seen = {};
       _identifyData = _identifyData.filter(function(p) {
@@ -2803,8 +2803,9 @@ function loadIdentifyGrid() {
       // Load thumbnails
       _identifyData.forEach(function(p) {
         if (p.face_count > 0) {
-          fetch('/api/people/' + p.id + '/faces?limit=1').then(function(r) { return r.json(); }).then(function(faces) {
-            if (faces && faces.length > 0) {
+          fetch('/api/people/' + p.id + '/faces?limit=1').then(function(r) { return r.json(); }).then(function(data) {
+            var faces = data.items || data || [];
+            if (faces.length > 0) {
               var el = document.getElementById('id-thumb-' + p.id);
               if (el) el.style.backgroundImage = 'url(/api/faces/' + faces[0].id + '/crop)';
             }
@@ -2816,8 +2817,9 @@ function loadIdentifyGrid() {
       });
     });
   } else {
-    fetch('/api/objects').then(function(r) { return r.json(); }).then(function(objects) {
-      _identifyData = (objects || []).filter(function(o) { return o.label === label; });
+    fetch('/api/objects').then(function(r) { return r.json(); }).then(function(data) {
+      var objects = data.items || data || [];
+      _identifyData = objects.filter(function(o) { return o.label === label; });
       _identifyData.forEach(function(o) { o._isObject = true; });
       renderIdentifyResults('');
     });

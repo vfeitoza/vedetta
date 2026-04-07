@@ -130,7 +130,7 @@
     Promise.all([
       fetch('/api/cameras').then(r => r.json()),
       fetch('/api/events/counts').then(r => r.json()),
-      fetch('/api/objects').then(r => r.json())
+      fetch('/api/objects').then(r => r.json()).then(d => d.items || d || [])
     ]).then(function([camData, counts, objects]) {
       var byLabel = counts.by_label || {};
       var byCamera = counts.by_camera || {};

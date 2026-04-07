@@ -457,9 +457,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Zone"
+                $ref: "#/components/schemas/ZoneListEnvelope"
         "404":
           description: Camera not found
           content:
@@ -931,9 +929,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Person"
+                $ref: "#/components/schemas/PersonListEnvelope"
 
   /api/people/{id}:
     get:
@@ -1038,9 +1034,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Face"
+                $ref: "#/components/schemas/FaceListEnvelope"
         "400":
           description: Invalid person ID
           content:
@@ -1066,9 +1060,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Event"
+                $ref: "#/components/schemas/PersonEventListEnvelope"
         "404":
           description: Person not found
           content:
@@ -1118,9 +1110,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Face"
+                $ref: "#/components/schemas/FaceListEnvelope"
 
   /api/faces/{id}/assign:
     put:
@@ -1616,9 +1606,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/KnownObject"
+                $ref: "#/components/schemas/ObjectListEnvelope"
     post:
       operationId: createObject
       summary: Create a known object from an event detection
@@ -1734,9 +1722,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ObjectSighting"
+                $ref: "#/components/schemas/SightingListEnvelope"
         "400":
           description: Invalid object ID
           content:
@@ -1795,9 +1781,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ObjectReference"
+                $ref: "#/components/schemas/ReferenceListEnvelope"
         "400":
           description: Invalid object ID
           content:
@@ -2866,6 +2850,125 @@ components:
         total_bytes:
           type: integer
           format: int64
+
+    ZoneListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Zone"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    PersonListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Person"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    FaceListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Face"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    PersonEventListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    ObjectListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnownObject"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    SightingListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObjectSighting"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    ReferenceListEnvelope:
+      type: object
+      required: [items, total, limit, offset, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObjectReference"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
 
     RecordingSummaryResponse:
       type: object

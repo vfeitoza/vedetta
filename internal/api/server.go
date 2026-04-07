@@ -1844,7 +1844,13 @@ func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
 	if zones == nil {
 		zones = []camera.Zone{}
 	}
-	writeJSON(w, http.StatusOK, zones)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    zones,
+		"total":    len(zones),
+		"limit":    len(zones),
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
@@ -2803,7 +2809,13 @@ func (s *Server) handleListPeople(w http.ResponseWriter, _ *http.Request) {
 			CreatedAt:       p.CreatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    resp,
+		"total":    len(resp),
+		"limit":    len(resp),
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleGetPerson(w http.ResponseWriter, r *http.Request) {
@@ -2970,7 +2982,13 @@ func (s *Server) handleListPersonFaces(w http.ResponseWriter, r *http.Request) {
 	if faces == nil {
 		faces = []storage.Face{}
 	}
-	writeJSON(w, http.StatusOK, faces)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    faces,
+		"total":    len(faces),
+		"limit":    limit,
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleListPersonEvents(w http.ResponseWriter, r *http.Request) {
@@ -2985,7 +3003,13 @@ func (s *Server) handleListPersonEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if person.Name == "" {
-		writeJSON(w, http.StatusOK, []camera.Event{})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":    []camera.Event{},
+			"total":    0,
+			"limit":    20,
+			"offset":   0,
+			"has_more": false,
+		})
 		return
 	}
 	events, err := s.db.QueryEventsFiltered("", "", "", person.Name, 20, 0)
@@ -2996,7 +3020,13 @@ func (s *Server) handleListPersonEvents(w http.ResponseWriter, r *http.Request) 
 	if events == nil {
 		events = []camera.Event{}
 	}
-	writeJSON(w, http.StatusOK, events)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    events,
+		"total":    len(events),
+		"limit":    20,
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleListUnmatchedFaces(w http.ResponseWriter, r *http.Request) {
@@ -3014,7 +3044,13 @@ func (s *Server) handleListUnmatchedFaces(w http.ResponseWriter, r *http.Request
 	if faces == nil {
 		faces = []storage.Face{}
 	}
-	writeJSON(w, http.StatusOK, faces)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    faces,
+		"total":    len(faces),
+		"limit":    limit,
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleAssignFace(w http.ResponseWriter, r *http.Request) {
@@ -3380,7 +3416,13 @@ func (s *Server) handleListObjects(w http.ResponseWriter, _ *http.Request) {
 	if objects == nil {
 		objects = []storage.KnownObject{}
 	}
-	writeJSON(w, http.StatusOK, objects)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    objects,
+		"total":    len(objects),
+		"limit":    len(objects),
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleCreateObject(w http.ResponseWriter, r *http.Request) {
@@ -3556,7 +3598,13 @@ func (s *Server) handleObjectSightings(w http.ResponseWriter, r *http.Request) {
 	if sightings == nil {
 		sightings = []storage.ObjectSighting{}
 	}
-	writeJSON(w, http.StatusOK, sightings)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    sightings,
+		"total":    len(sightings),
+		"limit":    limit,
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleObjectCrop(w http.ResponseWriter, r *http.Request) {
@@ -3669,7 +3717,13 @@ func (s *Server) handleObjectReferences(w http.ResponseWriter, r *http.Request) 
 	if refs == nil {
 		refs = []storage.ObjectReference{}
 	}
-	writeJSON(w, http.StatusOK, refs)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    refs,
+		"total":    len(refs),
+		"limit":    len(refs),
+		"offset":   0,
+		"has_more": false,
+	})
 }
 
 func (s *Server) handleAddObjectReference(w http.ResponseWriter, r *http.Request) {

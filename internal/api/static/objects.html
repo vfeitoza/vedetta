@@ -89,8 +89,8 @@
     var objectsData = [];
 
     function loadObjects() {
-      fetch('/api/objects').then(function(r) { return r.json(); }).then(function(objects) {
-        objectsData = objects || [];
+      fetch('/api/objects').then(function(r) { return r.json(); }).then(function(data) {
+        objectsData = data.items || data || [];
         renderObjects();
       });
     }
@@ -136,10 +136,11 @@
     }
 
     function loadReferences(objectId) {
-      fetch('/api/objects/' + objectId + '/references').then(function(r) { return r.json(); }).then(function(refs) {
+      fetch('/api/objects/' + objectId + '/references').then(function(r) { return r.json(); }).then(function(data) {
+        var refs = data.items || data || [];
         var container = document.getElementById('refs-' + objectId);
         if (!container) return;
-        if (!refs || !refs.length) {
+        if (!refs.length) {
           container.innerHTML = '<span style="font-size:var(--text-sm);color:var(--text-tertiary)">No reference images</span>';
           return;
         }
@@ -158,10 +159,11 @@
     }
 
     function loadSightings(objectId) {
-      fetch('/api/objects/' + objectId + '/sightings?limit=10').then(function(r) { return r.json(); }).then(function(sightings) {
+      fetch('/api/objects/' + objectId + '/sightings?limit=10').then(function(r) { return r.json(); }).then(function(data) {
+        var sightings = data.items || data || [];
         var el = document.getElementById('sightings-' + objectId);
         if (!el) return;
-        if (!sightings || !sightings.length) {
+        if (!sightings.length) {
           el.innerHTML = '<span>No sightings yet</span>';
           return;
         }
