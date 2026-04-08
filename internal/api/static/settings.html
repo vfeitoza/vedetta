@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Settings - Vedetta</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <meta name="theme-color" content="#0a0e14">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="apple-touch-icon" href="/favicon.svg">
+</head>
+<body>
+
+  <nav class="topnav" role="navigation" aria-label="Main">
+    <a href="/" class="topnav-brand" aria-label="Vedetta home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>vedetta</span>
+    </a>
+    <div class="topnav-links">
+      <a href="/" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/people.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
+      <a href="/objects.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
+      <a href="/system.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
+      <a href="/settings.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a>
+    </div>
+    <button class="btn btn-icon btn-ghost" data-action-click="toggleTheme()" aria-label="Toggle theme" title="Toggle dark/light theme" id="theme-toggle">
+      <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+    </button>
+    <div class="topnav-spacer"></div>
+    <a href="/system.html" class="conn-status" title="System health"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></a>
+  </nav>
+
+  <main class="page">
+    <div class="page-header">
+      <h1>Settings</h1>
+    </div>
+
+    <div class="system-grid">
+
+      <div class="sys-card" id="mqtt-card">
+        <div class="sys-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
+          MQTT
+          <span id="mqtt-status-badge" style="margin-left:auto;font-size:0.8em;font-weight:400;padding:0.2em 0.6em;border-radius:6px"></span>
+        </div>
+        <div class="sys-card-body" id="mqtt-body">
+          <div style="margin-bottom:1rem">
+            <button class="btn btn-secondary btn-small" id="mqtt-discover-btn" type="button">Discover Brokers</button>
+            <div id="mqtt-discover-results" style="margin-top:0.5rem"></div>
+          </div>
+
+          <form id="mqtt-form">
+            <div style="margin-bottom:0.75rem">
+              <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+                <input type="checkbox" id="mqtt-enabled" style="width:18px;height:18px;accent-color:var(--accent)">
+                <span>Enabled</span>
+              </label>
+            </div>
+            <div class="sys-row" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem">
+              <div>
+                <label for="mqtt-host" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Host</label>
+                <input type="text" id="mqtt-host" placeholder="127.0.0.1" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+              </div>
+              <div>
+                <label for="mqtt-port" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Port</label>
+                <input type="number" id="mqtt-port" placeholder="1883" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+              </div>
+            </div>
+            <div class="sys-row" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem">
+              <div>
+                <label for="mqtt-username" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Username</label>
+                <input type="text" id="mqtt-username" placeholder="optional" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+              </div>
+              <div>
+                <label for="mqtt-password" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Password</label>
+                <input type="password" id="mqtt-password" placeholder="optional" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+              </div>
+            </div>
+            <div style="margin-bottom:1rem">
+              <label for="mqtt-topic" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Topic</label>
+              <input type="text" id="mqtt-topic" placeholder="vedetta" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+            </div>
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+              <button type="button" class="btn btn-secondary btn-small" id="mqtt-test-btn">Test Connection</button>
+              <button type="submit" class="btn btn-primary btn-small">Save</button>
+            </div>
+            <div id="mqtt-status" style="min-height:1.3rem;margin-top:0.75rem;font-size:0.92rem;color:var(--muted)"></div>
+          </form>
+        </div>
+      </div>
+
+      <div class="sys-card" id="updates-card">
+        <div class="sys-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9"/></svg>
+          Updates
+        </div>
+        <div class="sys-card-body" id="updates-body">
+          <div class="sys-row"><span class="key">Current Version</span><span class="val" id="update-current">—</span></div>
+          <div class="sys-row"><span class="key">Latest Version</span><span class="val" id="update-latest">—</span></div>
+          <div id="update-actions" style="margin-top:1rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-small" id="update-check-btn">Check Now</button>
+            <span id="update-status" style="font-size:0.92rem;color:var(--muted)"></span>
+          </div>
+          <div id="update-available" style="display:none;margin-top:1rem;padding:0.75rem;border-radius:8px;background:rgba(93,215,255,0.08);border:1px solid rgba(93,215,255,0.2)">
+            <span id="update-available-text"></span>
+            <div style="margin-top:0.5rem;display:flex;gap:0.75rem">
+              <a id="update-release-link" href="#" target="_blank" class="btn btn-secondary btn-small">View Release</a>
+              <button type="button" class="btn btn-secondary btn-small" id="update-dismiss-btn">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
+    <div class="bottom-tabs-inner">
+      <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/people.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
+      <a href="/objects.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
+      <a href="/settings.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a>
+    </div>
+  </nav>
+
+  <!-- Keyboard Shortcut Modal -->
+  <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+    <div class="shortcut-modal-header">
+      <h2>Keyboard Shortcuts</h2>
+      <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="shortcut-modal-body">
+      <div class="shortcut-group">
+        <h3>Navigation</h3>
+        <div class="shortcut-row"><span>Cameras</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>1</kbd></span></div>
+        <div class="shortcut-row"><span>Events</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>2</kbd></span></div>
+        <div class="shortcut-row"><span>Recordings</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>3</kbd></span></div>
+        <div class="shortcut-row"><span>System</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>4</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>General</h3>
+        <div class="shortcut-row"><span>This help</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span>Dismiss / Back</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toasts"></div>
+  <script src="/app.js"></script>
+  <script>
+(function() {
+  var $ = document.getElementById.bind(document);
+
+  // --- MQTT ---
+  function loadMQTT() {
+    fetch('/api/settings/mqtt').then(function(r){return r.json()}).then(function(data) {
+      $('mqtt-enabled').checked = data.enabled;
+      $('mqtt-host').value = data.host || '';
+      $('mqtt-port').value = data.port || '';
+      $('mqtt-username').value = data.username || '';
+      $('mqtt-topic').value = data.topic || '';
+      updateMQTTBadge(data.status);
+    });
+  }
+
+  function updateMQTTBadge(status) {
+    var badge = $('mqtt-status-badge');
+    badge.textContent = status;
+    badge.style.background = status === 'connected' ? 'rgba(93,255,151,0.15)' : status === 'disconnected' ? 'rgba(255,125,125,0.15)' : 'rgba(159,180,198,0.1)';
+    badge.style.color = status === 'connected' ? 'var(--success)' : status === 'disconnected' ? 'var(--danger)' : 'var(--muted)';
+  }
+
+  function setMQTTStatus(msg, type) {
+    var el = $('mqtt-status');
+    el.textContent = msg;
+    el.style.color = type === 'error' ? 'var(--danger)' : type === 'success' ? 'var(--success)' : 'var(--muted)';
+  }
+
+  $('mqtt-discover-btn').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    fetch('/api/settings/mqtt/discover').then(function(r){return r.json()}).then(function(data) {
+      btn.disabled = false;
+      btn.textContent = 'Discover Brokers';
+      var results = $('mqtt-discover-results');
+      var brokers = data.brokers || [];
+      if (brokers.length === 0) {
+        results.innerHTML = '<span style="font-size:0.85rem;color:var(--muted)">No brokers found</span>';
+        return;
+      }
+      results.innerHTML = brokers.map(function(b) {
+        return '<button type="button" class="btn btn-secondary btn-small" style="margin:0.2rem" data-host="'+b.host+'" data-port="'+b.port+'">'+b.name+' ('+b.host+':'+b.port+')</button>';
+      }).join('');
+      results.querySelectorAll('button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          $('mqtt-host').value = this.dataset.host;
+          $('mqtt-port').value = this.dataset.port;
+          $('mqtt-enabled').checked = true;
+        });
+      });
+    }).catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'Discover Brokers';
+    });
+  });
+
+  $('mqtt-test-btn').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    setMQTTStatus('Testing...', '');
+    fetch('/api/settings/mqtt/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        host: $('mqtt-host').value,
+        port: parseInt($('mqtt-port').value) || 1883,
+        username: $('mqtt-username').value,
+        password: $('mqtt-password').value
+      })
+    }).then(function(r){return r.json()}).then(function(data) {
+      btn.disabled = false;
+      if (data.status === 'ok') {
+        setMQTTStatus('Connection successful', 'success');
+      } else {
+        setMQTTStatus('Connection failed: ' + (data.error || 'unknown error'), 'error');
+      }
+    }).catch(function(err) {
+      btn.disabled = false;
+      setMQTTStatus('Test failed: ' + err.message, 'error');
+    });
+  });
+
+  $('mqtt-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    setMQTTStatus('Saving...', '');
+    fetch('/api/settings/mqtt', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        enabled: $('mqtt-enabled').checked,
+        host: $('mqtt-host').value,
+        port: parseInt($('mqtt-port').value) || 1883,
+        username: $('mqtt-username').value,
+        password: $('mqtt-password').value,
+        topic: $('mqtt-topic').value
+      })
+    }).then(function(r){return r.json()}).then(function(data) {
+      if (data.error) {
+        setMQTTStatus('Save failed: ' + data.error, 'error');
+      } else {
+        setMQTTStatus('Saved successfully', 'success');
+        updateMQTTBadge(data.status);
+      }
+    }).catch(function(err) {
+      setMQTTStatus('Save failed: ' + err.message, 'error');
+    });
+  });
+
+  // --- Updates ---
+  function loadUpdates() {
+    fetch('/api/updates/status').then(function(r){return r.json()}).then(renderUpdates);
+  }
+
+  function renderUpdates(data) {
+    $('update-current').textContent = data.current || '—';
+    $('update-latest').textContent = data.latest || '—';
+    var avail = $('update-available');
+    if (data.update_available && !data.dismissed) {
+      avail.style.display = 'block';
+      $('update-available-text').textContent = data.latest + ' is available';
+      $('update-release-link').href = data.url || '#';
+      $('update-status').textContent = '';
+    } else if (data.update_available && data.dismissed) {
+      avail.style.display = 'none';
+      $('update-status').textContent = data.latest + ' available (dismissed)';
+      $('update-status').style.color = 'var(--muted)';
+    } else {
+      avail.style.display = 'none';
+      $('update-status').textContent = data.latest ? 'Up to date' : '';
+      $('update-status').style.color = 'var(--success)';
+    }
+  }
+
+  $('update-check-btn').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    $('update-status').textContent = 'Checking...';
+    $('update-status').style.color = 'var(--muted)';
+    fetch('/api/updates/check').then(function(r){return r.json()}).then(function(data) {
+      btn.disabled = false;
+      renderUpdates(data);
+    }).catch(function() {
+      btn.disabled = false;
+      $('update-status').textContent = 'Check failed';
+      $('update-status').style.color = 'var(--danger)';
+    });
+  });
+
+  $('update-dismiss-btn').addEventListener('click', function() {
+    fetch('/api/updates/dismiss', {method:'POST'}).then(function() {
+      loadUpdates();
+    });
+  });
+
+  // Init
+  loadMQTT();
+  loadUpdates();
+})();
+  </script>
+</body>
+</html>
