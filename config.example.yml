@@ -56,6 +56,10 @@ mqtt:
   port: 1883
   topic: vedetta
 
+updates:
+  check_enabled: true
+  check_interval: 24h
+
 api:
   host: 0.0.0.0
   port: 5050

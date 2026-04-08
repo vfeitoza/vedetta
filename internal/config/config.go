@@ -23,6 +23,7 @@ type Config struct {
 	API        APIConfig        `yaml:"api"`
 	RTSPServer RTSPServerConfig `yaml:"rtsp_server"`
 	Auth       AuthConfig       `yaml:"auth"`
+	Updates    UpdateConfig     `yaml:"updates"`
 }
 
 type CameraConfig struct {
@@ -166,6 +167,11 @@ type AuthConfig struct {
 	Proxy ProxyAuthConfig `yaml:"proxy"`
 }
 
+type UpdateConfig struct {
+	CheckEnabled  bool          `yaml:"check_enabled"`
+	CheckInterval time.Duration `yaml:"check_interval"`
+}
+
 type AuthUser struct {
 	Username     string `yaml:"username"`
 	PasswordHash string `yaml:"password_hash"`
@@ -283,6 +289,10 @@ func Defaults() *Config {
 		},
 		RTSPServer: RTSPServerConfig{
 			Port: 8554,
+		},
+		Updates: UpdateConfig{
+			CheckEnabled:  true,
+			CheckInterval: 24 * time.Hour,
 		},
 	}
 }
