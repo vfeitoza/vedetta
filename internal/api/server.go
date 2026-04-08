@@ -223,6 +223,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /partials/system-status", s.handleSystemStatusPartial)
 	s.mux.HandleFunc("GET /partials/system", s.handleSystemPartial)
 
+	// Camera management CRUD endpoints
+	s.mux.HandleFunc("GET /api/cameras/manage", s.ListCamerasManage)
+	s.mux.HandleFunc("POST /api/cameras/manage", s.AddCameraManage)
+	s.mux.HandleFunc("PUT /api/cameras/manage/{index}", s.UpdateCameraManage)
+	s.mux.HandleFunc("DELETE /api/cameras/manage/{index}", s.RemoveCameraManage)
+
 	// Settings API endpoints
 	s.mux.HandleFunc("GET /api/settings/mqtt", s.GetMQTTSettings)
 	s.mux.HandleFunc("PUT /api/settings/mqtt", s.UpdateMQTTSettings)
