@@ -11,7 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"net/url"
+
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -98,11 +98,7 @@ func main() {
 		setupDone := make(chan struct{})
 		setupAPI := api.SetupModeAPIConfig(cfg.API)
 		server := api.NewSetupMode(setupAPI, db, *configPath, setupDone)
-		setupURL := fmt.Sprintf("http://localhost:%d/?setup_token=%s", setupAPI.Port, url.QueryEscape(server.SetupToken()))
-		slog.Info("open the web UI to complete setup", "url", setupURL)
-		if setupAPI.Host != cfg.API.Host {
-			slog.Info("setup mode bound to loopback for safety", "addr", fmt.Sprintf("%s:%d", setupAPI.Host, setupAPI.Port))
-		}
+		slog.Info("open the web UI to complete setup", "url", fmt.Sprintf("http://localhost:%d/", setupAPI.Port))
 		go func() {
 			if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("API server failed", "error", err)
@@ -499,6 +495,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			tempCancel context.CancelFunc // for non-continuous temporary recording
 		}
 		active := make(map[string]*activeEvent) // eventID -> state
+		objectCounts := make(map[string]map[string]int) // camera -> label -> count
 		cooldowns := make(map[string]time.Time)
 		maxDur := cfg.Recording.MaxEventDuration
 		timeouts := make(chan string, 100) // eventIDs that hit max duration
@@ -512,6 +509,23 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			if err := db.UpdateEventEndTime(ev.ID, endTime); err != nil {
 				slog.Error("failed to update event end time", "event", ev.ID, "error", err)
 			}
+
+			// Publish event end over MQTT
+			if sub.mqttClient != nil {
+				if err := sub.mqttClient.PublishEvent(ev, nil); err != nil {
+					slog.Error("failed to publish event end", "event", ev.ID, "error", err)
+				}
+
+				// Decrement object count
+				if counts, ok := objectCounts[ev.CameraName]; ok {
+					counts[ev.Label]--
+					if counts[ev.Label] < 0 {
+						counts[ev.Label] = 0
+					}
+					sub.mqttClient.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
+				}
+			}
+
 			slog.Info("event ended",
 				"event", ev.ID,
 				"camera", ev.CameraName,
@@ -599,6 +613,14 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					if err := sub.mqttClient.PublishEvent(event, nil); err != nil {
 						slog.Error("failed to publish event", "error", err)
 					}
+
+					// Track object count per camera per label
+					if objectCounts[event.CameraName] == nil {
+						objectCounts[event.CameraName] = make(map[string]int)
+					}
+					objectCounts[event.CameraName][event.Label]++
+					sub.mqttClient.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
+
 					// Use annotated image for MQTT (with bounding boxes for visual context)
 					mqttImg := event.AnnotatedImage
 					if mqttImg == nil {
