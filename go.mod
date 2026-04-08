@@ -19,6 +19,7 @@ require (
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.6.1 // indirect
 	github.com/getkin/kin-openapi v0.134.0 // indirect
@@ -26,10 +27,12 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
+	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/miekg/dns v1.1.27 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/oapi-codegen/runtime v1.3.1 // indirect
