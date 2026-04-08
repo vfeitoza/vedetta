@@ -330,6 +330,16 @@ func (r *Recorder) PrepareExport(ctx context.Context, cameraName string, from, t
 	abandoned := make(chan struct{})
 	go func() {
 		err := r.exportProcess(inputs, tmpPath, startOffset, duration)
+		// Check abandoned first: if the caller already gave up, clean up
+		// the output file rather than sending a result nobody will read.
+		// A non-blocking check avoids the random select between two ready
+		// channels (resultCh is buffered, so both branches would be ready).
+		select {
+		case <-abandoned:
+			_ = os.Remove(tmpPath)
+			return
+		default:
+		}
 		select {
 		case resultCh <- processResult{err: err}:
 		case <-abandoned:
