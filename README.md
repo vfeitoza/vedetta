@@ -23,12 +23,11 @@ Vedetta is an open-source Network Video Recorder (NVR) written in Go. Inspired b
 
 ### Binary
 
-```sh
-# Build from source
-make build
+Download the latest release from [Releases](https://github.com/rvben/vedetta/releases), or build from source:
 
-# Run with a config file
-./build/vedetta -config config.yml
+```sh
+make build
+./build/vedetta
 ```
 
 ### Docker
@@ -36,11 +35,15 @@ make build
 ```sh
 docker run -d \
   --name vedetta \
-  -v /path/to/config.yml:/config.yml \
-  -v /path/to/recordings:/recordings \
-  -p 5050:5050 \
+  --network host \
+  -v /path/to/config.yml:/config/config.yml:ro \
+  -v vedetta-data:/data \
   ghcr.io/rvben/vedetta:latest
 ```
+
+A `docker-compose.yml` is included in the repository.
+
+Host networking is required for RTSP camera access and ONVIF multicast discovery. On first run without a config file, Vedetta starts a setup wizard at `http://<host>:5050`.
 
 ## Configuration
 

@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,9 @@ type Recompressor struct {
 	cameras []config.CameraConfig
 	db      *storage.DB
 
+	// transcodeFn performs the actual transcoding. Defaults to media.TranscodeSegment.
+	transcodeFn func(path string, targetW, targetH int) (media.TranscodeResult, error)
+
 	isRunning            atomic.Bool
 	mu                   sync.Mutex
 	lastRun              time.Time
@@ -27,7 +31,7 @@ type Recompressor struct {
 
 // NewRecompressor creates a Recompressor with the given config and camera list.
 func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB) *Recompressor {
-	return &Recompressor{cfg: cfg, cameras: cameras, db: db}
+	return &Recompressor{cfg: cfg, cameras: cameras, db: db, transcodeFn: media.TranscodeSegment}
 }
 
 // RecompressorStats holds runtime counters for the recompression job.
@@ -117,6 +121,19 @@ func (r *Recompressor) RunNow(ctx context.Context) {
 	slog.Info("recompression: manual pass completed", "processed", processed)
 }
 
+// safeTranscode calls media.TranscodeSegment with panic recovery.
+// The OpenH264 purego bindings can panic on certain corrupt segments;
+// catching the panic here prevents a single bad segment from crashing
+// the entire process.
+func (r *Recompressor) safeTranscode(path string) (result media.TranscodeResult, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("panic during transcode: %v", p)
+		}
+	}()
+	return r.transcodeFn(path, r.cfg.TargetWidth, r.cfg.TargetHeight)
+}
+
 // processOne picks the oldest eligible segment across all enabled cameras and transcodes it.
 // Returns true if a segment was processed, false if nothing was eligible.
 func (r *Recompressor) processOne() bool {
@@ -149,7 +166,7 @@ func (r *Recompressor) processOne() bool {
 	}
 
 	start := time.Now()
-	result, err := media.TranscodeSegment(bestSeg.Path, r.cfg.TargetWidth, r.cfg.TargetHeight)
+	result, err := r.safeTranscode(bestSeg.Path)
 	if err != nil {
 		slog.Warn("recompression: failed",
 			"camera", bestSeg.Camera,

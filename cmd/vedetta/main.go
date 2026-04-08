@@ -330,8 +330,6 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	// Create RTSP Hub — central connection manager
 	sub.hub = rtsp.NewHub(ctx)
 
-	slog.Info("native Go media pipeline active (no ffmpeg required)")
-
 	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath)
 
 	// Register cameras for recording

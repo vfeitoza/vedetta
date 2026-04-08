@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -170,6 +171,44 @@ func TestRecompressionJob_RetriesAfterFailure(t *testing.T) {
 	}
 	if len(segs) != 0 {
 		t.Errorf("expected 0 eligible after 3 failures, got %d", len(segs))
+	}
+}
+
+func TestRecompressionJob_PanicRecovery(t *testing.T) {
+	r, db := newTestRecompressor(t)
+	dir := t.TempDir()
+
+	segPath := filepath.Join(dir, "panic.mp4")
+	if err := os.WriteFile(segPath, make([]byte, 100), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	seg := storage.SegmentRecord{
+		Camera: "cam1", Path: segPath,
+		StartTime: time.Now().Add(-48 * time.Hour), EndTime: time.Now().Add(-47 * time.Hour),
+		SizeBytes: 100,
+	}
+	if err := db.SaveSegment(seg); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject a panicking transcode function to simulate the OpenH264 purego crash
+	r.transcodeFn = func(string, int, int) (media.TranscodeResult, error) {
+		panic("simulated OpenH264 purego crash")
+	}
+
+	// processOne must not panic — it should recover and increment the failure counter
+	processed := r.processOne()
+	if !processed {
+		t.Error("expected processOne to return true (segment was attempted)")
+	}
+
+	all, _ := db.GetAllSegments("cam1")
+	if len(all) == 0 {
+		t.Fatal("no segments found")
+	}
+	if all[0].RecompressFailures != 1 {
+		t.Errorf("expected 1 failure recorded, got %d", all[0].RecompressFailures)
 	}
 }
 
