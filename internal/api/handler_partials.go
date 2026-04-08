@@ -425,6 +425,9 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		RecompressLastRun    string
 		RecompressSegments   int64
 		RecompressBytesSaved string
+		UpdateAvailable      bool
+		UpdateVersion        string
+		UpdateURL            string
 	}
 
 	rc := stats.Recompression
@@ -452,6 +455,15 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		RecompressBytesSaved: formatBytes(rc.BytesReclaimed),
 	}
 
+	if s.updateChecker != nil {
+		us := s.updateChecker.Status()
+		if us.UpdateAvailable && !us.Dismissed {
+			data.UpdateAvailable = true
+			data.UpdateVersion = us.Latest
+			data.UpdateURL = us.URL
+		}
+	}
+
 	tmpl := template.Must(template.New("system").Funcs(s.funcMap).Parse(systemPartialTemplate))
 
 	w.Header().Set("Content-Type", "text/html")
@@ -466,7 +478,7 @@ const systemPartialTemplate = `<div class="sys-card">
     System Info
   </div>
   <div class="sys-card-body">
-    <div class="sys-row"><span class="key">Version</span><span class="val">{{.Version}}</span></div>
+    <div class="sys-row"><span class="key">Version</span><span class="val">{{.Version}}{{if .UpdateAvailable}} <a href="/settings.html" style="color:var(--accent);font-size:0.85em;margin-left:0.5em">{{.UpdateVersion}} available</a>{{end}}</span></div>
     <div class="sys-row"><span class="key">Uptime</span><span class="val">{{.Uptime}}</span></div>
     <div class="sys-row"><span class="key">Decoder</span><span class="val">{{.Decoder}}</span></div>
     <div class="sys-row"><span class="key">Go</span><span class="val">{{.GoVersion}}</span></div>
