@@ -57,6 +57,9 @@ type Server struct {
 	mqttEnabled          bool
 	configPath           string
 	mqttConfig           config.MQTTConfig
+	detector             *detect.Detector
+	recordingConfig      config.RecordingConfig
+	restartRequired      bool
 	hlsSegmentCache      sync.Map // map[string][]media.HLSSegmentRef — keyed by "camera:segID"
 	snapshotPath         string
 	faceCropDir          string
@@ -301,6 +304,14 @@ func (s *Server) SetConfigPath(path string) {
 
 func (s *Server) SetMQTTConfig(cfg config.MQTTConfig) {
 	s.mqttConfig = cfg
+}
+
+func (s *Server) SetDetector(d *detect.Detector) {
+	s.detector = d
+}
+
+func (s *Server) SetRecordingConfig(cfg config.RecordingConfig) {
+	s.recordingConfig = cfg
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

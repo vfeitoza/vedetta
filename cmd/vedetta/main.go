@@ -169,6 +169,8 @@ func main() {
 		server.SetVersion(Version)
 		server.SetConfigPath(*configPath)
 		server.SetMQTTConfig(cfg.MQTT)
+		server.SetDetector(sub.detector)
+		server.SetRecordingConfig(cfg.Recording)
 		if cfg.Updates.CheckEnabled {
 			checker := update.New(Version, cfg.Updates.CheckInterval, db)
 			checker.Start(ctx)
@@ -214,6 +216,7 @@ func main() {
 	server.SetVersion(Version)
 	server.SetConfigPath(*configPath)
 	server.SetMQTTConfig(cfg.MQTT)
+	server.SetRecordingConfig(cfg.Recording)
 	if cfg.Updates.CheckEnabled {
 		checker := update.New(Version, cfg.Updates.CheckInterval, db)
 		checker.Start(ctx)
@@ -246,6 +249,7 @@ func main() {
 	}
 
 	// Wire subsystems into the API server now that everything is initialized
+	server.SetDetector(sub.detector)
 	server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients)
 	server.ObjectMatchThreshold = cfg.Detect.ObjectMatchThreshold
 	if cfg.MQTT.Enabled {
