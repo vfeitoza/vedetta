@@ -141,6 +141,49 @@ func (d *Detector) DetectRGB24(data []byte, w, h int) (result []Detection) {
 	return d.filterLabels(processOutput(output, d.config.ScoreThreshold, scale, padX, padY))
 }
 
+// SetScoreThreshold updates the score threshold for detection. Thread-safe.
+func (d *Detector) SetScoreThreshold(t float32) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.config.ScoreThreshold = t
+}
+
+// ScoreThreshold returns the current score threshold. Thread-safe.
+func (d *Detector) ScoreThreshold() float32 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.config.ScoreThreshold
+}
+
+// SetLabels updates the label filter. Pass nil or empty to allow all labels. Thread-safe.
+func (d *Detector) SetLabels(labels []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(labels) == 0 {
+		d.labelAllowed = nil
+		return
+	}
+	allowed := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		allowed[l] = true
+	}
+	d.labelAllowed = allowed
+}
+
+// Labels returns the current label filter. Returns nil if all labels are allowed. Thread-safe.
+func (d *Detector) Labels() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.labelAllowed == nil {
+		return nil
+	}
+	labels := make([]string, 0, len(d.labelAllowed))
+	for l := range d.labelAllowed {
+		labels = append(labels, l)
+	}
+	return labels
+}
+
 func (d *Detector) Close() {
 	if d.backend != nil {
 		d.backend.Close()
