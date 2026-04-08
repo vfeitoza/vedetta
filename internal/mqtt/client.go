@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
@@ -18,6 +19,7 @@ type Publisher interface {
 	PublishCameraStatus(cameraName string, online bool)
 	PublishDiscovery(cameraNames []string)
 	PublishPresenceDiscovery(zones []ZoneInfo)
+	PublishObjectCount(cameraName, label string, count int)
 	Close()
 }
 
@@ -93,6 +95,16 @@ func (c *Client) PublishEvent(event camera.Event, matchedObjects []string) error
 	token := c.client.Publish(topic, 1, false, payload)
 	token.Wait()
 	return token.Error()
+}
+
+func (c *Client) PublishObjectCount(cameraName, label string, count int) {
+	topic := fmt.Sprintf("%s/%s/%s", c.topic, cameraName, label)
+	payload := strconv.Itoa(count)
+	token := c.client.Publish(topic, 1, true, payload)
+	token.Wait()
+	if err := token.Error(); err != nil {
+		slog.Error("failed to publish object count", "camera", cameraName, "label", label, "error", err)
+	}
 }
 
 func (c *Client) PublishSnapshot(cameraName, label string, jpegData []byte) {
