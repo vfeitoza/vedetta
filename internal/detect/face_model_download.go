@@ -1,22 +1,23 @@
 package detect
 
 import (
-	"archive/zip"
-	"bytes"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/rvben/vedetta/internal/artifact"
 )
 
 const (
 	scrfdFileName = "det_500m.onnx"
 	scrfdURL      = "https://github.com/yakhyo/facial-analysis/releases/download/v0.0.1/" + scrfdFileName
+	scrfdSHA256   = "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a"
 
 	mobileFaceNetFileName = "w600k_mbf.onnx"
 	buffaloZipURL         = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip"
+	buffaloZipSHA256      = "57d31b56b6ffa911c8a73cfc1707c73cab76efe7f13b675a05223bf42de47c72"
+	mobileFaceNetSHA256   = "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f"
 )
 
 // cachedFaceModelPath returns the path where a cached face model should be.
@@ -24,125 +25,76 @@ func cachedFaceModelPath(fileName string) string {
 	return filepath.Join(modelCacheDir(), fileName)
 }
 
+func faceModelSpec(fileName string) (artifact.Spec, bool) {
+	switch fileName {
+	case scrfdFileName:
+		return artifact.Spec{
+			Name:     scrfdFileName,
+			URL:      scrfdURL,
+			SHA256:   scrfdSHA256,
+			MaxBytes: maxModelBytes,
+		}, true
+	case mobileFaceNetFileName:
+		return artifact.Spec{
+			Name:     mobileFaceNetFileName,
+			URL:      buffaloZipURL + "#" + mobileFaceNetFileName,
+			SHA256:   mobileFaceNetSHA256,
+			MaxBytes: maxModelBytes,
+		}, true
+	case osnetFileName:
+		return artifact.Spec{
+			Name:     osnetFileName,
+			URL:      osnetURL,
+			SHA256:   osnetSHA256,
+			MaxBytes: maxModelBytes,
+		}, true
+	default:
+		return artifact.Spec{}, false
+	}
+}
+
+func readVerifiedCachedFaceModel(fileName, path string) ([]byte, error) {
+	spec, ok := faceModelSpec(fileName)
+	if !ok {
+		return os.ReadFile(path)
+	}
+	if err := artifact.VerifyFile(path, spec); err != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("cached %s invalid: %w", fileName, err)
+	}
+	return os.ReadFile(path)
+}
+
 // downloadSCRFD downloads the SCRFD face detection model and caches it locally.
 func downloadSCRFD() (string, error) {
 	destPath := cachedFaceModelPath(scrfdFileName)
-	if _, err := os.Stat(destPath); err == nil {
-		return destPath, nil
-	}
-
-	if err := os.MkdirAll(modelCacheDir(), 0o755); err != nil {
-		return "", fmt.Errorf("create cache dir: %w", err)
-	}
-
-	slog.Info("downloading SCRFD face detection model", "url", scrfdURL)
-
-	resp, err := http.Get(scrfdURL) //nolint:gosec // known external URL
-	if err != nil {
-		return "", fmt.Errorf("download SCRFD model: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download SCRFD model: HTTP %d", resp.StatusCode)
-	}
-
-	tmp := destPath + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
-	}
-
-	n, err := io.Copy(f, resp.Body)
-	if closeErr := f.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return "", fmt.Errorf("write SCRFD model: %w", err)
-	}
-
-	if err := os.Rename(tmp, destPath); err != nil {
-		os.Remove(tmp)
-		return "", fmt.Errorf("rename SCRFD model: %w", err)
-	}
-
-	slog.Info("SCRFD model downloaded and cached", "path", destPath, "size", n)
-	return destPath, nil
+	return ensureCachedArtifact(artifact.Spec{
+		Name:     scrfdFileName,
+		URL:      scrfdURL,
+		SHA256:   scrfdSHA256,
+		MaxBytes: maxModelBytes,
+	}, destPath)
 }
 
 // downloadMobileFaceNet downloads the buffalo_sc.zip and extracts w600k_mbf.onnx.
 func downloadMobileFaceNet() (string, error) {
 	destPath := cachedFaceModelPath(mobileFaceNetFileName)
-	if _, err := os.Stat(destPath); err == nil {
-		return destPath, nil
-	}
-
-	if err := os.MkdirAll(modelCacheDir(), 0o755); err != nil {
-		return "", fmt.Errorf("create cache dir: %w", err)
-	}
-
-	slog.Info("downloading MobileFaceNet embedding model", "url", buffaloZipURL)
-
-	resp, err := http.Get(buffaloZipURL) //nolint:gosec // known external URL
-	if err != nil {
-		return "", fmt.Errorf("download MobileFaceNet: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download MobileFaceNet: HTTP %d", resp.StatusCode)
-	}
-
-	zipData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read MobileFaceNet zip: %w", err)
-	}
-
-	slog.Info("extracting MobileFaceNet model from zip", "zip_size", len(zipData))
-
-	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
-	if err != nil {
-		return "", fmt.Errorf("open zip: %w", err)
-	}
-
-	for _, f := range zr.File {
-		if filepath.Base(f.Name) != mobileFaceNetFileName {
-			continue
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return "", fmt.Errorf("open %s in zip: %w", f.Name, err)
-		}
-
-		tmp := destPath + ".tmp"
-		outFile, err := os.Create(tmp)
-		if err != nil {
-			rc.Close()
-			return "", fmt.Errorf("create temp file: %w", err)
-		}
-
-		n, err := io.Copy(outFile, rc)
-		rc.Close()
-		if closeErr := outFile.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			os.Remove(tmp)
-			return "", fmt.Errorf("extract MobileFaceNet: %w", err)
-		}
-
-		if err := os.Rename(tmp, destPath); err != nil {
-			os.Remove(tmp)
-			return "", fmt.Errorf("rename MobileFaceNet model: %w", err)
-		}
-
-		slog.Info("MobileFaceNet model extracted and cached", "path", destPath, "size", n)
-		return destPath, nil
-	}
-
-	return "", fmt.Errorf("%s not found in buffalo_sc.zip", mobileFaceNetFileName)
+	return ensureCachedExtractedArtifact(
+		artifact.Spec{
+			Name:     "buffalo_sc.zip",
+			URL:      buffaloZipURL,
+			SHA256:   buffaloZipSHA256,
+			MaxBytes: maxArchiveBytes,
+		},
+		artifact.Spec{
+			Name:     mobileFaceNetFileName,
+			URL:      buffaloZipURL + "#" + mobileFaceNetFileName,
+			SHA256:   mobileFaceNetSHA256,
+			MaxBytes: maxModelBytes,
+		},
+		mobileFaceNetFileName,
+		destPath,
+	)
 }
 
 // loadFaceModel resolves model bytes using a fallback chain: config path, local file, cache, auto-download.
@@ -158,13 +110,20 @@ func loadFaceModel(configPath, defaultFileName string, downloadFn func() (string
 
 	candidates := []string{
 		defaultFileName,
-		cachedFaceModelPath(defaultFileName),
 	}
 	for _, path := range candidates {
 		if data, err := os.ReadFile(path); err == nil {
 			slog.Info("found face model at", "path", path)
 			return data, nil
 		}
+	}
+	cachedPath := cachedFaceModelPath(defaultFileName)
+	if data, err := readVerifiedCachedFaceModel(defaultFileName, cachedPath); err == nil {
+		slog.Info("found verified cached face model at", "path", cachedPath)
+		return data, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		slog.Warn("cached face model failed verification, re-downloading",
+			"path", cachedPath, "error", err)
 	}
 
 	path, err := downloadFn()

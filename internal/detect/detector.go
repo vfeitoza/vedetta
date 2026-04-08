@@ -209,13 +209,18 @@ func (d *Detector) loadModelData(modelPath string) ([]byte, error) {
 	// Check common local paths
 	candidates := []string{
 		"yolov8n.onnx",
-		cachedModelPath(),
 	}
 	for _, path := range candidates {
 		if data, err := os.ReadFile(path); err == nil {
 			slog.Info("found model at", "path", path)
 			return data, nil
 		}
+	}
+	if data, err := readVerifiedCachedModel(cachedModelPath()); err == nil {
+		slog.Info("found verified cached model at", "path", cachedModelPath())
+		return data, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		slog.Warn("cached model failed verification, re-downloading", "path", cachedModelPath(), "error", err)
 	}
 
 	// Auto-download as last resort
