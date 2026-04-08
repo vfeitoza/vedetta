@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,11 +11,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rvben/vedetta/internal/auth"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/storage"
 	"github.com/rvben/vedetta/internal/update"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// requestWithPrincipal returns a copy of req with the given principal injected into its context.
+func requestWithPrincipal(req *http.Request, p *auth.Principal) *http.Request {
+	ctx := context.WithValue(req.Context(), principalContextKey{}, p)
+	return req.WithContext(ctx)
+}
 
 func TestGetMQTTSettings(t *testing.T) {
 	srv, _ := newTestServer(t)
@@ -474,6 +483,212 @@ func TestUpdateDetectSettings_InvalidThreshold(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestGetAuthInfo_LocalUser(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/info", nil)
+	req = requestWithPrincipal(req, &auth.Principal{
+		Username: "admin",
+		Kind:     "session",
+	})
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["username"] != "admin" {
+		t.Errorf("expected username=admin, got %v", body["username"])
+	}
+	if body["auth_method"] != "session" {
+		t.Errorf("expected auth_method=session, got %v", body["auth_method"])
+	}
+	if body["proxy_auth_enabled"] != false {
+		t.Errorf("expected proxy_auth_enabled=false, got %v", body["proxy_auth_enabled"])
+	}
+}
+
+func TestGetAuthInfo_Unauthenticated(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/info", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestChangePassword_Success(t *testing.T) {
+	srv, db := newTestServer(t)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("oldpass1"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("bcrypt: %v", err)
+	}
+	if err := db.SaveAuthUser("admin", string(hash)); err != nil {
+		t.Fatalf("save auth user: %v", err)
+	}
+
+	checker := auth.New(config.AuthConfig{
+		Users: []config.AuthUser{{Username: "admin", PasswordHash: string(hash)}},
+	}, config.APIConfig{Exposure: "lan"}, db)
+	defer checker.Close()
+	srv.auth = checker
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	cfgContent := "auth:\n  users:\n    - username: admin\n      password_hash: \"" + string(hash) + "\"\napi:\n  host: 0.0.0.0\n  port: 5050\n  exposure: lan\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	srv.SetConfigPath(cfgPath)
+
+	payload := `{"current_password":"oldpass1","new_password":"newpass99"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithPrincipal(req, &auth.Principal{Username: "admin", Kind: "session"})
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !checker.Check("admin", "newpass99", "") {
+		t.Error("new password should work after change")
+	}
+	if checker.Check("admin", "oldpass1", "") {
+		t.Error("old password should not work after change")
+	}
+}
+
+func TestChangePassword_WrongCurrentPassword(t *testing.T) {
+	srv, db := newTestServer(t)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct1"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("bcrypt: %v", err)
+	}
+	if err := db.SaveAuthUser("admin", string(hash)); err != nil {
+		t.Fatalf("save auth user: %v", err)
+	}
+
+	checker := auth.New(config.AuthConfig{
+		Users: []config.AuthUser{{Username: "admin", PasswordHash: string(hash)}},
+	}, config.APIConfig{Exposure: "lan"}, db)
+	defer checker.Close()
+	srv.auth = checker
+
+	payload := `{"current_password":"wrongpass","new_password":"newpass99"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithPrincipal(req, &auth.Principal{Username: "admin", Kind: "session"})
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestChangePassword_EmptyNewPassword(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	payload := `{"current_password":"oldpass1","new_password":""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithPrincipal(req, &auth.Principal{Username: "admin", Kind: "session"})
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestChangePassword_ShortNewPassword(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	payload := `{"current_password":"oldpass1","new_password":"short"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithPrincipal(req, &auth.Principal{Username: "admin", Kind: "session"})
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestChangePassword_Unauthenticated(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	payload := `{"current_password":"oldpass1","new_password":"newpass99"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestGetDetectSettings_WithDetector(t *testing.T) {
+	srv, _ := newTestServer(t)
+	d := detect.New(config.DetectConfig{ScoreThreshold: 0.65, Labels: []string{"person", "car"}})
+	srv.SetDetector(d)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/detect", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	threshold, ok := body["score_threshold"].(float64)
+	if !ok || threshold < 0.64 || threshold > 0.66 {
+		t.Errorf("expected score_threshold ~0.65, got %v", body["score_threshold"])
+	}
+	labels, ok := body["labels"].([]any)
+	if !ok || len(labels) != 2 {
+		t.Errorf("expected 2 labels, got %v", body["labels"])
+	}
+}
+
+func TestTestMQTTConnection_BadHost(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// 192.0.2.0/24 is TEST-NET reserved by RFC 5737 — guaranteed unreachable.
+	payload := `{"host":"192.0.2.1","port":1883,"username":"","password":""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/mqtt/test", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "error" {
+		t.Errorf("expected status=error for unreachable host, got %v", body["status"])
 	}
 }
 
