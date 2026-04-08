@@ -184,6 +184,59 @@ func UpdateUpdates(path string, updates UpdateConfig) error {
 	return updateConfigSection(path, "updates", y)
 }
 
+// yamlRecordingWrite uses string durations for human-readable YAML output.
+type yamlRecordingWrite struct {
+	Path          string `yaml:"path"`
+	Continuous    bool   `yaml:"continuous"`
+	SegmentLength string `yaml:"segment_length"`
+	PreCapture    string `yaml:"pre_capture"`
+	PostCapture   string `yaml:"post_capture"`
+	RetainDays    int    `yaml:"retain_days"`
+	EventRetain   int    `yaml:"event_retain_days"`
+	MaxStorage    string `yaml:"max_storage,omitempty"`
+}
+
+// UpdateRecording updates the recording section of the config file.
+func UpdateRecording(path string, rec RecordingConfig) error {
+	y := yamlRecordingWrite{
+		Path:          rec.Path,
+		Continuous:    rec.Continuous,
+		SegmentLength: rec.SegmentLength.String(),
+		PreCapture:    rec.PreCapture.String(),
+		PostCapture:   rec.PostCapture.String(),
+		RetainDays:    rec.RetainDays,
+		EventRetain:   rec.EventRetain,
+		MaxStorage:    rec.MaxStorage,
+	}
+	return updateConfigSection(path, "recording", y)
+}
+
+// UpdateDetect updates only the UI-editable fields of the detect section
+// (score_threshold and labels) while preserving all other fields such as
+// model_path, backend, motion, and object_match_threshold.
+func UpdateDetect(path string, detect DetectConfig) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
+	var existing struct {
+		Detect map[string]any `yaml:"detect"`
+	}
+	if err := yaml.Unmarshal(data, &existing); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if existing.Detect == nil {
+		existing.Detect = make(map[string]any)
+	}
+	existing.Detect["score_threshold"] = detect.ScoreThreshold
+	if len(detect.Labels) > 0 {
+		existing.Detect["labels"] = detect.Labels
+	} else {
+		delete(existing.Detect, "labels")
+	}
+	return updateConfigSection(path, "detect", existing.Detect)
+}
+
 // AppendCamera adds a camera to an existing config file using yaml.Node to
 // preserve the existing document structure (comments, ordering, other sections).
 func AppendCamera(path string, cam CameraConfig, comment string) error {
