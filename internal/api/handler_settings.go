@@ -167,6 +167,142 @@ func (s *Server) DismissUpdate(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) GetRecordingSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"continuous":        s.recordingConfig.Continuous,
+		"retain_days":       s.recordingConfig.RetainDays,
+		"event_retain_days": s.recordingConfig.EventRetain,
+		"segment_length":    s.recordingConfig.SegmentLength.String(),
+		"pre_capture":       s.recordingConfig.PreCapture.String(),
+		"post_capture":      s.recordingConfig.PostCapture.String(),
+		"max_storage":       s.recordingConfig.MaxStorage,
+	})
+}
+
+func (s *Server) UpdateRecordingSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	defer r.Body.Close()
+
+	var req struct {
+		Continuous      bool   `json:"continuous"`
+		RetainDays      int    `json:"retain_days"`
+		EventRetainDays int    `json:"event_retain_days"`
+		SegmentLength   string `json:"segment_length"`
+		PreCapture      string `json:"pre_capture"`
+		PostCapture     string `json:"post_capture"`
+		MaxStorage      string `json:"max_storage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	segLen, err := time.ParseDuration(req.SegmentLength)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid segment_length duration"})
+		return
+	}
+	preCap, err := time.ParseDuration(req.PreCapture)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pre_capture duration"})
+		return
+	}
+	postCap, err := time.ParseDuration(req.PostCapture)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid post_capture duration"})
+		return
+	}
+
+	rec := s.recordingConfig
+	rec.Continuous = req.Continuous
+	rec.RetainDays = req.RetainDays
+	rec.EventRetain = req.EventRetainDays
+	rec.SegmentLength = segLen
+	rec.PreCapture = preCap
+	rec.PostCapture = postCap
+	rec.MaxStorage = req.MaxStorage
+
+	if err := config.UpdateRecording(s.configPath, rec); err != nil {
+		slog.Error("failed to write recording config", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config"})
+		return
+	}
+
+	s.recordingConfig = rec
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"continuous":        rec.Continuous,
+		"retain_days":       rec.RetainDays,
+		"event_retain_days": rec.EventRetain,
+		"segment_length":    rec.SegmentLength.String(),
+		"pre_capture":       rec.PreCapture.String(),
+		"post_capture":      rec.PostCapture.String(),
+		"max_storage":       rec.MaxStorage,
+		"restart_required":  true,
+	})
+}
+
+func (s *Server) GetDetectSettings(w http.ResponseWriter, _ *http.Request) {
+	if s.detector == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"score_threshold": float32(0),
+			"labels":          []string{},
+		})
+		return
+	}
+	labels := s.detector.Labels()
+	if labels == nil {
+		labels = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"score_threshold": s.detector.ScoreThreshold(),
+		"labels":          labels,
+	})
+}
+
+func (s *Server) UpdateDetectSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	defer r.Body.Close()
+
+	var req struct {
+		ScoreThreshold float32  `json:"score_threshold"`
+		Labels         []string `json:"labels"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	if req.ScoreThreshold < 0.05 || req.ScoreThreshold > 1.0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "score_threshold must be between 0.05 and 1.0"})
+		return
+	}
+
+	if s.detector != nil {
+		s.detector.SetScoreThreshold(req.ScoreThreshold)
+		s.detector.SetLabels(req.Labels)
+	}
+
+	detectCfg := config.DetectConfig{
+		ScoreThreshold: req.ScoreThreshold,
+		Labels:         req.Labels,
+	}
+	if err := config.UpdateDetect(s.configPath, detectCfg); err != nil {
+		slog.Error("failed to write detect config", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config"})
+		return
+	}
+
+	labels := req.Labels
+	if labels == nil {
+		labels = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"score_threshold": req.ScoreThreshold,
+		"labels":          labels,
+	})
+}
+
 func (s *Server) reconnectMQTT(cfg config.MQTTConfig) {
 	if s.mqttClient != nil {
 		if closer, ok := s.mqttClient.(interface{ Close() }); ok {
