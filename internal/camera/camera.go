@@ -169,6 +169,10 @@ func (c *Camera) Name() string {
 	return c.config.Name
 }
 
+func (c *Camera) DetectURL() string {
+	return c.config.URL
+}
+
 func (c *Camera) RecordURL() string {
 	if c.config.RecordURL != "" {
 		return c.config.RecordURL

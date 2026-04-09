@@ -96,6 +96,19 @@ func (h *Hub) Get(url string) *Source {
 	return nil
 }
 
+// Remove disconnects and removes the Source for the given URL.
+// If no consumers remain, this frees the RTSP connection slot on the camera.
+func (h *Hub) Remove(url string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if ms, ok := h.sources[url]; ok {
+		ms.cancel()
+		delete(h.sources, url)
+		slog.Info("RTSP hub removed source", "url", SanitizeURL(url))
+	}
+}
+
 // Close disconnects all sources and shuts down the hub.
 func (h *Hub) Close() {
 	h.cancel()

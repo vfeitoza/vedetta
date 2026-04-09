@@ -88,6 +88,7 @@ type Server struct {
 
 func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Server {
 	s := &Server{
+		ctx:                  context.Background(),
 		config:               cfg,
 		auth:                 authChecker,
 		db:                   db,

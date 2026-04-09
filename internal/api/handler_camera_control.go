@@ -24,6 +24,16 @@ func (s *Server) StopCamera(w http.ResponseWriter, r *http.Request, name string)
 
 	s.recorder.StopCameraRecording(name)
 
+	// Disconnect RTSP source(s) to free camera connection slots.
+	if s.hub != nil {
+		detectURL := cam.DetectURL()
+		recordURL := cam.RecordURL()
+		s.hub.Remove(detectURL)
+		if recordURL != detectURL {
+			s.hub.Remove(recordURL)
+		}
+	}
+
 	if err := s.db.SetCameraStopped(name, true); err != nil {
 		slog.Error("failed to persist camera stopped state", "camera", name, "error", err)
 	}
@@ -49,14 +59,14 @@ func (s *Server) StartCamera(w http.ResponseWriter, r *http.Request, name string
 		slog.Error("failed to clear camera stopped state", "camera", name, "error", err)
 	}
 
-	if err := s.cameras.StartCamera(r.Context(), name); err != nil {
+	if err := s.cameras.StartCamera(s.ctx, name); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": err.Error(),
 		})
 		return
 	}
 
-	s.recorder.StartCameraRecording(r.Context(), name)
+	s.recorder.StartCameraRecording(s.ctx, name)
 
 	slog.Info("camera started", "name", name)
 
