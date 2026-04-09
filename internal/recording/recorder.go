@@ -115,8 +115,9 @@ func (r *Recorder) StartCameraRecording(ctx context.Context, name string) {
 	r.segments.StartRecording(ctx, name, url)
 }
 
-// StartContinuousRecording begins segment recording for all registered cameras.
-func (r *Recorder) StartContinuousRecording(ctx context.Context) {
+// StartContinuousRecording begins segment recording for all registered cameras
+// that are not in the stoppedCameras set.
+func (r *Recorder) StartContinuousRecording(ctx context.Context, stoppedCameras map[string]bool) {
 	if !r.config.Continuous {
 		slog.Info("continuous recording disabled")
 		return
@@ -124,6 +125,9 @@ func (r *Recorder) StartContinuousRecording(ctx context.Context) {
 
 	first := true
 	for name, url := range r.cameraURLs {
+		if stoppedCameras[name] {
+			continue
+		}
 		if !first {
 			select {
 			case <-ctx.Done():

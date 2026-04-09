@@ -340,8 +340,21 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 		sub.recorder.RegisterCamera(cam.Name, recordURL)
 	}
 
+	stoppedCameras := make(map[string]bool)
+	stoppedList, err := db.ListStoppedCameras()
+	if err != nil {
+		slog.Error("failed to load stopped cameras", "error", err)
+	} else {
+		for _, name := range stoppedList {
+			stoppedCameras[name] = true
+		}
+		if len(stoppedCameras) > 0 {
+			slog.Info("cameras marked as stopped", "count", len(stoppedCameras))
+		}
+	}
+
 	// Start continuous segment recording
-	sub.recorder.StartContinuousRecording(ctx)
+	sub.recorder.StartContinuousRecording(ctx, stoppedCameras)
 	sub.recorder.StartRetentionCleanup(ctx)
 	sub.recorder.StartStatsRefresh(ctx)
 	sub.recorder.StartRecompressionJob(ctx)
@@ -402,7 +415,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 		}
 	}
 
-	sub.manager.Start(ctx)
+	sub.manager.Start(ctx, stoppedCameras)
 
 	// Probe cameras for PTZ support (concurrent, non-blocking)
 	ptzClients := make(map[string]*camera.PTZClient)

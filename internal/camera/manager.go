@@ -3,6 +3,7 @@ package camera
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -62,11 +63,15 @@ func NewManager(configs []config.CameraConfig, detector *detect.Detector, motion
 	return m
 }
 
-func (m *Manager) Start(ctx context.Context) {
+func (m *Manager) Start(ctx context.Context, stoppedCameras map[string]bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for i, name := range m.order {
+		if stoppedCameras[name] {
+			slog.Info("skipping stopped camera", "name", name)
+			continue
+		}
 		if i > 0 {
 			select {
 			case <-ctx.Done():
