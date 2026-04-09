@@ -28,14 +28,15 @@ type Segment struct {
 // SegmentRecorder continuously records RTSP streams into fixed-length segments
 // using the native Go media pipeline (no ffmpeg).
 type SegmentRecorder struct {
-	config    config.RecordingConfig
-	baseDir   string
-	db        *storage.DB
-	hub       *rtsp.Hub
-	disk      *media.DiskSpace
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	consumers []*media.RecordingConsumer
+	config      config.RecordingConfig
+	baseDir     string
+	db          *storage.DB
+	hub         *rtsp.Hub
+	disk        *media.DiskSpace
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	consumers   []*media.RecordingConsumer
+	cancelFuncs map[string]context.CancelFunc
 }
 
 func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hub) *SegmentRecorder {
@@ -44,11 +45,12 @@ func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hu
 		baseDir = abs
 	}
 	return &SegmentRecorder{
-		config:  cfg,
-		baseDir: baseDir,
-		db:      db,
-		hub:     hub,
-		disk:    media.NewDiskSpace(baseDir),
+		config:      cfg,
+		baseDir:     baseDir,
+		db:          db,
+		hub:         hub,
+		disk:        media.NewDiskSpace(baseDir),
+		cancelFuncs: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -65,11 +67,31 @@ func (sr *SegmentRecorder) StartRecording(ctx context.Context, cameraName, rtspU
 		return
 	}
 
+	camCtx, camCancel := context.WithCancel(ctx)
+	sr.mu.Lock()
+	sr.cancelFuncs[cameraName] = camCancel
+	sr.mu.Unlock()
+
 	sr.wg.Add(1)
 	go func() {
 		defer sr.wg.Done()
-		sr.recordLoop(ctx, cameraName, rtspURL, segDir)
+		defer func() {
+			sr.mu.Lock()
+			delete(sr.cancelFuncs, cameraName)
+			sr.mu.Unlock()
+		}()
+		sr.recordLoop(camCtx, cameraName, rtspURL, segDir)
 	}()
+}
+
+// StopRecording stops recording for a single camera.
+func (sr *SegmentRecorder) StopRecording(cameraName string) {
+	sr.mu.Lock()
+	cancel, ok := sr.cancelFuncs[cameraName]
+	sr.mu.Unlock()
+	if ok {
+		cancel()
+	}
 }
 
 // Wait blocks until all recording goroutines have finished and finalized their segments.

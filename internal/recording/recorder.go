@@ -100,6 +100,21 @@ func (r *Recorder) StartTemporaryRecording(ctx context.Context, cameraName, rtsp
 	r.segments.StartRecording(ctx, cameraName, rtspURL)
 }
 
+// StopCameraRecording stops recording for a single camera.
+func (r *Recorder) StopCameraRecording(name string) {
+	r.segments.StopRecording(name)
+}
+
+// StartCameraRecording starts recording for a single camera.
+func (r *Recorder) StartCameraRecording(ctx context.Context, name string) {
+	url, ok := r.cameraURLs[name]
+	if !ok {
+		slog.Warn("no recording URL registered for camera", "camera", name)
+		return
+	}
+	r.segments.StartRecording(ctx, name, url)
+}
+
 // StartContinuousRecording begins segment recording for all registered cameras.
 func (r *Recorder) StartContinuousRecording(ctx context.Context) {
 	if !r.config.Continuous {
