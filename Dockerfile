@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -21,11 +21,12 @@ RUN apt-get update && \
 RUN groupadd -r vedetta && useradd -r -g vedetta -d /data -s /sbin/nologin vedetta
 
 RUN mkdir -p /data/recordings /data/snapshots /config && \
-    chown -R vedetta:vedetta /data
+    chown -R vedetta:vedetta /data /config
 
 COPY --from=builder /vedetta /usr/local/bin/vedetta
 
 USER vedetta
+WORKDIR /data
 
 EXPOSE 5050
 

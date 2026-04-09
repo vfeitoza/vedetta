@@ -13,7 +13,7 @@ services:
     network_mode: host
 
     volumes:
-      - ./config.yml:/config/config.yml:ro
+      - ./config:/config
       - vedetta-data:/data
 
     environment:

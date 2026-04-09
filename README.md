@@ -36,7 +36,7 @@ make build
 docker run -d \
   --name vedetta \
   --network host \
-  -v /path/to/config.yml:/config/config.yml:ro \
+  -v vedetta-config:/config \
   -v vedetta-data:/data \
   ghcr.io/rvben/vedetta:latest
 ```
