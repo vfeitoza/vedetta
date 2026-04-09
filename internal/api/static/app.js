@@ -2407,6 +2407,18 @@ function refreshGridSnapshots() {
     .catch(function() {});
 }
 
+function toggleCamera(name, isStopped) {
+  var action = isStopped ? 'start' : 'stop';
+  fetch('/api/cameras/' + encodeURIComponent(name) + '/' + action, { method: 'POST' })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || r.statusText); });
+      htmx.ajax('GET', '/partials/camera-grid', { target: '#camera-grid', swap: 'innerHTML' });
+    })
+    .catch(function(err) {
+      console.error('Failed to ' + action + ' camera:', err);
+    });
+}
+
 // Start refresh after htmx loads the grid initially
 document.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'camera-grid') {
