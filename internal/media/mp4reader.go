@@ -68,16 +68,17 @@ func probeMoovDuration(r io.ReadSeeker) (time.Duration, error) {
 		size := int64(binary.BigEndian.Uint32(boxHeader[:4]))
 		boxType := string(boxHeader[4:8])
 
-		if size == 1 {
+		switch size {
+		case 1:
 			var extSize [8]byte
 			if _, err := io.ReadFull(r, extSize[:]); err != nil {
 				return 0, fmt.Errorf("read extended size: %w", err)
 			}
 			size = int64(binary.BigEndian.Uint64(extSize[:]))
 			size -= 16
-		} else if size == 0 {
+		case 0:
 			return 0, fmt.Errorf("unsupported box size 0")
-		} else {
+		default:
 			size -= 8
 		}
 

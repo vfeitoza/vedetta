@@ -131,10 +131,10 @@ func ensureOpenH264() bool {
 	return openh264Loaded
 }
 
-func openH264StateSnapshot() (loaded bool, loadErr error, source, path, version string) {
+func openH264StateSnapshot() (loaded bool, source, path, version string, loadErr error) {
 	openh264StateMu.Lock()
 	defer openh264StateMu.Unlock()
-	return openh264Loaded, openh264LoadErr, openh264Source, openh264Path, openh264LoadedVersion
+	return openh264Loaded, openh264Source, openh264Path, openh264LoadedVersion, openh264LoadErr
 }
 
 func resetOpenH264State() {

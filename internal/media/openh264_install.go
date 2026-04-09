@@ -100,14 +100,6 @@ func openH264InstallSpecForPlatform(platform string) (openH264InstallSpec, bool)
 	}
 }
 
-func openH264InstalledPath() string {
-	spec, ok := openH264InstallSpecFunc(openH264Platform())
-	if !ok {
-		return ""
-	}
-	return filepath.Join(openH264CacheRoot(), spec.libraryName)
-}
-
 func verifiedInstalledOpenH264Path() (string, bool, error) {
 	spec, ok := openH264InstallSpecFunc(openH264Platform())
 	if !ok {
@@ -132,7 +124,7 @@ func verifiedInstalledOpenH264Path() (string, bool, error) {
 
 func OpenH264StatusInfo() OpenH264Status {
 	available := ensureOpenH264()
-	loaded, loadErr, source, path, version := openH264StateSnapshot()
+	loaded, source, path, version, loadErr := openH264StateSnapshot()
 
 	installedPath, installed, installErr := verifiedInstalledOpenH264Path()
 	status := OpenH264Status{

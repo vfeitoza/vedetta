@@ -50,9 +50,9 @@ type rtspServerConsumer struct {
 
 func (c *rtspServerConsumer) writeRTP(media *description.Media, pkt *rtp.Packet, expectedPT uint8) {
 	// Rewrite payload type if upstream differs from what we declared in our SDP.
-	if pkt.Header.PayloadType != expectedPT {
+	if pkt.PayloadType != expectedPT {
 		clone := *pkt
-		clone.Header.PayloadType = expectedPT
+		clone.PayloadType = expectedPT
 		pkt = &clone
 	}
 
@@ -116,7 +116,7 @@ func (c *rtspServerConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	}
 
 	for _, outPkt := range pkts {
-		outPkt.Header.PayloadType = c.videoPT
+		outPkt.PayloadType = c.videoPT
 		c.stream.WritePacketRTP(c.videoMedia, outPkt)
 	}
 }

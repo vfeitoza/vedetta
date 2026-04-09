@@ -321,13 +321,6 @@ func (fr *FaceRecognizer) postprocessSCRFD(outputs map[string]*onnxruntime.Tenso
 		featW := scrfdInputSize / stride
 		numAnchors := int(scores.Shape[0])
 
-		// Verify anchor count matches feature map
-		expectedAnchors := featH * featW * 2 // 2 anchors per position for det_500m
-		if numAnchors != expectedAnchors {
-			// Try single anchor per position
-			expectedAnchors = featH * featW
-		}
-
 		anchorsPerPos := numAnchors / (featH * featW)
 		if anchorsPerPos == 0 {
 			anchorsPerPos = 1

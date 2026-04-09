@@ -100,8 +100,8 @@ func TestSourceFanOutVideo(t *testing.T) {
 	if c2.videoPkts != 1 {
 		t.Errorf("c2 got %d video pkts, want 1", c2.videoPkts)
 	}
-	if c1.lastVideoPkt.Header.SequenceNumber != 42 {
-		t.Errorf("c1 got seq %d, want 42", c1.lastVideoPkt.Header.SequenceNumber)
+	if c1.lastVideoPkt.SequenceNumber != 42 {
+		t.Errorf("c1 got seq %d, want 42", c1.lastVideoPkt.SequenceNumber)
 	}
 }
 

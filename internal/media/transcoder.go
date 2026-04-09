@@ -363,13 +363,14 @@ func transcodeFile(src, dst string, outW, outH int) error {
 
 		for _, part := range parts {
 			for _, tr := range part.Tracks {
-				if tr.ID == videoTrackID {
+				switch tr.ID {
+				case videoTrackID:
 					videoBase = tr.BaseTime
 					for _, s := range tr.Samples {
 						videoDuration += s.Duration
 						videoAVCC = append(videoAVCC, s.Payload...)
 					}
-				} else if tr.ID == audioTrackID {
+				case audioTrackID:
 					audioBase = tr.BaseTime
 					for _, s := range tr.Samples {
 						newAudioSamples = append(newAudioSamples, &fmp4.Sample{
@@ -596,21 +597,6 @@ func reorderAnnexBWithSPSPPS(annexB, sps, pps []byte) []byte {
 		out = append(out, nal...)
 	}
 	return out
-}
-
-// sliceContainsSPSOrPPS reports whether any NAL unit in the Annex B stream is
-// an SPS (type 7) or PPS (type 8).
-func sliceContainsSPSOrPPS(annexB []byte) bool {
-	for _, nal := range splitAnnexB(annexB) {
-		if len(nal) == 0 {
-			continue
-		}
-		t := nal[0] & 0x1f
-		if t == 7 || t == 8 {
-			return true
-		}
-	}
-	return false
 }
 
 func avccToAnnexB(avcc []byte) ([]byte, error) {

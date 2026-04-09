@@ -549,15 +549,6 @@ func readAvcC(r io.ReadSeeker) (sps, pps []byte, err error) {
 	return nil, nil, fmt.Errorf("avcC box not found")
 }
 
-// isKeyframe checks if AVCC-formatted data starts with an IDR NAL unit.
-func isKeyframe(avccData []byte) bool {
-	if len(avccData) < 5 {
-		return false
-	}
-	nalType := avccData[4] & 0x1F
-	return nalType == 5 || nalType == 7 // IDR slice or SPS
-}
-
 // encodeJPEGThumbnail scales a YCbCr image to the target width and encodes as JPEG.
 func encodeJPEGThumbnail(img *image.YCbCr, targetWidth, quality int) ([]byte, error) {
 	srcW := img.Rect.Dx()

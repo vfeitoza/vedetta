@@ -264,7 +264,7 @@ func (s *Server) SetContext(ctx context.Context) {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 
-	var handler http.Handler = s.mux
+	var handler http.Handler
 	if s.setupMode {
 		handler = securityHeadersMiddleware(apiBodyLimitMiddleware(s.mux))
 	} else {

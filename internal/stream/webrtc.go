@@ -34,17 +34,17 @@ type trackState struct {
 func (t *trackState) write(pkt *rtp.Packet) error {
 	t.mu.Lock()
 	if !t.started {
-		t.seqOffset = -pkt.Header.SequenceNumber
-		t.tsOffset = -pkt.Header.Timestamp
+		t.seqOffset = -pkt.SequenceNumber
+		t.tsOffset = -pkt.Timestamp
 		t.started = true
 	}
-	seq := pkt.Header.SequenceNumber + t.seqOffset
-	ts := pkt.Header.Timestamp + t.tsOffset
+	seq := pkt.SequenceNumber + t.seqOffset
+	ts := pkt.Timestamp + t.tsOffset
 	t.mu.Unlock()
 
 	clone := *pkt
-	clone.Header.SequenceNumber = seq
-	clone.Header.Timestamp = ts
+	clone.SequenceNumber = seq
+	clone.Timestamp = ts
 	return t.track.WriteRTP(&clone)
 }
 

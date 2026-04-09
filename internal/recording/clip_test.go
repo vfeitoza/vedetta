@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,7 +58,7 @@ func TestExtractClip_DynamicWindow_WithEndTime(t *testing.T) {
 	}
 
 	// ExtractClip will fail on trim (not valid MP4), but verify it finds segments
-	_, err = rec.ExtractClip(nil, event)
+	_, err = rec.ExtractClip(context.TODO(), event)
 	if err != nil && err.Error() == `no segments available for camera "cam1"` {
 		t.Error("dynamic window should find segments")
 	}
@@ -106,7 +107,7 @@ func TestExtractClip_ZeroEndTime_UsesTimestampOnly(t *testing.T) {
 		Timestamp:  now.Add(-1 * time.Minute),
 	}
 
-	_, err = rec.ExtractClip(nil, event)
+	_, err = rec.ExtractClip(context.TODO(), event)
 	if err != nil && err.Error() == `no segments available for camera "cam1"` {
 		t.Error("zero EndTime fallback should still find segments")
 	}

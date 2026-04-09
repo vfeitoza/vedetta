@@ -47,10 +47,7 @@ func shouldLimitAPIBody(r *http.Request) bool {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return false
 	}
-	if !strings.HasPrefix(r.URL.Path, "/api/") {
-		return false
-	}
-	return true
+	return strings.HasPrefix(r.URL.Path, "/api/")
 }
 
 func requestBodyLimit(r *http.Request) int64 {
