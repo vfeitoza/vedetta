@@ -57,11 +57,38 @@ func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 		status = "degraded"
 	}
 
+	// Detection check — reflects whether the H264 decoder is loaded and
+	// the detection pipeline can produce events. When the codec is
+	// unavailable, detection silently fails — this exposes that state to
+	// monitoring and integrations so alerts can fire.
+	detectionState := "ok"
+	detectionReason := ""
+	openH264 := openH264StatusInfo()
+	if !openH264.Available {
+		detectionState = "disabled"
+		detectionReason = "OpenH264 codec not loaded"
+		if openH264.Error != "" {
+			detectionReason += ": " + openH264.Error
+		}
+		status = "degraded"
+	}
+	detectionCheck := map[string]any{
+		"state":           detectionState,
+		"openh264_loaded": openH264.Available,
+	}
+	if detectionReason != "" {
+		detectionCheck["reason"] = detectionReason
+	}
+	if openH264.Version != "" {
+		detectionCheck["openh264_version"] = openH264.Version
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": status,
 		"checks": map[string]any{
-			"database": dbStatus,
-			"mqtt":     mqttStatus,
+			"database":  dbStatus,
+			"mqtt":      mqttStatus,
+			"detection": detectionCheck,
 			"cameras": map[string]any{
 				"total":  len(statuses),
 				"online": onlineCount,
