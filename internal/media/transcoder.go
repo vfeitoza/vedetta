@@ -336,6 +336,11 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	var outSPS, outPPS []byte
 	var seqNum uint32 = 1
 
+	// Allocate encoder I/O structs once and reuse across all GOP iterations.
+	// See the per-GOP comment below for the rationale for using [N]byte backing.
+	var encSrcPicBuf [unsafe.Sizeof(openh264.SSourcePicture{})]byte
+	var encInfoBuf [unsafe.Sizeof(openh264.SFrameBSInfo{})]byte
+
 	for gopIdx, blk := range blocks {
 		// Read the full moof+mdat block and unmarshal it as an fmp4.Part so that
 		// per-track sample payloads are properly separated regardless of whether
@@ -431,12 +436,25 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		if frame != nil {
 			scaled := scaleYCbCr(frame, outW, outH)
 
-			encSrcPic := openh264.SSourcePicture{
-				IColorFormat: openh264.VideoFormatI420,
-				IPicWidth:    int32(outW),
-				IPicHeight:   int32(outH),
-				UiTimeStamp:  int64(gopIdx * 1000),
+			// Guard against degenerate frames that would panic on &slice[0].
+			if len(scaled.Y) == 0 || len(scaled.Cb) == 0 || len(scaled.Cr) == 0 {
+				pinner.Unpin()
+				continue
 			}
+
+			// Zero-clear the reused encoder I/O buffers before each use to ensure
+			// no data from a previous iteration leaks into the new frame.
+			for i := range encSrcPicBuf {
+				encSrcPicBuf[i] = 0
+			}
+			for i := range encInfoBuf {
+				encInfoBuf[i] = 0
+			}
+			encSrcPic := (*openh264.SSourcePicture)(unsafe.Pointer(&encSrcPicBuf[0]))
+			encSrcPic.IColorFormat = openh264.VideoFormatI420
+			encSrcPic.IPicWidth = int32(outW)
+			encSrcPic.IPicHeight = int32(outH)
+			encSrcPic.UiTimeStamp = int64(gopIdx * 1000)
 			encSrcPic.IStride[0] = int32(scaled.YStride)
 			encSrcPic.IStride[1] = int32(scaled.CStride)
 			encSrcPic.IStride[2] = int32(scaled.CStride)
@@ -447,24 +465,75 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			encSrcPic.PData[1] = (*uint8)(unsafe.Pointer(&scaled.Cb[0]))
 			encSrcPic.PData[2] = (*uint8)(unsafe.Pointer(&scaled.Cr[0]))
 
-			encInfo := openh264.SFrameBSInfo{}
+			encInfo := (*openh264.SFrameBSInfo)(unsafe.Pointer(&encInfoBuf[0]))
+
 			OpenH264Lock()
-			encRet := ppEnc.EncodeFrame(&encSrcPic, &encInfo)
-			var nalBytes []byte
-			if encRet == openh264.CmResultSuccess && encInfo.EFrameType != openh264.VideoFrameTypeSkip {
-				for iLayer := 0; iLayer < int(encInfo.ILayerNum); iLayer++ {
-					layer := &encInfo.SLayerInfo[iLayer]
-					var layerSize int32
-					nallens := unsafe.Slice(layer.PNalLengthInByte, layer.INalCount)
-					for _, l := range nallens {
-						layerSize += l
-					}
-					nalBytes = append(nalBytes, unsafe.Slice(layer.PBsBuf, layerSize)...)
-				}
+			encRet := ppEnc.EncodeFrame(encSrcPic, encInfo)
+			// Extract the layer count and frame type while still inside the lock,
+			// before the C-owned NAL buffers could be invalidated by another call.
+			nLayers := int(encInfo.ILayerNum)
+			encFrameType := encInfo.EFrameType
+			const maxLayers = 128
+			if nLayers > maxLayers {
+				nLayers = maxLayers
+			}
+			// Capture C pointer values as uintptr (not pointer-typed — the GC
+			// does not trace uintptr fields) before doing any allocation.
+			var (
+				layerBufPtrs   [maxLayers]uintptr
+				layerLenPtrs   [maxLayers]uintptr
+				layerNalCounts [maxLayers]int32
+			)
+			for iLayer := 0; iLayer < nLayers; iLayer++ {
+				layer := &encInfo.SLayerInfo[iLayer]
+				layerBufPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PBsBuf))
+				layerLenPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PNalLengthInByte))
+				layerNalCounts[iLayer] = layer.INalCount
 			}
 			OpenH264Unlock()
 
-			if encRet == openh264.CmResultSuccess && encInfo.EFrameType != openh264.VideoFrameTypeSkip {
+			// Unpin after the encode call; the C library no longer needs the
+			// Go-managed plane data. Do this before any further allocations to
+			// release the pinning obligation promptly.
+			pinner.Unpin()
+			pinner = &runtime.Pinner{}
+
+			// Copy NAL bytes from the C-owned buffers into Go-owned slices.
+			// The C buffers remain valid until the next EncodeFrame or
+			// WelsDestroySVCEncoder call (serialized by OpenH264Lock above).
+			//
+			// We access C memory via uintptr pointer arithmetic rather than
+			// unsafe.Slice to avoid creating any slice header whose Data field
+			// holds a C pointer (even transiently on the Go heap).
+			var nalBytes []byte
+			if encRet == openh264.CmResultSuccess && encFrameType != openh264.VideoFrameTypeSkip {
+				for iLayer := 0; iLayer < nLayers; iLayer++ {
+					nalCount := layerNalCounts[iLayer]
+					nalLenPtr := layerLenPtrs[iLayer]
+					bufPtr := layerBufPtrs[iLayer]
+					if nalCount <= 0 || nalLenPtr == 0 || bufPtr == 0 {
+						continue
+					}
+					// Sum NAL unit lengths by stepping through the C-owned int32 array
+					// one element at a time. No slice header with a C data pointer.
+					var layerSize int32
+					for i := int32(0); i < nalCount; i++ {
+						l := *(*int32)(unsafe.Pointer(nalLenPtr + uintptr(i)*4)) //nolint:govet // C pointer stored as uintptr; GC cannot move C-owned memory
+						layerSize += l
+					}
+					if layerSize <= 0 {
+						continue
+					}
+					// Copy NAL bytes from the C-owned buffer into a Go-owned slice.
+					layerCopy := make([]byte, layerSize)
+					for i := int32(0); i < layerSize; i++ {
+						layerCopy[i] = *(*uint8)(unsafe.Pointer(bufPtr + uintptr(i))) //nolint:govet // C pointer stored as uintptr; GC cannot move C-owned memory
+					}
+					nalBytes = append(nalBytes, layerCopy...)
+				}
+			}
+
+			if encRet == openh264.CmResultSuccess && encFrameType != openh264.VideoFrameTypeSkip {
 
 				if outSPS == nil {
 					outSPS, outPPS = extractSPSPPS(nalBytes)
@@ -472,7 +541,7 @@ func transcodeFile(src, dst string, outW, outH int) error {
 
 				avccPayloadOut, err := annexBToAVCC(nalBytes)
 				if err == nil && len(avccPayloadOut) > 0 {
-					isNonSync := encInfo.EFrameType != openh264.VideoFrameTypeIDR
+					isNonSync := encFrameType != openh264.VideoFrameTypeIDR
 					newVideoSamples = append(newVideoSamples, &fmp4.Sample{
 						Duration:        videoDuration,
 						Payload:         avccPayloadOut,
