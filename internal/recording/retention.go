@@ -108,19 +108,29 @@ func (r *Recorder) enforceStorageCap() {
 }
 
 func (r *Recorder) cleanSegments(cutoff time.Time) {
-	for _, cameraName := range r.listCameras() {
-		segments := r.segments.AllSegments(cameraName)
-		for _, seg := range segments {
-			if seg.EndTime.Before(cutoff) {
-				slog.Debug("removing expired segment",
-					"camera", cameraName,
-					"path", seg.Path,
-					"age", time.Since(seg.EndTime).Round(time.Hour),
-				)
-				if err := r.segments.RemoveSegment(cameraName, seg.Path); err != nil {
-					slog.Error("failed to remove segment", "path", seg.Path, "error", err)
-				}
-			}
+	// Query the database directly for all expired segments, regardless of
+	// which camera they belong to. Filesystem-based iteration (listCameras)
+	// used to miss orphan segments from cameras that had been removed from
+	// the config — their DB rows would live forever.
+	expired, err := r.db.GetSegmentsEndingBefore(cutoff)
+	if err != nil {
+		slog.Error("failed to query expired segments", "error", err)
+		return
+	}
+
+	if len(expired) == 0 {
+		return
+	}
+
+	slog.Debug("retention cleanup: removing expired segments", "count", len(expired))
+	for _, seg := range expired {
+		slog.Debug("removing expired segment",
+			"camera", seg.Camera,
+			"path", seg.Path,
+			"age", time.Since(seg.EndTime).Round(time.Hour),
+		)
+		if err := r.segments.RemoveSegment(seg.Camera, seg.Path); err != nil {
+			slog.Error("failed to remove segment", "path", seg.Path, "error", err)
 		}
 	}
 }
@@ -265,16 +275,3 @@ func (r *Recorder) removeEmptyDirsIn(root string) {
 	})
 }
 
-func (r *Recorder) listCameras() []string {
-	var cameras []string
-	entries, err := os.ReadDir(r.config.Path)
-	if err != nil {
-		return nil
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			cameras = append(cameras, entry.Name())
-		}
-	}
-	return cameras
-}

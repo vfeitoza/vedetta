@@ -781,6 +781,26 @@ func (d *DB) SegmentBytesByCamera() (map[string]int64, error) {
 	return result, rows.Err()
 }
 
+// GetSegmentsEndingBefore returns all segments whose end_time is before the
+// given cutoff, across all cameras — including cameras that no longer exist
+// in the current config. Used by retention cleanup to catch orphaned segments
+// that filesystem-based iteration would miss.
+func (d *DB) GetSegmentsEndingBefore(cutoff time.Time) ([]SegmentRecord, error) {
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE replace(end_time, 'T', ' ') < replace(?, 'T', ' ')
+		ORDER BY end_time ASC`,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanSegments(rows)
+}
+
 // GetOldestSegments returns the N oldest segments across all cameras, ordered by start_time.
 func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	rows, err := d.db.Query(`

@@ -48,6 +48,13 @@ func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 	if storageStats.DiskLow {
 		status = "degraded"
 	}
+	// Storage projection can also trip degraded state before disk_low fires —
+	// for example when the config's steady-state exceeds disk capacity.
+	if storageStats.Projection.Status == "insufficient" ||
+		storageStats.Projection.Status == "critical" ||
+		storageStats.Projection.Status == "warning" {
+		status = "degraded"
+	}
 
 	mqttStatus := "disabled"
 	if s.mqttClient != nil {
@@ -105,6 +112,7 @@ func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 					"bytes_reclaimed":       storageStats.Recompression.BytesReclaimed,
 					"last_run":              storageStats.Recompression.LastRun,
 				},
+				"projection": storageStats.Projection,
 			},
 		},
 		"version": s.version,
