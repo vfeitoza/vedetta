@@ -189,6 +189,21 @@ func TestFormatDuration(t *testing.T) {
 // --- JSON API handler tests ---
 
 func TestHandleHealth(t *testing.T) {
+	// Mock OpenH264 as available so the detection check doesn't flip the
+	// overall status to "degraded" on CI runners that don't have libopenh264.
+	oldStatus := openH264StatusInfo
+	t.Cleanup(func() {
+		openH264StatusInfo = oldStatus
+	})
+	openH264StatusInfo = func() media.OpenH264Status {
+		return media.OpenH264Status{
+			Supported: true,
+			Available: true,
+			Installed: true,
+			Version:   "2.6.0",
+		}
+	}
+
 	srv, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -216,6 +231,57 @@ func TestHandleHealth(t *testing.T) {
 	ct := w.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	// Verify the detection check is present and reflects the mocked state.
+	checks, _ := body["checks"].(map[string]any)
+	detection, _ := checks["detection"].(map[string]any)
+	if detection == nil {
+		t.Fatal("response missing 'checks.detection' key")
+	}
+	if detection["state"] != "ok" {
+		t.Errorf("detection.state = %q, want %q", detection["state"], "ok")
+	}
+	if detection["openh264_loaded"] != true {
+		t.Errorf("detection.openh264_loaded = %v, want true", detection["openh264_loaded"])
+	}
+}
+
+func TestHandleHealthDegradedWhenDetectionUnavailable(t *testing.T) {
+	// When OpenH264 is unavailable, the detection check should report
+	// 'disabled' and the overall status should be 'degraded'.
+	oldStatus := openH264StatusInfo
+	t.Cleanup(func() {
+		openH264StatusInfo = oldStatus
+	})
+	openH264StatusInfo = func() media.OpenH264Status {
+		return media.OpenH264Status{
+			Supported: true,
+			Available: false,
+			Error:     "library not found",
+		}
+	}
+
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "degraded" {
+		t.Errorf("status = %q, want %q", body["status"], "degraded")
+	}
+	checks, _ := body["checks"].(map[string]any)
+	detection, _ := checks["detection"].(map[string]any)
+	if detection["state"] != "disabled" {
+		t.Errorf("detection.state = %q, want %q", detection["state"], "disabled")
+	}
+	if detection["reason"] == nil {
+		t.Error("expected detection.reason when detection is disabled")
 	}
 }
 
