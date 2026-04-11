@@ -48,6 +48,15 @@ func withTokenPrincipal(r *http.Request, username string) *http.Request {
 	return r.WithContext(ctx)
 }
 
+// withProxyPrincipal injects a proxy-kind principal — the form Vedetta sees
+// when a request arrives via a trusted reverse proxy (Authelia + Caddy). Push
+// endpoints must accept this kind so the PWA works in that deployment.
+func withProxyPrincipal(r *http.Request, username string) *http.Request {
+	p := &auth.Principal{Username: username, Kind: auth.AuthKindProxy}
+	ctx := context.WithValue(r.Context(), principalContextKey{}, p)
+	return r.WithContext(ctx)
+}
+
 // noopSender satisfies notify.Sender without making network calls. Tests
 // that only care about the handler-side path wire this so the dispatcher
 // can be constructed without a live push service.

@@ -195,6 +195,45 @@ func TestPushEndpoints_RejectMissingPrincipal(t *testing.T) {
 	}
 }
 
+// TestPushEndpoints_AcceptProxyPrincipal verifies that push endpoints
+// accept the proxy-kind principal Vedetta produces when authenticated
+// upstream by a trusted reverse proxy (Authelia + Caddy). This is the
+// deployment pattern in the vedetta.am8.nl homelab setup: without proxy
+// acceptance, the PWA would get 403 on every push API call.
+func TestPushEndpoints_AcceptProxyPrincipal(t *testing.T) {
+	srv, db := newTestServerWithUser(t, "alice")
+	srv.SetNotifier(newNoopDispatcherForTest(t, db))
+
+	// ListPushSubscriptions: read path, should succeed for proxy principal.
+	req := httptest.NewRequest(http.MethodGet, "/api/push/subscriptions", nil)
+	req = withProxyPrincipal(req, "alice")
+	rec := httptest.NewRecorder()
+	srv.ListPushSubscriptions(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListPushSubscriptions with proxy principal: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// GetVAPIDPublicKey: read path, should succeed for proxy principal.
+	req = httptest.NewRequest(http.MethodGet, "/api/push/vapid-public-key", nil)
+	req = withProxyPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.GetVAPIDPublicKey(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetVAPIDPublicKey with proxy principal: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// CreatePushSubscription: write path, should also succeed for proxy
+	// principal (proxy = real human, just authenticated upstream).
+	body := `{"endpoint":"` + testEndpoint + `","keys":{"p256dh":"` + testP256dh + `","auth":"` + testAuth + `"}}`
+	req = httptest.NewRequest(http.MethodPost, "/api/push/subscriptions", strings.NewReader(body))
+	req = withProxyPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.CreatePushSubscription(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("CreatePushSubscription with proxy principal: expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListPushSubscriptions_OnlyOwnSubs(t *testing.T) {
 	srv, db := newTestServerWithUsers(t, "alice", "bob")
 
@@ -519,7 +558,7 @@ func TestTestPush_NoNotifier(t *testing.T) {
 func TestPushRoutes_RegisteredOnMux(t *testing.T) {
 	// Proves Task 14: each push route is reachable via s.mux, not just via
 	// direct handler calls. We inject a session principal on the request
-	// context so the push handlers' requireSession check passes — the mux
+	// context so the push handlers' requireInteractiveUser check passes — the mux
 	// itself doesn't run auth middleware in tests, matching the pattern
 	// used by handler_cameras_manage_test.go.
 	srv, db := newTestServerWithUser(t, "alice")

@@ -11,14 +11,21 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-// requireSession enforces explicit session-principal auth on push endpoints.
-// Token and proxy principals are rejected — a push subscription belongs to a
-// human with a browser, and the CSRF protection the push flow relies on only
-// applies to session principals.
-func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*auth.Principal, bool) {
+// requireInteractiveUser enforces that the caller is a real human browsing
+// the UI, not a long-lived API token. Session cookies (direct Vedetta login)
+// and proxy principals (authenticated upstream by Authelia/equivalent via a
+// trusted Remote-User header) are both accepted. Bearer API tokens are
+// rejected — push subscriptions are per-device and per-human; giving a
+// service token the ability to register or manipulate them would let an
+// automation silently route notifications to arbitrary endpoints.
+func (s *Server) requireInteractiveUser(w http.ResponseWriter, r *http.Request) (*auth.Principal, bool) {
 	p := principalFromContext(r.Context())
-	if p == nil || p.Kind != auth.AuthKindSession {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "session auth required"})
+	if p == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "authentication required"})
+		return nil, false
+	}
+	if p.Kind != auth.AuthKindSession && p.Kind != auth.AuthKindProxy {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "interactive user authentication required (not API token)"})
 		return nil, false
 	}
 	return p, true
@@ -27,7 +34,7 @@ func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*auth.P
 // GetVAPIDPublicKey returns the server's VAPID public key so the browser's
 // service worker can construct a PushSubscription.
 func (s *Server) GetVAPIDPublicKey(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireSession(w, r); !ok {
+	if _, ok := s.requireInteractiveUser(w, r); !ok {
 		return
 	}
 	if s.notifier == nil {
@@ -49,7 +56,7 @@ type subscriptionBody struct {
 // CreatePushSubscription registers a new browser push subscription for the
 // authenticated user. Endpoint and keys are validated before persisting.
 func (s *Server) CreatePushSubscription(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
@@ -92,7 +99,7 @@ func (s *Server) CreatePushSubscription(w http.ResponseWriter, r *http.Request) 
 // raw endpoint and keys are never returned — only metadata the user needs
 // to identify and manage their devices.
 func (s *Server) ListPushSubscriptions(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
@@ -122,7 +129,7 @@ func (s *Server) ListPushSubscriptions(w http.ResponseWriter, r *http.Request) {
 // 404 — the spec deliberately refuses to distinguish "not yours" from
 // "not found" to avoid leaking existence to other users.
 func (s *Server) DeletePushSubscription(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
@@ -155,7 +162,7 @@ type prefsResponse struct {
 // cameras map is seeded with all known (camera, class) pairs as enabled,
 // then flipped false for any explicit disable rows from notification_prefs.
 func (s *Server) GetPushPrefs(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
@@ -201,7 +208,7 @@ func (s *Server) GetPushPrefs(w http.ResponseWriter, r *http.Request) {
 // and cooldown seconds live in kv_store; per-(camera,class) rows live in
 // notification_prefs.
 func (s *Server) PutPushPrefs(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
@@ -240,7 +247,7 @@ func (s *Server) PutPushPrefs(w http.ResponseWriter, r *http.Request) {
 // with subscriptions — acceptable for v1 because the test button is an
 // admin-ish action triggered explicitly by an operator.
 func (s *Server) TestPush(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.requireSession(w, r)
+	p, ok := s.requireInteractiveUser(w, r)
 	if !ok {
 		return
 	}
