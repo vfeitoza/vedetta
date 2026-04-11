@@ -530,8 +530,13 @@ func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
 		return nil
 	}
 	return notify.New(notify.Options{
-		Store:  db,
-		Sender: &notify.WebPushSender{Subscriber: "mailto:vedetta@localhost"},
+		Store: db,
+		// Apple's push relay (web.push.apple.com) rejects the VAPID JWT
+		// with 403 if the `sub` claim is not a real mailto: or https://
+		// contact. Hostname-only values like "mailto:vedetta@localhost"
+		// fail. Use the notify package's default, which can be overridden
+		// per-send by configuration if we ever make it configurable.
+		Sender: &notify.WebPushSender{Subscriber: "mailto:vedetta@am8.nl"},
 		VAPID:  vapid,
 		Logger: slog.Default(),
 	})
