@@ -2070,6 +2070,27 @@ func (d *DB) DeleteSetting(key string) error {
 	return err
 }
 
+// GetKV reads a kv_store row, distinguishing missing keys from empty values.
+// Wrapper that makes *DB satisfy notify.KVStore without forcing callers to
+// reason about GetSetting's "empty string on missing" contract.
+func (d *DB) GetKV(key string) (string, bool, error) {
+	var val string
+	err := d.db.QueryRow("SELECT value FROM kv_store WHERE key = ?", key).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return val, true, nil
+}
+
+// SetKV upserts a kv_store row. Equivalent to SetSetting; exists so that
+// *DB satisfies notify.KVStore with symmetric naming.
+func (d *DB) SetKV(key, value string) error {
+	return d.SetSetting(key, value)
+}
+
 // SetCameraStopped marks a camera as stopped (true) or running (false) in the kv_store.
 func (d *DB) SetCameraStopped(name string, stopped bool) error {
 	key := "camera_stopped:" + name
