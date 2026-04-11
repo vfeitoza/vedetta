@@ -616,3 +616,50 @@ func TestTestPush_NoCameras(t *testing.T) {
 		t.Fatalf("expected 412 with no cameras, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestGetMetrics_IncludesNotifyCounters verifies the /metrics endpoint
+// emits notify-dispatcher Prometheus counters once a dispatcher is wired
+// into the server. Without this plumbing, operators lose visibility into
+// push queue depth, delivery failures, and cooldown suppression.
+func TestGetMetrics_IncludesNotifyCounters(t *testing.T) {
+	srv, db := newTestServerWithUser(t, "alice")
+	srv.SetNotifier(newNoopDispatcherForTest(t, db))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.GetMetrics(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	wantMetrics := []string{
+		"vedetta_notify_events_received_total",
+		"vedetta_notify_push_send_total",
+		"vedetta_notify_queue_depth_gauge",
+	}
+	for _, name := range wantMetrics {
+		if !strings.Contains(body, name) {
+			t.Errorf("/metrics body missing %q\nbody:\n%s", name, body)
+		}
+	}
+}
+
+// TestGetMetrics_NoNotifier_NoCounters verifies the /metrics endpoint
+// does not crash or emit notify counters when no dispatcher is wired
+// (VAPID load failure or push disabled).
+func TestGetMetrics_NoNotifier_NoCounters(t *testing.T) {
+	srv, _ := newTestServerWithUser(t, "alice")
+	// notifier intentionally left nil
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.GetMetrics(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: expected 200, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "vedetta_notify_") {
+		t.Errorf("/metrics should not contain notify counters when dispatcher is nil:\n%s", rec.Body.String())
+	}
+}
