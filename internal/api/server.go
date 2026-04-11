@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -263,6 +264,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "running"})
 	})
+
+	// Ensure .webmanifest files are served with the correct Content-Type.
+	// mime.AddExtensionType is process-global and idempotent; http.FileServer
+	// consults the mime package lazily on first request.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 
 	// Serve static files at root
 	staticSub, err := fs.Sub(staticFiles, "static")
