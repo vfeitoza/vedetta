@@ -336,8 +336,26 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	var outSPS, outPPS []byte
 	var seqNum uint32 = 1
 
-	// Allocate encoder I/O structs once and reuse across all GOP iterations.
-	// See the per-GOP comment below for the rationale for using [N]byte backing.
+	// GC-SAFE ENCODER I/O BUFFERS — DO NOT "SIMPLIFY" TO TYPED STRUCTS.
+	//
+	// OpenH264 writes C-owned pointers (PBsBuf, PNalLengthInByte) into the
+	// SFrameBSInfo struct, and we write Go-owned Pinner-pinned pointers
+	// (PData[0..2]) into SSourcePicture. If either struct is allocated as
+	// its Go type, those fields appear in the GC pointer bitmap and the
+	// concurrent GC (Go 1.26+) will scan them during marking.
+	//
+	// For SFrameBSInfo the scanned pointers are C-owned addresses that
+	// look like they might be inside the Go heap; the GC calls findObject
+	// on them and crashes with "found pointer to free object" or "found
+	// bad pointer in Go heap", or the process gets SIGKILLed.
+	//
+	// By allocating the structs as [N]byte arrays, the GC bitmap for the
+	// allocation is all zeros — no words are ever scanned as pointers, no
+	// matter where the memory lives (stack or heap). We cast to the typed
+	// pointer only for field writes; Go's GC scans allocations by their
+	// original type metadata, not by what pointers later alias them.
+	//
+	// Regression test: TestTranscodeSegment_Fixture in transcoder_real_test.go.
 	var encSrcPicBuf [unsafe.Sizeof(openh264.SSourcePicture{})]byte
 	var encInfoBuf [unsafe.Sizeof(openh264.SFrameBSInfo{})]byte
 
