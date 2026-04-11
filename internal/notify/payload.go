@@ -3,6 +3,7 @@ package notify
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/rvben/vedetta/internal/camera"
 )
@@ -27,7 +28,7 @@ type pushPayload struct {
 // unauthenticated fetches, which iOS silently treats as "no image".
 func BuildPayload(ev camera.Event, signer *SnapshotSigner) []byte {
 	p := pushPayload{
-		Title: ev.CameraName,
+		Title: friendlyCameraName(ev.CameraName),
 		Body:  fmt.Sprintf("%s detected · %s UTC", titleCase(ev.Label), ev.Timestamp.UTC().Format("15:04")),
 		URL:   fmt.Sprintf("/event.html?id=%s", ev.ID),
 		Tag:   fmt.Sprintf("%s:%s", ev.CameraName, ev.Label),
@@ -47,6 +48,24 @@ func BuildPayload(ev camera.Event, signer *SnapshotSigner) []byte {
 		data, _ = json.Marshal(p)
 	}
 	return data
+}
+
+// friendlyCameraName turns a config-level camera identifier like
+// "kids_bedroom_3" or "front_door" into a display string suitable for a
+// notification title: "Kids Bedroom 3", "Front Door". Numeric suffixes
+// stay numeric. This is a cosmetic fallback — a future DisplayName
+// field in CameraConfig should take priority once it exists.
+func friendlyCameraName(name string) string {
+	if name == "" {
+		return name
+	}
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-'
+	})
+	for i, part := range parts {
+		parts[i] = titleCase(part)
+	}
+	return strings.Join(parts, " ")
 }
 
 // titleCase uppercases the first byte of an ASCII word. Good enough for

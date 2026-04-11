@@ -21,7 +21,7 @@ func newTestSigner(t *testing.T) *SnapshotSigner {
 func TestBuildPayload_WithSnapshot(t *testing.T) {
 	ev := camera.Event{
 		ID:                "front-t91-1712847123456",
-		CameraName:        "front",
+		CameraName:        "front_door",
 		Label:             "person",
 		Score:             0.87,
 		Timestamp:         time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC),
@@ -34,8 +34,10 @@ func TestBuildPayload_WithSnapshot(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got["title"] != "front" {
-		t.Errorf("title = %v", got["title"])
+	// Title should be the friendly form of the camera name — underscores
+	// become spaces, each word title-cased. "front_door" → "Front Door".
+	if got["title"] != "Front Door" {
+		t.Errorf("title = %v, want %q", got["title"], "Front Door")
 	}
 	if !strings.Contains(got["body"].(string), "Person") || !strings.Contains(got["body"].(string), "18:42 UTC") {
 		t.Errorf("body = %v", got["body"])
@@ -52,7 +54,10 @@ func TestBuildPayload_WithSnapshot(t *testing.T) {
 	if !strings.Contains(image, "e=") || !strings.Contains(image, "s=") {
 		t.Errorf("image URL missing e= or s= params: %v", image)
 	}
-	if got["tag"] != "front:person" {
+	// Tag is a deduplication key used by showNotification() — keep the
+	// raw camera name so distinct cameras never collide in the OS
+	// notification stack, regardless of the friendly title.
+	if got["tag"] != "front_door:person" {
 		t.Errorf("tag = %v", got["tag"])
 	}
 }
@@ -110,5 +115,22 @@ func TestTitleCase(t *testing.T) {
 	}
 	if titleCase("") != "" {
 		t.Fatalf("expected empty, got %q", titleCase(""))
+	}
+}
+
+func TestFriendlyCameraName(t *testing.T) {
+	cases := map[string]string{
+		"front_door":     "Front Door",
+		"kids_bedroom_3": "Kids Bedroom 3",
+		"garage":         "Garage",
+		"driveway-east":  "Driveway East",
+		"":               "",
+		"A":              "A",
+		"back_YARD":      "Back YARD", // uppercase preserved, only first byte touched
+	}
+	for in, want := range cases {
+		if got := friendlyCameraName(in); got != want {
+			t.Errorf("friendlyCameraName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

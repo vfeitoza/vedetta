@@ -224,9 +224,40 @@ func (d *NotificationDispatcher) handleEvent(ctx context.Context, ev camera.Even
 	}
 	payload := BuildPayload(ev, d.snapshotSigner)
 
+	// Debug: log per-event payload characteristics so production pushes
+	// can be inspected without adding a decrypted body to the log stream.
+	d.logger.Info("push dispatch",
+		"event", ev.ID,
+		"camera", ev.CameraName,
+		"label", ev.Label,
+		"snapshot_available", ev.SnapshotAvailable,
+		"signer_configured", d.snapshotSigner != nil,
+		"payload_bytes", len(payload),
+		"has_image_field", bytesContainsImageField(payload),
+		"users", len(users),
+	)
+
 	for _, user := range users {
 		d.dispatchToUser(ctx, user, ev, payload)
 	}
+}
+
+// bytesContainsImageField returns true if the JSON payload includes a
+// non-empty "image" field. Cheap string scan — payloads are small JSON.
+func bytesContainsImageField(p []byte) bool {
+	s := string(p)
+	i := indexOfImageKey(s)
+	return i >= 0
+}
+
+func indexOfImageKey(s string) int {
+	for i := 0; i+8 <= len(s); i++ {
+		if s[i] == '"' && s[i+1] == 'i' && s[i+2] == 'm' && s[i+3] == 'a' &&
+			s[i+4] == 'g' && s[i+5] == 'e' && s[i+6] == '"' && s[i+7] == ':' {
+			return i
+		}
+	}
+	return -1
 }
 
 func (d *NotificationDispatcher) dispatchToUser(ctx context.Context, user string, ev camera.Event, payload []byte) {
