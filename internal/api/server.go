@@ -250,6 +250,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/system/codecs/openh264", s.GetOpenH264Status)
 	s.mux.HandleFunc("POST /api/system/codecs/openh264/install", s.InstallOpenH264)
 
+	// Push notification endpoints
+	s.mux.HandleFunc("GET /api/push/vapid-public-key", s.GetVAPIDPublicKey)
+	s.mux.HandleFunc("POST /api/push/subscriptions", s.CreatePushSubscription)
+	s.mux.HandleFunc("GET /api/push/subscriptions", s.ListPushSubscriptions)
+	s.mux.HandleFunc("DELETE /api/push/subscriptions/{id}", s.DeletePushSubscription)
+	s.mux.HandleFunc("GET /api/push/prefs", s.GetPushPrefs)
+	s.mux.HandleFunc("PUT /api/push/prefs", s.PutPushPrefs)
+	s.mux.HandleFunc("POST /api/push/test", s.TestPush)
+
 	// Setup status endpoint (returns "running" in normal mode)
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "running"})

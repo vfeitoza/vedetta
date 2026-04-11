@@ -516,6 +516,91 @@ func TestTestPush_NoNotifier(t *testing.T) {
 	}
 }
 
+func TestPushRoutes_RegisteredOnMux(t *testing.T) {
+	// Proves Task 14: each push route is reachable via s.mux, not just via
+	// direct handler calls. We inject a session principal on the request
+	// context so the push handlers' requireSession check passes — the mux
+	// itself doesn't run auth middleware in tests, matching the pattern
+	// used by handler_cameras_manage_test.go.
+	srv, db := newTestServerWithUser(t, "alice")
+	srv.SetCameraNames([]string{"front_door"})
+
+	// GET /api/push/subscriptions (empty list)
+	req := httptest.NewRequest(http.MethodGet, "/api/push/subscriptions", nil)
+	req = withSessionPrincipal(req, "alice")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/push/subscriptions: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// GET /api/push/prefs
+	req = httptest.NewRequest(http.MethodGet, "/api/push/prefs", nil)
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/push/prefs: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// POST /api/push/subscriptions
+	body := map[string]any{
+		"endpoint": testEndpoint,
+		"keys":     map[string]string{"p256dh": testP256dh, "auth": testAuth},
+	}
+	jb, _ := json.Marshal(body)
+	req = httptest.NewRequest(http.MethodPost, "/api/push/subscriptions", bytes.NewReader(jb))
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /api/push/subscriptions: expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// DELETE /api/push/subscriptions/{id} — uses PathValue via the mux
+	subs, _ := db.ListPushSubscriptionsByUser("alice")
+	if len(subs) != 1 {
+		t.Fatalf("expected 1 sub seeded via mux, got %d", len(subs))
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/push/subscriptions/"+strconv.FormatInt(subs[0].ID, 10), nil)
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /api/push/subscriptions/{id}: expected 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// PUT /api/push/prefs
+	pb := prefsResponse{Muted: false, CooldownSeconds: 180, Cameras: map[string]map[string]bool{}}
+	pjb, _ := json.Marshal(pb)
+	req = httptest.NewRequest(http.MethodPut, "/api/push/prefs", bytes.NewReader(pjb))
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT /api/push/prefs: expected 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// GET /api/push/vapid-public-key (notifier is nil → 503, but the route
+	// must still exist and hit the handler rather than returning 404).
+	req = httptest.NewRequest(http.MethodGet, "/api/push/vapid-public-key", nil)
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /api/push/vapid-public-key: expected 503 (no notifier), got %d", rec.Code)
+	}
+
+	// POST /api/push/test (same — notifier nil → 503, proving route wiring)
+	req = httptest.NewRequest(http.MethodPost, "/api/push/test", nil)
+	req = withSessionPrincipal(req, "alice")
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /api/push/test: expected 503 (no notifier), got %d", rec.Code)
+	}
+}
+
 func TestTestPush_NoCameras(t *testing.T) {
 	srv, db := newTestServerWithUser(t, "alice")
 	// Install a no-op notifier so we reach the camera check.
