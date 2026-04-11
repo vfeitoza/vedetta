@@ -286,9 +286,17 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`data-render-detection-overlay="true">` +
 			`</div>` +
 			`{{else}}<img id="event-snapshot" src="/api/cameras/{{.CameraName}}/snapshot" alt="event">{{end}}` +
-			`{{if .HasRecording}}<div class="play-overlay" id="play-overlay" data-action-click="playEventRecording(this, '{{.CameraName}}', '{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}')">` +
+			// Prefer the pre-generated per-event clip (a plain MP4 file)
+			// over the HLS re-segmenter path when both are available. The
+			// clip plays natively in every browser including iOS Safari;
+			// the HLS path splits multi-track moofs into single-track for
+			// MSE/hls.js compatibility, which iOS's native HLS decoder
+			// rejects with a silent black-frame failure. For longer
+			// scrub-through-history viewing, the sidebar still offers
+			// "View in Recording" which opens the camera playback page.
+			`{{if .ClipAvailable}}<div class="play-overlay" id="play-overlay" data-action-click="playEventClip(this, '{{.ID}}')">` +
 			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
-			`</div>{{else if .ClipAvailable}}<div class="play-overlay" id="play-overlay" data-action-click="playEventClip(this, '{{.ID}}')">` +
+			`</div>{{else if .HasRecording}}<div class="play-overlay" id="play-overlay" data-action-click="playEventRecording(this, '{{.CameraName}}', '{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}')">` +
 			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
 			`</div>{{end}}` +
 			`</div>` +
