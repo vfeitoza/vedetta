@@ -2329,3 +2329,23 @@ func (d *DB) ListNotificationPrefs(username string) ([]NotificationPref, error) 
 	}
 	return out, rows.Err()
 }
+
+// ListAllUsernames returns every username in auth_users. Used by the
+// notification dispatcher to iterate subscribers without pulling password
+// hashes into memory (unlike ListAuthUsers).
+func (d *DB) ListAllUsernames() ([]string, error) {
+	rows, err := d.db.Query(`SELECT username FROM auth_users ORDER BY username`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
