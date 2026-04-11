@@ -2330,11 +2330,17 @@ func (d *DB) ListNotificationPrefs(username string) ([]NotificationPref, error) 
 	return out, rows.Err()
 }
 
-// ListAllUsernames returns every username in auth_users. Used by the
-// notification dispatcher to iterate subscribers without pulling password
-// hashes into memory (unlike ListAuthUsers).
+// ListAllUsernames returns every username that has at least one push
+// subscription. It is the source of truth for the notification dispatcher's
+// per-event fanout loop.
+//
+// Deliberately NOT "SELECT username FROM auth_users": push subscriptions
+// can belong to users authenticated by any source (direct session, reverse-
+// proxy Remote-User, bearer token), and those usernames do not all appear
+// in auth_users. Iterating push_subscriptions directly also avoids doing
+// pref/mute/cooldown work for users who aren't subscribed.
 func (d *DB) ListAllUsernames() ([]string, error) {
-	rows, err := d.db.Query(`SELECT username FROM auth_users ORDER BY username`)
+	rows, err := d.db.Query(`SELECT DISTINCT username FROM push_subscriptions ORDER BY username`)
 	if err != nil {
 		return nil, err
 	}
