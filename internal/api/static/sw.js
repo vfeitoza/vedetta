@@ -37,12 +37,21 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || '/';
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      for (const w of wins) {
-        if (w.url.endsWith(url) && 'focus' in w) return w.focus();
-      }
-      return clients.openWindow(url);
-    })
-  );
+  event.waitUntil((async () => {
+    const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // If an existing window is already at the target URL, just focus it.
+    for (const w of wins) {
+      if (w.url.endsWith(url) && 'focus' in w) return w.focus();
+    }
+    // If ANY client is open, focus it and tell it to navigate. On iOS
+    // inside a standalone PWA, clients.openWindow() focuses the existing
+    // window without navigating — this postMessage is the workaround.
+    if (wins.length > 0 && 'focus' in wins[0]) {
+      await wins[0].focus();
+      wins[0].postMessage({ type: 'notify-navigate', url: url });
+      return;
+    }
+    // No clients — open a fresh window.
+    return clients.openWindow(url);
+  })());
 });

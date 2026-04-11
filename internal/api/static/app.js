@@ -4177,3 +4177,16 @@ function bindPTZControls(cameraName) {
     if (cb && !cb.checked) cb.checked = true;
   });
 })();
+
+// ---------- Service worker → page navigation bridge ----------
+// The SW's notificationclick handler posts a {type:"notify-navigate",url}
+// message when we need to navigate the already-open PWA window. iOS
+// ignores clients.openWindow() in standalone mode.
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'notify-navigate' && e.data.url) {
+      window.location.href = e.data.url;
+    }
+  });
+})();
