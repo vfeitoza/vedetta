@@ -1445,8 +1445,8 @@ func TestPushSubscriptionCRUD(t *testing.T) {
 
 	// Delete by id + user (wrong user)
 	err = db.DeletePushSubscription(id, "bob")
-	if err != ErrNotFound {
-		t.Fatalf("expected ErrNotFound for wrong-user delete, got %v", err)
+	if err != ErrPushSubscriptionNotFound {
+		t.Fatalf("expected ErrPushSubscriptionNotFound for wrong-user delete, got %v", err)
 	}
 
 	// Delete by id + user (right user)

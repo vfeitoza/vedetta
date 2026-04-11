@@ -2133,7 +2133,7 @@ type PushSubscription struct {
 }
 
 var (
-	ErrNotFound                 = errors.New("not found")
+	ErrPushSubscriptionNotFound = errors.New("push subscription not found")
 	ErrSubscriptionOwnedByOther = errors.New("push subscription endpoint already registered to another user")
 )
 
@@ -2218,7 +2218,7 @@ func (d *DB) ListPushSubscriptionsByUser(username string) ([]PushSubscription, e
 }
 
 // DeletePushSubscription removes a subscription by id, but only if it belongs to username.
-// Returns ErrNotFound if no row matches.
+// Returns ErrPushSubscriptionNotFound if no row matches.
 func (d *DB) DeletePushSubscription(id int64, username string) error {
 	res, err := d.db.Exec(`DELETE FROM push_subscriptions WHERE id = ? AND username = ?`, id, username)
 	if err != nil {
@@ -2226,7 +2226,7 @@ func (d *DB) DeletePushSubscription(id int64, username string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrNotFound
+		return ErrPushSubscriptionNotFound
 	}
 	return nil
 }
