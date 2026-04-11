@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -40,6 +41,7 @@ type NotificationDispatcher struct {
 	sender   Sender
 	vapid    *VAPID
 	cooldown *CooldownCache
+	backoff  *CooldownCache
 	metrics  *Metrics
 	logger   *slog.Logger
 	window   time.Duration
@@ -83,6 +85,7 @@ func New(opts Options) *NotificationDispatcher {
 		sender:   opts.Sender,
 		vapid:    opts.VAPID,
 		cooldown: NewCooldownCache(opts.CooldownWindow, nil),
+		backoff:  NewCooldownCache(60*time.Second, nil),
 		metrics:  opts.Metrics,
 		logger:   opts.Logger,
 		window:   opts.CooldownWindow,
@@ -163,6 +166,7 @@ func (d *NotificationDispatcher) sweepLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			d.cooldown.Sweep()
+			d.backoff.Sweep()
 			if n, err := d.store.CountPushSubscriptions(); err == nil {
 				d.metrics.SubscriptionCount.Store(int64(n))
 			}
@@ -244,22 +248,20 @@ func (d *NotificationDispatcher) dispatchToUser(ctx context.Context, user string
 	// a total failure (all 5xx or timeout) should not suppress the retry
 	// opportunity on the next event.
 	anySuccess := false
-	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 
 	for _, sub := range subs {
-		// Per-endpoint backoff map (shared with the cooldown cache). 429s
-		// set this key so subsequent events skip the offending endpoint
-		// until its backoff window expires.
-		backoffKey := "backoff:" + sub.Endpoint
-		if d.cooldown.Check(backoffKey) {
+		// Per-endpoint 60s backoff. 429s set this key so subsequent events
+		// skip the offending endpoint until its backoff window expires.
+		if d.backoff.Check(sub.Endpoint) {
 			continue
 		}
+		sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		result := d.sender.Send(sendCtx, Subscription{
 			Endpoint: sub.Endpoint,
 			P256dh:   sub.P256dh,
 			Auth:     sub.Auth,
 		}, payload, d.vapid)
+		cancel()
 		d.recordResult(result, sub.Endpoint)
 		switch {
 		case result.Status >= 200 && result.Status < 300:
@@ -269,7 +271,7 @@ func (d *NotificationDispatcher) dispatchToUser(ctx context.Context, user string
 				d.logger.Error("prune sub", "error", err)
 			}
 		case result.Status == 429:
-			d.cooldown.Mark(backoffKey)
+			d.backoff.Mark(sub.Endpoint)
 		}
 	}
 	if anySuccess {
@@ -282,6 +284,7 @@ func (d *NotificationDispatcher) recordResult(r SendResult, endpoint string) {
 	switch {
 	case r.Timeout:
 		d.metrics.PushSendTimeout.Add(1)
+		d.logger.Warn("push send timeout", "endpoint_host", hostOnly(endpoint))
 	case r.Err != nil:
 		d.metrics.PushSendError.Add(1)
 		d.logger.Warn("push send error",
@@ -319,6 +322,9 @@ type WebPushSender struct {
 // than exceptions, so the dispatcher can make pruning decisions without
 // inspecting error types.
 func (w *WebPushSender) Send(ctx context.Context, sub Subscription, payload []byte, vapid *VAPID) SendResult {
+	if vapid == nil {
+		return SendResult{Err: errors.New("webpush: vapid is nil")}
+	}
 	subscriber := w.Subscriber
 	if subscriber == "" {
 		subscriber = "mailto:vedetta@localhost"
