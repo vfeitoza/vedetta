@@ -88,9 +88,33 @@ func isPublicPath(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodGet && r.URL.Path == "/api/openapi.json":
 		return true
+	// PWA assets that browsers must be able to fetch without a prior session:
+	//   - manifest.webmanifest: read by Safari during Add to Home Screen before any login.
+	//   - sw.js: navigator.serviceWorker.register rejects the SW on any redirect.
+	//   - icon-*.png / badge-72.png: referenced from the manifest and from <head>
+	//     apple-touch-icon; iOS fetches them without cookies in some paths.
+	// None of these contain secrets; serving them anonymously is safe.
+	case r.Method == http.MethodGet && r.URL.Path == "/manifest.webmanifest":
+		return true
+	case r.Method == http.MethodGet && r.URL.Path == "/sw.js":
+		return true
+	case r.Method == http.MethodGet && isPWAIconPath(r.URL.Path):
+		return true
 	default:
 		return false
 	}
+}
+
+// isPWAIconPath reports whether the path is one of the PWA icon assets that
+// must be fetchable without authentication. Keep this list in sync with
+// internal/api/static/manifest.webmanifest and the apple-touch-icon link tags
+// in the HTML pages.
+func isPWAIconPath(path string) bool {
+	switch path {
+	case "/icon-180.png", "/icon-192.png", "/icon-512.png", "/icon-512-maskable.png", "/badge-72.png":
+		return true
+	}
+	return false
 }
 
 func handleUnauthorized(w http.ResponseWriter, r *http.Request) {
