@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -483,20 +485,57 @@ func (mc *mseConsumer) removeClient(c *mseClient) int {
 type MSEManager struct {
 	hub            *rtsp.Hub
 	allowedOrigins []string
+	trustedProxies []netip.Prefix
 	mu             sync.Mutex
 	consumers      map[string]*mseConsumer
 }
 
 // NewMSEManager creates an MSE manager.
-func NewMSEManager(hub *rtsp.Hub, allowedOrigins []string) *MSEManager {
+func NewMSEManager(hub *rtsp.Hub, allowedOrigins, trustedProxies []string) *MSEManager {
 	return &MSEManager{
 		hub:            hub,
 		allowedOrigins: append([]string(nil), allowedOrigins...),
+		trustedProxies: parseTrustedProxies(trustedProxies),
 		consumers:      make(map[string]*mseConsumer),
 	}
 }
 
-func originAllowed(r *http.Request, allowedOrigins []string) bool {
+func parseTrustedProxies(values []string) []netip.Prefix {
+	result := make([]netip.Prefix, 0, len(values))
+	for _, value := range values {
+		if prefix, err := netip.ParsePrefix(value); err == nil {
+			result = append(result, prefix)
+			continue
+		}
+		if addr, err := netip.ParseAddr(value); err == nil {
+			result = append(result, netip.PrefixFrom(addr, addr.BitLen()))
+		}
+	}
+	return result
+}
+
+func remoteAddrMatchesTrustedProxy(remoteAddr string, trusted []netip.Prefix) bool {
+	if len(trusted) == 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, prefix := range trusted {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func originAllowed(r *http.Request, allowedOrigins []string, trustedProxies []netip.Prefix) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		return true
@@ -511,6 +550,10 @@ func originAllowed(r *http.Request, allowedOrigins []string) bool {
 	reqScheme := "http"
 	if r.TLS != nil {
 		reqScheme = "https"
+	} else if remoteAddrMatchesTrustedProxy(r.RemoteAddr, trustedProxies) {
+		if fp := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); fp != "" {
+			reqScheme = strings.ToLower(fp)
+		}
 	}
 	if strings.EqualFold(normalized, reqScheme+"://"+r.Host) {
 		return true
@@ -570,7 +613,7 @@ func (m *MSEManager) removeConsumerIfEmpty(rtspURL string, expected *mseConsumer
 func (m *MSEManager) HandleWebSocket(w http.ResponseWriter, r *http.Request, cameraName, rtspURL string) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(req *http.Request) bool {
-			return originAllowed(req, m.allowedOrigins)
+			return originAllowed(req, m.allowedOrigins, m.trustedProxies)
 		},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)

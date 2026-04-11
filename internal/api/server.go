@@ -351,7 +351,7 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 	s.recorder = recorder
 	s.hub = hub
 	s.streams = stream.NewStreamManager(hub)
-	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins)
+	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins, s.config.TrustedProxies)
 	s.faceRecognizer = faceRecognizer
 	s.objectEmbedder = objectEmbedder
 	s.snapshotPath = snapshotPath
