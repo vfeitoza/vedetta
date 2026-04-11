@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/rvben/vedetta/internal/camera"
 )
 
@@ -300,6 +301,55 @@ func (d *NotificationDispatcher) recordResult(r SendResult, endpoint string) {
 		d.logger.Warn("push send unexpected status",
 			"endpoint_host", hostOnly(endpoint), "status", r.Status)
 	}
+}
+
+// WebPushSender is the production Sender that calls webpush-go. The
+// dispatcher owns its lifetime; tests substitute a fakeSender.
+type WebPushSender struct {
+	// Subscriber is the VAPID "sub" claim, typically "mailto:admin@example.com".
+	// Set from config; if empty, uses "mailto:vedetta@localhost".
+	Subscriber string
+	// TTLSeconds overrides the default 60s if non-zero. Push services use
+	// TTL to decide how long to hold an undelivered message.
+	TTLSeconds int
+}
+
+// Send implements Sender by calling webpush.SendNotificationWithContext.
+// Transport errors and context deadlines are surfaced via SendResult rather
+// than exceptions, so the dispatcher can make pruning decisions without
+// inspecting error types.
+func (w *WebPushSender) Send(ctx context.Context, sub Subscription, payload []byte, vapid *VAPID) SendResult {
+	subscriber := w.Subscriber
+	if subscriber == "" {
+		subscriber = "mailto:vedetta@localhost"
+	}
+	ttl := w.TTLSeconds
+	if ttl == 0 {
+		ttl = 60
+	}
+	ws := &webpush.Subscription{
+		Endpoint: sub.Endpoint,
+		Keys: webpush.Keys{
+			P256dh: sub.P256dh,
+			Auth:   sub.Auth,
+		},
+	}
+	opts := &webpush.Options{
+		VAPIDPublicKey:  vapid.PublicKey(),
+		VAPIDPrivateKey: vapid.PrivateKey(),
+		Subscriber:      subscriber,
+		TTL:             ttl,
+		Urgency:         webpush.UrgencyHigh,
+	}
+	resp, err := webpush.SendNotificationWithContext(ctx, payload, ws, opts)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return SendResult{Timeout: true, Err: err}
+		}
+		return SendResult{Err: err}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return SendResult{Status: resp.StatusCode}
 }
 
 // hostOnly extracts the host portion of an endpoint URL without pulling in
