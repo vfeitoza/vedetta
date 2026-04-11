@@ -226,6 +226,26 @@ func migrate(db *sql.DB) error {
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS push_subscriptions (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			username    TEXT    NOT NULL REFERENCES auth_users(username) ON DELETE CASCADE,
+			endpoint    TEXT    NOT NULL UNIQUE,
+			p256dh      TEXT    NOT NULL,
+			auth        TEXT    NOT NULL,
+			user_agent  TEXT,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_seen   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(username);
+
+		CREATE TABLE IF NOT EXISTS notification_prefs (
+			username     TEXT NOT NULL,
+			camera       TEXT NOT NULL,
+			object_class TEXT NOT NULL,
+			enabled      BOOLEAN NOT NULL DEFAULT 1,
+			PRIMARY KEY (username, camera, object_class)
+		);
 	`)
 	if err != nil {
 		return err
@@ -2091,4 +2111,10 @@ func decodeZonePoints(z *camera.Zone, pointsJSON string) error {
 		{z.X1, z.Y2},
 	}
 	return nil
+}
+
+// Raw returns the underlying *sql.DB for tests that need to seed or inspect rows directly.
+// Production code should not use this.
+func (d *DB) Raw() *sql.DB {
+	return d.db
 }

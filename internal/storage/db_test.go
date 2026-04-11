@@ -1355,3 +1355,30 @@ func TestCameraStoppedState(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPushSubscriptionsTable(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("seed auth_users: %v", err)
+	}
+	_, err = db.Raw().Exec(`INSERT INTO push_subscriptions (username, endpoint, p256dh, auth, user_agent) VALUES (?, ?, ?, ?, ?)`,
+		"alice", "https://fcm.googleapis.com/fcm/send/abc", "pubkey", "authsecret", "iPhone")
+	if err != nil {
+		t.Fatalf("insert push_subscription: %v", err)
+	}
+}
+
+func TestNotificationPrefsTable(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("seed auth_users: %v", err)
+	}
+	_, err = db.Raw().Exec(`INSERT INTO notification_prefs (username, camera, object_class, enabled) VALUES ('alice', 'front', 'person', 0)`)
+	if err != nil {
+		t.Fatalf("insert pref: %v", err)
+	}
+}
