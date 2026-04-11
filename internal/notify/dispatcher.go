@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -27,10 +28,13 @@ type Subscription struct {
 
 // SendResult categorizes the outcome of a single Send call. Status is the
 // HTTP status code from the push service, 0 on transport/timeout error.
+// Body holds the response body on non-2xx responses, truncated to 4KB,
+// so the dispatcher can surface push service error messages in logs.
 type SendResult struct {
 	Status  int
 	Err     error
 	Timeout bool
+	Body    string
 }
 
 // NotificationDispatcher consumes confirmed-track events and fans out web
@@ -292,7 +296,7 @@ func (d *NotificationDispatcher) recordResult(r SendResult, endpoint string) {
 	case r.Status == 401 || r.Status == 403:
 		d.metrics.PushSend401.Add(1)
 		d.logger.Error("push send 401/403",
-			"endpoint_host", hostOnly(endpoint), "status", r.Status)
+			"endpoint_host", hostOnly(endpoint), "status", r.Status, "body", r.Body)
 	case r.Status == 410 || r.Status == 404:
 		d.metrics.PushSend410.Add(1)
 	case r.Status == 429:
@@ -302,7 +306,7 @@ func (d *NotificationDispatcher) recordResult(r SendResult, endpoint string) {
 	default:
 		d.metrics.PushSendError.Add(1)
 		d.logger.Warn("push send unexpected status",
-			"endpoint_host", hostOnly(endpoint), "status", r.Status)
+			"endpoint_host", hostOnly(endpoint), "status", r.Status, "body", r.Body)
 	}
 }
 
@@ -355,6 +359,14 @@ func (w *WebPushSender) Send(ctx context.Context, sub Subscription, payload []by
 		return SendResult{Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// Capture response body on non-2xx so the dispatcher can surface it
+	// in logs — push services (especially Apple) return text bodies that
+	// explain WHY a VAPID JWT was rejected, and hiding them turns
+	// debugging into archaeology.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return SendResult{Status: resp.StatusCode, Body: string(body)}
+	}
 	return SendResult{Status: resp.StatusCode}
 }
 
