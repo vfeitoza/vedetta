@@ -230,7 +230,7 @@ func migrate(db *sql.DB) error {
 
 		CREATE TABLE IF NOT EXISTS push_subscriptions (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			username    TEXT    NOT NULL REFERENCES auth_users(username) ON DELETE CASCADE,
+			username    TEXT    NOT NULL,
 			endpoint    TEXT    NOT NULL UNIQUE,
 			p256dh      TEXT    NOT NULL,
 			auth        TEXT    NOT NULL,

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -89,9 +90,11 @@ func (s *Server) CreatePushSubscription(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
+		slog.Error("push subscribe: save failed", "username", p.Username, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	slog.Info("push subscribe: registered", "username", p.Username, "id", id, "user_agent", body.UserAgent)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
