@@ -3486,8 +3486,26 @@ function playEventRecording(overlay, cameraName, timestamp) {
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
-  video.src = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback?start=' + encodeURIComponent(timestamp);
   media.appendChild(video);
+
+  // The playback endpoint returns an HLS m3u8 playlist. Safari/iOS plays
+  // HLS natively from a <video src>; other browsers need hls.js to wrap
+  // it via MSE. Mirrors the live-camera playback path in this same file.
+  var url = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback.m3u8?start=' + encodeURIComponent(timestamp);
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    var hls = new Hls({ maxBufferLength: 60 });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      if (data.fatal) {
+        console.error('event recording HLS error', data.type, data.details);
+        hls.destroy();
+      }
+    });
+  } else {
+    video.src = url;
+  }
 }
 
 // ─── Zones ───
