@@ -14,18 +14,46 @@ import (
 )
 
 type Config struct {
-	Cameras    []CameraConfig   `yaml:"cameras"`
-	Detect     DetectConfig     `yaml:"detect"`
-	Recording  RecordingConfig  `yaml:"recording"`
-	Events     EventConfig      `yaml:"events"`
-	Storage    StorageConfig    `yaml:"storage"`
-	MQTT       MQTTConfig       `yaml:"mqtt"`
-	API        APIConfig        `yaml:"api"`
-	RTSPServer RTSPServerConfig `yaml:"rtsp_server"`
-	Auth       AuthConfig       `yaml:"auth"`
-	Updates    UpdateConfig     `yaml:"updates"`
-	Codecs     CodecsConfig     `yaml:"codecs"`
+	Cameras       []CameraConfig      `yaml:"cameras"`
+	Detect        DetectConfig        `yaml:"detect"`
+	Recording     RecordingConfig     `yaml:"recording"`
+	Events        EventConfig         `yaml:"events"`
+	Storage       StorageConfig       `yaml:"storage"`
+	MQTT          MQTTConfig          `yaml:"mqtt"`
+	API           APIConfig           `yaml:"api"`
+	RTSPServer    RTSPServerConfig    `yaml:"rtsp_server"`
+	Auth          AuthConfig          `yaml:"auth"`
+	Updates       UpdateConfig        `yaml:"updates"`
+	Codecs        CodecsConfig        `yaml:"codecs"`
+	Notifications NotificationsConfig `yaml:"notifications"`
 }
+
+// NotificationsConfig controls web push notification delivery.
+type NotificationsConfig struct {
+	// VAPIDSubscriber is the contact identifier embedded in every VAPID
+	// JWT as the `sub` claim, per RFC 8292. The push service operator
+	// (Apple, Google, Mozilla) uses it to reach the application server
+	// operator in case of abuse.
+	//
+	// Must be EITHER:
+	//   - a raw email address: "admin@example.com" (webpush-go will
+	//     prepend "mailto:" itself; do NOT include the scheme)
+	//   - an https:// URL: "https://vedetta.example.com/contact"
+	//
+	// Apple's push relay rejects the JWT with HTTP 403 BadJwtToken if
+	// the value is not a well-formed mailto or https form — values like
+	// "vedetta@localhost" fail because the domain is not routable.
+	//
+	// Defaults to "admin@example.com" with a startup warning, which
+	// parses on all push services but should be replaced in production.
+	VAPIDSubscriber string `yaml:"vapid_subscriber"`
+}
+
+// DefaultVAPIDSubscriber is the fallback used when NotificationsConfig
+// does not specify one. "example.com" is IANA-reserved for documentation,
+// parses cleanly on every push service, and is a visible marker that the
+// operator has not configured their real contact.
+const DefaultVAPIDSubscriber = "admin@example.com"
 
 // CodecsConfig controls optional external codec behavior.
 type CodecsConfig struct {

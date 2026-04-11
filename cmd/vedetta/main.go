@@ -137,7 +137,7 @@ func main() {
 		sub := initSubsystems(ctx, cancel, cfg, db)
 		defer closeSubsystems(sub)
 
-		sub.notifier = setupNotifier(db)
+		sub.notifier = setupNotifier(db, cfg)
 		wireNotifier(ctx, server, sub.notifier, cfg)
 
 		// Reconcile event media availability with the filesystem
@@ -238,7 +238,7 @@ func main() {
 	sub := initSubsystems(ctx, cancel, cfg, db)
 	defer closeSubsystems(sub)
 
-	sub.notifier = setupNotifier(db)
+	sub.notifier = setupNotifier(db, cfg)
 	wireNotifier(ctx, server, sub.notifier, cfg)
 
 	runEventLoop(ctx, cfg, db, sub, server)
@@ -523,7 +523,7 @@ func ensureOpenH264(ctx context.Context, cfg *config.Config) {
 // load fails (corrupt keys, storage error), push notifications are disabled
 // and nil is returned — the rest of Vedetta continues to start. Handlers
 // already guard on a nil dispatcher and return 503 for push endpoints.
-func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
+func setupNotifier(db *storage.DB, cfg *config.Config) *notify.NotificationDispatcher {
 	vapid, err := notify.LoadOrGenerateVAPID(db)
 	if err != nil {
 		slog.Error("push notifications disabled: vapid load failed", "error", err)
@@ -534,17 +534,18 @@ func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
 		slog.Error("push notifications disabled: snapshot signer load failed", "error", err)
 		return nil
 	}
+	// Resolve the VAPID subscriber. webpush-go's getVAPIDAuthorizationHeader
+	// prepends "mailto:" to any value that does not start with "https:", so
+	// pass a raw email or an https URL — never a pre-formed "mailto:" URI.
+	subscriber := cfg.Notifications.VAPIDSubscriber
+	if subscriber == "" {
+		subscriber = config.DefaultVAPIDSubscriber
+		slog.Warn("notifications.vapid_subscriber is unset; using placeholder — set a real contact in config.yml before production use",
+			"default", subscriber)
+	}
 	return notify.New(notify.Options{
-		Store: db,
-		// webpush-go's getVAPIDAuthorizationHeader prepends "mailto:" to
-		// any subscriber that doesn't start with "https:". Passing a raw
-		// email address produces a valid `sub` claim; passing
-		// "mailto:foo@bar" produces `mailto:mailto:foo@bar` which Apple
-		// rejects as BadJwtToken.
-		//
-		// TODO(notify): make this a config field (notifications.vapid_subscriber)
-		// so other Vedetta operators don't ship with my contact baked in.
-		Sender:         &notify.WebPushSender{Subscriber: "vedetta@am8.nl"},
+		Store:          db,
+		Sender:         &notify.WebPushSender{Subscriber: subscriber},
 		VAPID:          vapid,
 		SnapshotSigner: signer,
 		Logger:         slog.Default(),
