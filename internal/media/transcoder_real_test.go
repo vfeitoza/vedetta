@@ -1,11 +1,33 @@
 package media
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+	"time"
 )
+
+// ensureOpenH264ForTest loads OpenH264 if already available, otherwise
+// downloads and installs it via the same mechanism the server uses at
+// startup (InstallOpenH264). This lets the fixture test run in CI on
+// runners that don't have libopenh264 installed at the system level.
+func ensureOpenH264ForTest(t *testing.T) {
+	t.Helper()
+	if ensureOpenH264() {
+		return
+	}
+	t.Log("OpenH264 not loaded; attempting install")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	status, err := InstallOpenH264(ctx)
+	if err != nil {
+		t.Skipf("OpenH264 install failed (skipping, not a test failure): %v", err)
+	}
+	if !status.Available {
+		t.Skipf("OpenH264 install reported unavailable after install")
+	}
+}
 
 // TestTranscodeSegment_Fixture is the regression test for the Go 1.26
 // GC memory safety bug in the encoder call path. It runs against a
@@ -23,20 +45,7 @@ import (
 // I/O by replacing the [N]byte backing pattern with a typed struct
 // value, this test will catch it.
 func TestTranscodeSegment_Fixture(t *testing.T) {
-	if runtime.GOOS == "linux" && os.Getenv("CI") != "" {
-		// On Linux CI without libopenh264 installed, ensureOpenH264
-		// will return false and we'd skip anyway. This check saves
-		// the ~30s it takes to attempt install.
-		if _, err := os.Stat("/usr/lib/x86_64-linux-gnu/libopenh264.so.7"); err != nil {
-			if _, err2 := os.Stat("/usr/lib/x86_64-linux-gnu/libopenh264.so"); err2 != nil {
-				t.Skip("libopenh264 not installed on CI runner")
-			}
-		}
-	}
-
-	if !ensureOpenH264() {
-		t.Skip("OpenH264 not available")
-	}
+	ensureOpenH264ForTest(t)
 
 	// Copy fixture to a temp location — TranscodeSegment rewrites the
 	// file in place, so we must not touch the committed testdata copy.
