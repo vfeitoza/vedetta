@@ -19,6 +19,7 @@ import (
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/notify"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/storage"
@@ -79,6 +80,14 @@ type Server struct {
 	objectRematchPending map[int64]bool
 	faceBackfillRunning  atomic.Bool
 	objectRematchFn      func(int64)
+
+	// Push notification dispatcher and cached camera names. notifier is nil
+	// when push is disabled (e.g. VAPID setup failed or operator opted out);
+	// cameraNamesCached is populated by main.go after config load so the
+	// prefs handler can render the full (camera × class) grid without
+	// walking the live camera.Manager on every request.
+	notifier          *notify.NotificationDispatcher
+	cameraNamesCached []string
 
 	// ctx is the application lifetime context (cancelled on shutdown).
 	ctx context.Context
@@ -321,6 +330,20 @@ func (s *Server) SetDetector(d *detect.Detector) {
 
 func (s *Server) SetRecordingConfig(cfg config.RecordingConfig) {
 	s.recordingConfig = cfg
+}
+
+// SetNotifier wires the push notification dispatcher. May be called with nil
+// to keep push disabled — for example, when VAPID setup failed but the
+// operator still wants the rest of the API to come up.
+func (s *Server) SetNotifier(n *notify.NotificationDispatcher) {
+	s.notifier = n
+}
+
+// SetCameraNames caches the list of configured camera names used by the
+// push preferences handler to seed its (camera × class) response grid.
+// Called from main.go after config load.
+func (s *Server) SetCameraNames(names []string) {
+	s.cameraNamesCached = append([]string(nil), names...)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
