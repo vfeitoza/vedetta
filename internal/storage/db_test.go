@@ -1463,3 +1463,61 @@ func TestPushSubscriptionCRUD(t *testing.T) {
 		t.Fatalf("delete by endpoint: %v", err)
 	}
 }
+
+func TestNotificationPrefsCRUD(t *testing.T) {
+	db := newTestDB(t)
+	_, _ = db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+
+	// Default: no rows → IsNotificationEnabled returns true for any (camera, class)
+	enabled, err := db.IsNotificationEnabled("alice", "front", "person")
+	if err != nil {
+		t.Fatalf("enabled: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("default should be enabled")
+	}
+
+	// Opt out specific (camera, class)
+	if err := db.SetNotificationPref("alice", "front", "person", false); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	enabled, _ = db.IsNotificationEnabled("alice", "front", "person")
+	if enabled {
+		t.Fatalf("expected disabled")
+	}
+	// Sibling class still enabled
+	enabled, _ = db.IsNotificationEnabled("alice", "front", "car")
+	if !enabled {
+		t.Fatalf("sibling class should still be enabled")
+	}
+
+	// Wildcard disable beats specific enable
+	_ = db.SetNotificationPref("alice", "back", "*", false)
+	_ = db.SetNotificationPref("alice", "back", "person", true)
+	enabled, _ = db.IsNotificationEnabled("alice", "back", "person")
+	if enabled {
+		t.Fatalf("wildcard disable should beat specific enable")
+	}
+
+	// List all prefs.
+	// Only two disabled rows are stored: (front,person,0) and (back,*,0).
+	// The (back,person,true) call above is a no-op because the sparse-table
+	// contract stores only disabled rows — a request to enable something
+	// that's already default-enabled DELETEs any existing row (there is none).
+	list, err := db.ListNotificationPrefs("alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(list))
+	}
+
+	// Re-setting to default (enabled=true) should remove the row to keep the table sparse
+	_ = db.SetNotificationPref("alice", "front", "person", true)
+	list, _ = db.ListNotificationPrefs("alice")
+	for _, p := range list {
+		if p.Camera == "front" && p.ObjectClass == "person" {
+			t.Fatalf("expected row to be removed when reset to default, got %+v", p)
+		}
+	}
+}
