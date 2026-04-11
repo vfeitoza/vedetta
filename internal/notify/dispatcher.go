@@ -331,7 +331,9 @@ func (w *WebPushSender) Send(ctx context.Context, sub Subscription, payload []by
 	}
 	subscriber := w.Subscriber
 	if subscriber == "" {
-		subscriber = "mailto:vedetta@localhost"
+		// webpush-go prepends "mailto:" itself for non-https subscribers.
+		// Pass a raw email; the library handles the scheme.
+		subscriber = "vedetta@localhost"
 	}
 	ttl := w.TTLSeconds
 	if ttl == 0 {

@@ -531,12 +531,15 @@ func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
 	}
 	return notify.New(notify.Options{
 		Store: db,
-		// Apple's push relay (web.push.apple.com) rejects the VAPID JWT
-		// with 403 if the `sub` claim is not a real mailto: or https://
-		// contact. Hostname-only values like "mailto:vedetta@localhost"
-		// fail. Use the notify package's default, which can be overridden
-		// per-send by configuration if we ever make it configurable.
-		Sender: &notify.WebPushSender{Subscriber: "mailto:vedetta@am8.nl"},
+		// webpush-go's getVAPIDAuthorizationHeader prepends "mailto:" to
+		// any subscriber that doesn't start with "https:". Passing a raw
+		// email address produces a valid `sub` claim; passing
+		// "mailto:foo@bar" produces `mailto:mailto:foo@bar` which Apple
+		// rejects as BadJwtToken.
+		//
+		// TODO(notify): make this a config field (notifications.vapid_subscriber)
+		// so other Vedetta operators don't ship with my contact baked in.
+		Sender: &notify.WebPushSender{Subscriber: "vedetta@am8.nl"},
 		VAPID:  vapid,
 		Logger: slog.Default(),
 	})
