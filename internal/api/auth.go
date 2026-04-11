@@ -100,6 +100,11 @@ func isPublicPath(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodGet && isPWAIconPath(r.URL.Path):
 		return true
+	// Signed push-notification snapshot URLs. iOS fetches these without
+	// session cookies when rendering notification thumbnails; the handler
+	// itself enforces an HMAC signature check.
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/push/snapshot/"):
+		return true
 	default:
 		return false
 	}

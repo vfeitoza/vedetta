@@ -267,6 +267,34 @@ func (s *Server) TestPush(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// GetPushSnapshot serves an event snapshot bypassing session auth, gated
+// only by an HMAC signature in the query string. Used by iOS push
+// notification thumbnails, which iOS fetches without cookies in SW scope.
+// The signature is minted by the dispatcher when building the push
+// payload; see notify.SnapshotSigner.
+func (s *Server) GetPushSnapshot(w http.ResponseWriter, r *http.Request) {
+	if s.notifier == nil {
+		http.NotFound(w, r)
+		return
+	}
+	eventID := r.PathValue("id")
+	exp := r.URL.Query().Get("e")
+	sig := r.URL.Query().Get("s")
+	if err := s.notifier.VerifySnapshot(eventID, exp, sig); err != nil {
+		slog.Debug("push snapshot: bad signature", "event", eventID, "error", err)
+		http.NotFound(w, r)
+		return
+	}
+	ev, err := s.db.GetEventByID(eventID)
+	if err != nil || ev == nil || !ev.SnapshotAvailable || ev.SnapshotPath == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, ev.SnapshotPath)
+}
+
 // cameraNames returns the list of configured camera names used by the prefs
 // handler to seed the response. Populated by SetCameraNames at startup.
 func (s *Server) cameraNames() []string {
