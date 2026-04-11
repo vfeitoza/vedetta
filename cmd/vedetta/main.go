@@ -696,13 +696,18 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					"score", fmt.Sprintf("%.2f", event.Score),
 				)
 
-				if err := db.SaveEvent(event); err != nil {
-					slog.Error("failed to save event", "error", err)
+				saveErr := db.SaveEvent(event)
+				if saveErr != nil {
+					slog.Error("failed to save event", "error", saveErr)
 				} else if event.SnapshotImage != nil && event.SnapshotPath != "" {
 					if err := snapshot.SaveSnapshot(event.SnapshotImage, event.SnapshotPath, cfg.Events.SnapshotQuality); err != nil {
 						slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
 					} else if err := db.UpdateEventSnapshotPath(event.ID, event.SnapshotPath); err != nil {
 						slog.Error("failed to persist event snapshot path", "event", event.ID, "error", err)
+					} else {
+						// Main.go is the authoritative setter of this bit for
+						// downstream consumers (MQTT publish, push dispatcher).
+						event.SnapshotAvailable = true
 					}
 				}
 
@@ -764,6 +769,14 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					event:      event,
 					timer:      timer,
 					tempCancel: tempCancel,
+				}
+
+				// Fan out to push notification subscribers. Enqueue is
+				// non-blocking and guarded by its own cooldown; we skip it
+				// only when the event failed to persist (saveErr != nil) so
+				// we never push an event users can't look up via the API.
+				if sub.notifier != nil && saveErr == nil {
+					sub.notifier.Enqueue(event)
 				}
 
 			case end := <-eventEnds:
