@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -2117,4 +2118,129 @@ func decodeZonePoints(z *camera.Zone, pointsJSON string) error {
 // Production code should not use this.
 func (d *DB) Raw() *sql.DB {
 	return d.db
+}
+
+// PushSubscription is a row in push_subscriptions.
+type PushSubscription struct {
+	ID        int64
+	Username  string
+	Endpoint  string
+	P256dh    string
+	Auth      string
+	UserAgent string
+	CreatedAt time.Time
+	LastSeen  time.Time
+}
+
+var (
+	ErrNotFound                 = errors.New("not found")
+	ErrSubscriptionOwnedByOther = errors.New("push subscription endpoint already registered to another user")
+)
+
+// SavePushSubscription inserts or updates a subscription.
+// If an existing row has the same endpoint:
+//   - owned by the same user: keys/user_agent are updated, last_seen bumped, same id returned.
+//   - owned by a different user: ErrSubscriptionOwnedByOther is returned.
+func (d *DB) SavePushSubscription(sub PushSubscription) (int64, error) {
+	var existingID int64
+	var existingUser string
+	err := d.db.QueryRow(`SELECT id, username FROM push_subscriptions WHERE endpoint = ?`, sub.Endpoint).
+		Scan(&existingID, &existingUser)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, err
+	}
+	if err == nil {
+		if existingUser != sub.Username {
+			return 0, ErrSubscriptionOwnedByOther
+		}
+		_, uerr := d.db.Exec(`
+			UPDATE push_subscriptions
+			   SET p256dh = ?, auth = ?, user_agent = ?, last_seen = CURRENT_TIMESTAMP
+			 WHERE id = ?`,
+			sub.P256dh, sub.Auth, nullString(sub.UserAgent), existingID)
+		if uerr != nil {
+			return 0, uerr
+		}
+		return existingID, nil
+	}
+	res, err := d.db.Exec(`
+		INSERT INTO push_subscriptions (username, endpoint, p256dh, auth, user_agent)
+		VALUES (?, ?, ?, ?, ?)`,
+		sub.Username, sub.Endpoint, sub.P256dh, sub.Auth, nullString(sub.UserAgent))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// FindPushSubscriptionByEndpoint returns the subscription with the given endpoint, or nil if none.
+func (d *DB) FindPushSubscriptionByEndpoint(endpoint string) (*PushSubscription, error) {
+	var s PushSubscription
+	var userAgent sql.NullString
+	err := d.db.QueryRow(`
+		SELECT id, username, endpoint, p256dh, auth, user_agent, created_at, last_seen
+		  FROM push_subscriptions WHERE endpoint = ?`, endpoint).
+		Scan(&s.ID, &s.Username, &s.Endpoint, &s.P256dh, &s.Auth, &userAgent, &s.CreatedAt, &s.LastSeen)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if userAgent.Valid {
+		s.UserAgent = userAgent.String
+	}
+	return &s, nil
+}
+
+// ListPushSubscriptionsByUser returns all subscriptions for the given user.
+func (d *DB) ListPushSubscriptionsByUser(username string) ([]PushSubscription, error) {
+	rows, err := d.db.Query(`
+		SELECT id, username, endpoint, p256dh, auth, user_agent, created_at, last_seen
+		  FROM push_subscriptions WHERE username = ? ORDER BY id`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushSubscription
+	for rows.Next() {
+		var s PushSubscription
+		var userAgent sql.NullString
+		if err := rows.Scan(&s.ID, &s.Username, &s.Endpoint, &s.P256dh, &s.Auth, &userAgent, &s.CreatedAt, &s.LastSeen); err != nil {
+			return nil, err
+		}
+		if userAgent.Valid {
+			s.UserAgent = userAgent.String
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DeletePushSubscription removes a subscription by id, but only if it belongs to username.
+// Returns ErrNotFound if no row matches.
+func (d *DB) DeletePushSubscription(id int64, username string) error {
+	res, err := d.db.Exec(`DELETE FROM push_subscriptions WHERE id = ? AND username = ?`, id, username)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeletePushSubscriptionByEndpoint removes a subscription by endpoint, regardless of owner.
+// Used by the dispatcher to prune after 404/410 responses from the push service.
+func (d *DB) DeletePushSubscriptionByEndpoint(endpoint string) error {
+	_, err := d.db.Exec(`DELETE FROM push_subscriptions WHERE endpoint = ?`, endpoint)
+	return err
+}
+
+// CountPushSubscriptions returns the total number of push subscriptions across all users.
+func (d *DB) CountPushSubscriptions() (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM push_subscriptions`).Scan(&n)
+	return n, err
 }

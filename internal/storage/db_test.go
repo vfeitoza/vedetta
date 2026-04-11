@@ -1382,3 +1382,84 @@ func TestNotificationPrefsTable(t *testing.T) {
 		t.Fatalf("insert pref: %v", err)
 	}
 }
+
+func TestPushSubscriptionCRUD(t *testing.T) {
+	db := newTestDB(t)
+
+	_, _ = db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash'), ('bob', 'hash')`)
+
+	// Insert
+	id, err := db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/a", P256dh: "k1", Auth: "a1", UserAgent: "iPhone",
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if id == 0 {
+		t.Fatalf("expected nonzero id")
+	}
+
+	// Find by endpoint
+	got, err := db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got == nil || got.Username != "alice" || got.ID != id {
+		t.Fatalf("unexpected subscription: %+v", got)
+	}
+
+	// Upsert same endpoint, same user → same id, updated keys
+	id2, err := db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/a", P256dh: "k2", Auth: "a2", UserAgent: "iPad",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("expected id %d, got %d", id, id2)
+	}
+	got, _ = db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if got.P256dh != "k2" || got.UserAgent != "iPad" {
+		t.Fatalf("upsert did not overwrite fields: %+v", got)
+	}
+
+	// Upsert same endpoint, different user → ErrSubscriptionOwnedByOther
+	_, err = db.SavePushSubscription(PushSubscription{
+		Username: "bob", Endpoint: "https://push.example/a", P256dh: "k3", Auth: "a3",
+	})
+	if err != ErrSubscriptionOwnedByOther {
+		t.Fatalf("expected ErrSubscriptionOwnedByOther, got %v", err)
+	}
+
+	// List by user
+	_, _ = db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/b", P256dh: "k", Auth: "a",
+	})
+	list, err := db.ListPushSubscriptionsByUser("alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 subs, got %d", len(list))
+	}
+
+	// Delete by id + user (wrong user)
+	err = db.DeletePushSubscription(id, "bob")
+	if err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound for wrong-user delete, got %v", err)
+	}
+
+	// Delete by id + user (right user)
+	if err := db.DeletePushSubscription(id, "alice"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, _ = db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if got != nil {
+		t.Fatalf("expected nil after delete, got %+v", got)
+	}
+
+	// Delete by endpoint (used by dispatcher on 410)
+	if err := db.DeletePushSubscriptionByEndpoint("https://push.example/b"); err != nil {
+		t.Fatalf("delete by endpoint: %v", err)
+	}
+}
