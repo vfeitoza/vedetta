@@ -517,6 +517,15 @@ func grabThumbnailRTSP(rtspURL string, quality int) ([]byte, error) {
 
 	result := make(chan []byte, 1)
 	errCh := make(chan error, 1)
+
+	// SetupAll must run before OnPacketRTPAny: gortsplib binds packet
+	// handlers to the RTSP session created in SetupAll, and some peers
+	// (notably Tapo C200) drop packets delivered to handlers attached
+	// before the session exists.
+	if err := client.SetupAll(desc.BaseURL, desc.Medias); err != nil {
+		return nil, fmt.Errorf("RTSP setup: %w", err)
+	}
+
 	client.OnPacketRTPAny(func(_ *description.Media, _ format.Format, pkt *rtp.Packet) {
 		au, decErr := rtpDecoder.Decode(pkt)
 		if decErr != nil {
@@ -591,10 +600,6 @@ func grabThumbnailRTSP(rtspURL string, quality int) ([]byte, error) {
 		default:
 		}
 	})
-
-	if err := client.SetupAll(desc.BaseURL, desc.Medias); err != nil {
-		return nil, fmt.Errorf("RTSP setup: %w", err)
-	}
 
 	if _, err := client.Play(nil); err != nil {
 		return nil, fmt.Errorf("RTSP play: %w", err)
