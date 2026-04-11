@@ -165,9 +165,15 @@ var allowedDataActionFunctions = new Set([
   'togglePiP',
   'toggleTheme',
   'updateThreshold',
+  'addNewCamera',
+  'closeAddCameraModal',
+  'deleteCamSettings',
+  'openAddCameraModal',
   'removeCam',
   'saveCam',
+  'saveCamSettings',
   'toggleCam',
+  'toggleCamSettings',
   'zoneCancelDraw',
   'zoneDelete',
   'zoneFormCancel',
@@ -2227,7 +2233,7 @@ document.addEventListener('keydown', function(e) {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/recordings.html'; }
       break;
     case '4':
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/system.html'; }
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/settings.html'; }
       break;
   }
 });

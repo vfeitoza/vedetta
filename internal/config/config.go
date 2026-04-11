@@ -72,16 +72,16 @@ func (c CameraConfig) DetectEnabled() bool {
 }
 
 type StreamConfig struct {
-	Width  int `yaml:"width"`
-	Height int `yaml:"height"`
-	FPS    int `yaml:"fps"`
+	Width  int `yaml:"width" json:"width"`
+	Height int `yaml:"height" json:"height"`
+	FPS    int `yaml:"fps" json:"fps"`
 }
 
 type DetectStreamConfig struct {
-	Width   int   `yaml:"width"`
-	Height  int   `yaml:"height"`
-	FPS     int   `yaml:"fps"`
-	Enabled *bool `yaml:"enabled"`
+	Width   int   `yaml:"width" json:"width"`
+	Height  int   `yaml:"height" json:"height"`
+	FPS     int   `yaml:"fps" json:"fps"`
+	Enabled *bool `yaml:"enabled" json:"enabled"`
 }
 
 type Zone struct {

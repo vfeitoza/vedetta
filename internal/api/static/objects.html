@@ -8,21 +8,6 @@
   <meta name="theme-color" content="#0a0e14">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="apple-touch-icon" href="/favicon.svg">
-  <style>
-    .object-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem; }
-    .object-header { display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem; }
-    .object-thumb { width:80px; height:80px; border-radius:var(--radius); background:var(--surface); background-size:cover; background-position:center; flex-shrink:0; }
-    .object-info { flex:1; }
-    .object-name { font-size:1.1rem; font-weight:600; }
-    .object-meta { font-size:var(--text-sm); color:var(--text-tertiary); margin-top:0.25rem; }
-    .object-refs { display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem; }
-    .ref-thumb { width:100px; height:80px; border-radius:var(--radius-sm); background:var(--surface); background-size:cover; background-position:center; border:2px solid transparent; cursor:pointer; position:relative; }
-    .ref-thumb:hover { border-color:var(--accent); }
-    .ref-delete { position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--danger); color:#fff; border:none; font-size:11px; line-height:18px; text-align:center; cursor:pointer; display:none; }
-    .ref-thumb:hover .ref-delete { display:block; }
-    .object-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:1rem; }
-    .empty-state { color:var(--text-tertiary); padding:2rem; text-align:center; }
-  </style>
 </head>
 <body>
 
@@ -37,7 +22,6 @@
       <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
       <a href="/people.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
       <a href="/objects.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
-      <a href="/system.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
       <a href="/settings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
     </div>
     <button class="btn btn-icon btn-ghost" data-action-click="toggleTheme()" aria-label="Toggle theme" title="Toggle dark/light theme" id="theme-toggle">
@@ -45,7 +29,7 @@
       <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
     </button>
     <div class="topnav-spacer"></div>
-    <a href="/system.html" class="conn-status" title="System health"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></a>
+    <a href="/settings.html" class="conn-status" title="System health"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></a>
   </nav>
 
   <main class="page">
@@ -53,19 +37,20 @@
       <h1>Tracked Objects</h1>
     </div>
 
-    <div id="objects-grid" class="object-grid">
-      <div class="empty-state">Loading...</div>
+    <div id="objects-grid" class="system-grid">
+      <div class="loading-state">Loading...</div>
     </div>
   </main>
 
   <nav class="bottom-tabs" role="navigation" aria-label="Bottom">
-    <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
-    <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
-    <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
-    <a href="/people.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
-    <a href="/objects.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
-    <a href="/system.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>System</a>
-    <a href="/settings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+    <div class="bottom-tabs-inner">
+      <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
+      <a href="/people.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
+      <a href="/objects.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
+      <a href="/settings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+    </div>
   </nav>
 
   <!-- Confirm Modal -->
@@ -92,7 +77,7 @@
 
     function loadObjects() {
       fetch('/api/objects').then(function(r) { return r.json(); }).then(function(data) {
-        objectsData = data.items || data || [];
+        objectsData = (data && data.items) || data || [];
         renderObjects();
       });
     }
@@ -100,33 +85,54 @@
     function renderObjects() {
       var grid = document.getElementById('objects-grid');
       if (!objectsData.length) {
-        grid.innerHTML = '<div class="empty-state">No tracked objects yet. Go to an event and click "Track as new" to start tracking an object.</div>';
+        grid.innerHTML = '<div class="sys-card"><div class="sys-card-body" style="text-align:center;color:var(--text-tertiary);padding:2rem">'
+          + 'No tracked objects yet. On any event, click <strong>Track as new</strong> to start tracking an object.'
+          + '</div></div>';
         return;
       }
 
       var html = '';
       objectsData.forEach(function(obj) {
-        html += '<div class="object-card" id="object-' + obj.id + '">'
-          + '<div class="object-header">'
-          + '<div class="object-thumb" style="' + (obj.crop_path ? 'background-image:url(/api/objects/' + obj.id + '/crop)' : '') + '"></div>'
-          + '<div class="object-info">'
-          + '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
-          + 'data-action-change="renameObject(' + obj.id + ', this.value)" data-action-focus="this.select()" '
-          + 'style="font-size:1.1rem;font-weight:600">'
-	          + '<div class="object-meta">' + escapeHtml(obj.label) + ' <span id="ref-count-' + obj.id + '"></span></div>'
-          + '<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem">'
-          + '<label style="font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">Threshold</label>'
-          + '<input type="range" min="0.3" max="0.95" step="0.05" value="' + (obj.match_threshold || 0.65) + '" '
-          + 'style="flex:1;accent-color:var(--accent)" '
-          + 'data-action-input="document.getElementById(\'thresh-val-' + obj.id + '\').textContent=this.value" '
-          + 'data-action-change="updateThreshold(' + obj.id + ', parseFloat(this.value))">'
-          + '<span id="thresh-val-' + obj.id + '" style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--text-secondary);min-width:2.5em">' + (obj.match_threshold || 0.65) + '</span>'
+        var thumbStyle = obj.crop_path
+          ? 'background-image:url(/api/objects/' + obj.id + '/crop)'
+          : '';
+        var threshold = (obj.match_threshold != null ? obj.match_threshold : 0.65);
+        html += '<div class="sys-card" id="object-' + obj.id + '">'
+          + '<div class="sys-card-header" style="gap:0.75rem;padding:0.75rem 1rem">'
+          +   '<div class="face-thumb" style="' + thumbStyle + '" aria-hidden="true"></div>'
+          +   '<div style="flex:1;min-width:0">'
+          +     '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
+          +       'data-action-change="renameObject(' + obj.id + ', this.value)" data-action-focus="this.select()">'
+          +     '<div style="display:flex;align-items:center;gap:0.375rem;margin-top:0.25rem;font-size:var(--text-xs);color:var(--text-tertiary)">'
+          +       '<span>' + escapeHtml(obj.label) + '</span>'
+          +       '<span>·</span>'
+          +       '<span id="ref-count-' + obj.id + '">0 refs</span>'
+          +     '</div>'
+          +   '</div>'
+          +   '<button class="btn btn-icon btn-ghost" style="color:var(--danger);flex-shrink:0" '
+          +     'data-action-click="deleteObject(' + obj.id + ', ' + jsStringArg(obj.name) + ')" '
+          +     'aria-label="Delete object">'
+          +     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+          +   '</button>'
           + '</div>'
+          + '<div class="sys-card-body" style="padding:0.75rem 1rem">'
+          +   '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">'
+          +     '<label style="font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">Match threshold</label>'
+          +     '<input type="range" min="0.3" max="0.95" step="0.05" value="' + threshold + '" '
+          +       'style="flex:1;accent-color:var(--accent)" '
+          +       'data-action-input="document.getElementById(\'thresh-val-' + obj.id + '\').textContent=this.value" '
+          +       'data-action-change="updateThreshold(' + obj.id + ', parseFloat(this.value))">'
+          +     '<span id="thresh-val-' + obj.id + '" style="font-size:var(--text-xs);font-family:var(--font-mono);color:var(--text-secondary);min-width:2.5em;text-align:right">' + threshold + '</span>'
+          +   '</div>'
+          +   '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-bottom:0.375rem">References</div>'
+          +   '<div class="face-grid" id="refs-' + obj.id + '" style="margin-bottom:0.875rem">'
+          +     '<div style="font-size:var(--text-xs);color:var(--text-tertiary)">Loading...</div>'
+          +   '</div>'
+          +   '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-bottom:0.375rem">Recent sightings</div>'
+          +   '<div id="sightings-' + obj.id + '" style="font-size:var(--text-sm);color:var(--text-secondary)">'
+          +     '<span style="color:var(--text-tertiary)">Loading...</span>'
+          +   '</div>'
           + '</div>'
-	          + '<button class="btn btn-sm btn-ghost" style="color:var(--danger)" data-action-click="deleteObject(' + obj.id + ', ' + jsStringArg(obj.name) + ')">Delete</button>'
-          + '</div>'
-          + '<div class="object-refs" id="refs-' + obj.id + '">Loading references...</div>'
-          + '<div class="object-sightings" id="sightings-' + obj.id + '" style="margin-top:0.75rem;font-size:var(--text-sm);color:var(--text-tertiary)"></div>'
           + '</div>';
       });
       grid.innerHTML = html;
@@ -139,46 +145,49 @@
 
     function loadReferences(objectId) {
       fetch('/api/objects/' + objectId + '/references').then(function(r) { return r.json(); }).then(function(data) {
-        var refs = data.items || data || [];
+        var refs = (data && data.items) || data || [];
         var container = document.getElementById('refs-' + objectId);
         if (!container) return;
+        var countEl = document.getElementById('ref-count-' + objectId);
+        if (countEl) countEl.textContent = refs.length + (refs.length === 1 ? ' ref' : ' refs');
         if (!refs.length) {
-          container.innerHTML = '<span style="font-size:var(--text-sm);color:var(--text-tertiary)">No reference images</span>';
+          container.innerHTML = '<span style="font-size:var(--text-xs);color:var(--text-tertiary)">No references</span>';
           return;
         }
         var html = '';
         refs.forEach(function(ref) {
-	          var eventURL = ref.event_id ? '/event.html?id=' + encodeURIComponent(ref.event_id) : '';
-	          var clickAction = eventURL ? 'data-action-click="window.open(' + jsStringArg(eventURL) + ', \'_blank\')"' : '';
-          html += '<div class="ref-thumb" style="background-image:url(/api/objects/' + objectId + '/crop?ref=' + ref.id + ')" '
+          var eventURL = ref.event_id ? '/event.html?id=' + encodeURIComponent(ref.event_id) : '';
+          var clickAction = eventURL ? 'data-action-click="window.open(' + jsStringArg(eventURL) + ', \'_blank\')"' : '';
+          html += '<div class="face-thumb face-thumb--unmatched" '
+            + 'style="background-image:url(/api/objects/' + objectId + '/crop?ref=' + ref.id + ');position:relative" '
             + clickAction + ' title="' + (ref.event_id ? 'View source event' : 'Reference image') + '">'
-            + '<button class="ref-delete" data-action-click="event.stopPropagation();deleteReference(' + ref.id + ',' + objectId + ')" title="Remove reference">&times;</button>'
+            + '<button class="btn btn-icon btn-ghost" '
+            + 'style="position:absolute;top:-4px;right:-4px;width:18px;height:18px;min-width:0;padding:0;background:var(--danger);color:#fff;border-radius:50%;font-size:12px;line-height:1" '
+            + 'data-action-click="event.stopPropagation();deleteReference(' + ref.id + ',' + objectId + ')" title="Remove reference">×</button>'
             + '</div>';
         });
         container.innerHTML = html;
-        var countEl = document.getElementById('ref-count-' + objectId);
-        if (countEl) countEl.textContent = '· ' + refs.length + ' reference' + (refs.length !== 1 ? 's' : '');
       });
     }
 
     function loadSightings(objectId) {
       fetch('/api/objects/' + objectId + '/sightings?limit=10').then(function(r) { return r.json(); }).then(function(data) {
-        var sightings = data.items || data || [];
+        var sightings = (data && data.items) || data || [];
         var el = document.getElementById('sightings-' + objectId);
         if (!el) return;
         if (!sightings.length) {
-          el.innerHTML = '<span>No sightings yet</span>';
+          el.innerHTML = '<span style="color:var(--text-tertiary)">No sightings yet</span>';
           return;
         }
-        var html = '<div style="margin-top:0.25rem;font-weight:600;color:var(--text-secondary)">Recent Sightings (' + sightings.length + ')</div>';
+        var html = '';
         sightings.forEach(function(s) {
           var time = new Date(s.timestamp).toLocaleString();
           var sim = Math.round(s.similarity * 100) + '%';
           var simColor = s.similarity >= 0.8 ? 'var(--green)' : s.similarity >= 0.65 ? 'var(--amber)' : 'var(--danger)';
-          html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0">'
-	            + '<a href="/event.html?id=' + encodeURIComponent(s.event_id) + '" style="color:var(--accent);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(s.camera) + ' — ' + escapeHtml(time) + '</a>'
-            + '<span style="font-family:var(--font-mono);color:' + simColor + '">' + sim + '</span>'
-            + '<button class="btn btn-xs btn-ghost" style="color:var(--danger);padding:0 0.25rem;font-size:10px" data-action-click="dismissSighting(' + s.id + ',' + objectId + ')" title="Wrong match — dismiss">✕</button>'
+          html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0;border-top:1px solid var(--border-subtle)">'
+            + '<a href="/event.html?id=' + encodeURIComponent(s.event_id) + '" style="color:var(--text-primary);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-xs)">' + escapeHtml(s.camera) + ' · ' + escapeHtml(time) + '</a>'
+            + '<span style="font-family:var(--font-mono);font-size:var(--text-xs);color:' + simColor + '">' + sim + '</span>'
+            + '<button class="btn btn-icon btn-ghost btn-xs" style="color:var(--danger)" data-action-click="dismissSighting(' + s.id + ',' + objectId + ')" title="Wrong match — dismiss">×</button>'
             + '</div>';
         });
         el.innerHTML = html;
@@ -249,13 +258,13 @@
     }
 
     function escapeHtml(s) {
-      return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
     function escapeAttr(s) {
       return escapeHtml(s);
     }
     function jsStringArg(s) {
-      return escapeAttr(JSON.stringify(String(s || '')));
+      return escapeAttr(JSON.stringify(String(s == null ? '' : s)));
     }
 
     document.getElementById('confirm-backdrop').addEventListener('click', closeConfirmModal);
