@@ -148,8 +148,16 @@ func (s *Server) GetEventClip(w http.ResponseWriter, r *http.Request, id string)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "clip not found"})
 		return
 	}
-	filename := fmt.Sprintf("%s_%s.mp4", event.ID, event.Label)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	// Only set Content-Disposition: attachment when the client explicitly
+	// asks for a download (?download=1). The default is inline playback so
+	// a <video src="/api/events/<id>/clip"> element on the event detail
+	// page can actually render the clip — a hardcoded attachment header
+	// makes the browser treat the response as a file download and the
+	// video element stays black on iOS Safari.
+	if r.URL.Query().Get("download") == "1" {
+		filename := fmt.Sprintf("%s_%s.mp4", event.ID, event.Label)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
 	http.ServeFile(w, r, event.ClipPath)
 }
 
