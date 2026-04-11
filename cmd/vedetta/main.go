@@ -529,6 +529,11 @@ func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
 		slog.Error("push notifications disabled: vapid load failed", "error", err)
 		return nil
 	}
+	signer, err := notify.LoadOrGenerateSnapshotSigner(db)
+	if err != nil {
+		slog.Error("push notifications disabled: snapshot signer load failed", "error", err)
+		return nil
+	}
 	return notify.New(notify.Options{
 		Store: db,
 		// webpush-go's getVAPIDAuthorizationHeader prepends "mailto:" to
@@ -539,9 +544,10 @@ func setupNotifier(db *storage.DB) *notify.NotificationDispatcher {
 		//
 		// TODO(notify): make this a config field (notifications.vapid_subscriber)
 		// so other Vedetta operators don't ship with my contact baked in.
-		Sender: &notify.WebPushSender{Subscriber: "vedetta@am8.nl"},
-		VAPID:  vapid,
-		Logger: slog.Default(),
+		Sender:         &notify.WebPushSender{Subscriber: "vedetta@am8.nl"},
+		VAPID:          vapid,
+		SnapshotSigner: signer,
+		Logger:         slog.Default(),
 	})
 }
 

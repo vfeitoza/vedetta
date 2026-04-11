@@ -41,17 +41,18 @@ type SendResult struct {
 // push notifications. Callers call Start once and Enqueue per event. The
 // Enqueue path is non-blocking — the detection hot path must never stall.
 type NotificationDispatcher struct {
-	store    Store
-	sender   Sender
-	vapid    *VAPID
-	cooldown *CooldownCache
-	backoff  *CooldownCache
-	metrics  *Metrics
-	logger   *slog.Logger
-	window   time.Duration
-	jobs     chan camera.Event
-	workers  int
-	wg       sync.WaitGroup
+	store          Store
+	sender         Sender
+	vapid          *VAPID
+	snapshotSigner *SnapshotSigner
+	cooldown       *CooldownCache
+	backoff        *CooldownCache
+	metrics        *Metrics
+	logger         *slog.Logger
+	window         time.Duration
+	jobs           chan camera.Event
+	workers        int
+	wg             sync.WaitGroup
 }
 
 // Options bundles dispatcher construction params. Zero values fall back to
@@ -60,6 +61,7 @@ type Options struct {
 	Store          Store
 	Sender         Sender
 	VAPID          *VAPID
+	SnapshotSigner *SnapshotSigner // nil → payloads omit image URLs
 	Logger         *slog.Logger
 	CooldownWindow time.Duration // default 3 min
 	QueueCapacity  int           // default 256
@@ -85,17 +87,29 @@ func New(opts Options) *NotificationDispatcher {
 		opts.Logger = slog.Default()
 	}
 	return &NotificationDispatcher{
-		store:    opts.Store,
-		sender:   opts.Sender,
-		vapid:    opts.VAPID,
-		cooldown: NewCooldownCache(opts.CooldownWindow, nil),
-		backoff:  NewCooldownCache(60*time.Second, nil),
-		metrics:  opts.Metrics,
-		logger:   opts.Logger,
-		window:   opts.CooldownWindow,
-		jobs:     make(chan camera.Event, opts.QueueCapacity),
-		workers:  opts.Workers,
+		store:          opts.Store,
+		sender:         opts.Sender,
+		vapid:          opts.VAPID,
+		snapshotSigner: opts.SnapshotSigner,
+		cooldown:       NewCooldownCache(opts.CooldownWindow, nil),
+		backoff:        NewCooldownCache(60*time.Second, nil),
+		metrics:        opts.Metrics,
+		logger:         opts.Logger,
+		window:         opts.CooldownWindow,
+		jobs:           make(chan camera.Event, opts.QueueCapacity),
+		workers:        opts.Workers,
 	}
+}
+
+// VerifySnapshot validates a signed snapshot URL from the push
+// notification handler. Returns nil on success; any error means the
+// handler should 404. Push is disabled (nil signer) returns an error so
+// the handler can still 404 cleanly.
+func (d *NotificationDispatcher) VerifySnapshot(eventID, exp, sig string) error {
+	if d.snapshotSigner == nil {
+		return errors.New("snapshot signer not configured")
+	}
+	return d.snapshotSigner.Verify(eventID, exp, sig)
 }
 
 // Metrics returns the shared metrics struct. Used by the /metrics handler
@@ -208,7 +222,7 @@ func (d *NotificationDispatcher) handleEvent(ctx context.Context, ev camera.Even
 		d.logger.Error("list users", "error", err)
 		return
 	}
-	payload := BuildPayload(ev)
+	payload := BuildPayload(ev, d.snapshotSigner)
 
 	for _, user := range users {
 		d.dispatchToUser(ctx, user, ev, payload)

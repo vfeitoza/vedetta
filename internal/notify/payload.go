@@ -19,7 +19,13 @@ type pushPayload struct {
 
 // BuildPayload produces the JSON push body for a detection event.
 // See design spec → "Service worker" and "payload.go" sections.
-func BuildPayload(ev camera.Event) []byte {
+//
+// When signer is non-nil and ev.SnapshotAvailable is true, the payload's
+// image field is set to a short-lived HMAC-signed URL that iOS can fetch
+// anonymously (no session cookies) to render the notification thumbnail.
+// The authenticated /api/events/<id>/snapshot endpoint returns 401 to
+// unauthenticated fetches, which iOS silently treats as "no image".
+func BuildPayload(ev camera.Event, signer *SnapshotSigner) []byte {
 	p := pushPayload{
 		Title: ev.CameraName,
 		Body:  fmt.Sprintf("%s detected · %s UTC", titleCase(ev.Label), ev.Timestamp.UTC().Format("15:04")),
@@ -27,8 +33,8 @@ func BuildPayload(ev camera.Event) []byte {
 		Tag:   fmt.Sprintf("%s:%s", ev.CameraName, ev.Label),
 		TS:    ev.Timestamp.UTC().Unix(),
 	}
-	if ev.SnapshotAvailable {
-		p.Image = fmt.Sprintf("/api/events/%s/snapshot", ev.ID)
+	if ev.SnapshotAvailable && signer != nil {
+		p.Image = signer.Sign(ev.ID)
 	}
 	data, _ := json.Marshal(p)
 	if len(data) > 4000 {

@@ -9,6 +9,15 @@ import (
 	"github.com/rvben/vedetta/internal/camera"
 )
 
+func newTestSigner(t *testing.T) *SnapshotSigner {
+	t.Helper()
+	signer, err := LoadOrGenerateSnapshotSigner(newFakeKVStore())
+	if err != nil {
+		t.Fatalf("LoadOrGenerateSnapshotSigner: %v", err)
+	}
+	return signer
+}
+
 func TestBuildPayload_WithSnapshot(t *testing.T) {
 	ev := camera.Event{
 		ID:                "front-t91-1712847123456",
@@ -18,7 +27,8 @@ func TestBuildPayload_WithSnapshot(t *testing.T) {
 		Timestamp:         time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC),
 		SnapshotAvailable: true,
 	}
-	data := BuildPayload(ev)
+	signer := newTestSigner(t)
+	data := BuildPayload(ev, signer)
 
 	var got map[string]interface{}
 	if err := json.Unmarshal(data, &got); err != nil {
@@ -33,8 +43,14 @@ func TestBuildPayload_WithSnapshot(t *testing.T) {
 	if got["url"] != "/event.html?id=front-t91-1712847123456" {
 		t.Errorf("url = %v", got["url"])
 	}
-	if got["image"] != "/api/events/front-t91-1712847123456/snapshot" {
-		t.Errorf("image = %v", got["image"])
+	image, _ := got["image"].(string)
+	if !strings.HasPrefix(image, "/api/push/snapshot/front-t91-1712847123456?") {
+		t.Errorf("image = %v, expected signed /api/push/snapshot/ URL", got["image"])
+	}
+	// The signed URL must carry both an expiry and a signature so the
+	// handler can validate it without any session state.
+	if !strings.Contains(image, "e=") || !strings.Contains(image, "s=") {
+		t.Errorf("image URL missing e= or s= params: %v", image)
 	}
 	if got["tag"] != "front:person" {
 		t.Errorf("tag = %v", got["tag"])
@@ -49,11 +65,28 @@ func TestBuildPayload_OmitsImageWhenUnavailable(t *testing.T) {
 		Timestamp:         time.Now().UTC(),
 		SnapshotAvailable: false,
 	}
-	data := BuildPayload(ev)
+	signer := newTestSigner(t)
+	data := BuildPayload(ev, signer)
 	var got map[string]interface{}
 	_ = json.Unmarshal(data, &got)
 	if _, has := got["image"]; has {
 		t.Fatalf("image should be omitted when SnapshotAvailable is false, payload: %s", string(data))
+	}
+}
+
+func TestBuildPayload_OmitsImageWhenSignerNil(t *testing.T) {
+	ev := camera.Event{
+		ID:                "front-t91",
+		CameraName:        "front",
+		Label:             "person",
+		Timestamp:         time.Now().UTC(),
+		SnapshotAvailable: true,
+	}
+	data := BuildPayload(ev, nil)
+	var got map[string]interface{}
+	_ = json.Unmarshal(data, &got)
+	if _, has := got["image"]; has {
+		t.Fatalf("image should be omitted when signer is nil, payload: %s", string(data))
 	}
 }
 
@@ -65,7 +98,7 @@ func TestBuildPayload_FitsUnder4KB(t *testing.T) {
 		Timestamp:         time.Now().UTC(),
 		SnapshotAvailable: true,
 	}
-	data := BuildPayload(ev)
+	data := BuildPayload(ev, newTestSigner(t))
 	if len(data) > 4000 {
 		t.Fatalf("payload too large: %d bytes", len(data))
 	}
