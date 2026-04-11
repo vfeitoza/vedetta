@@ -82,3 +82,15 @@ auth:
   #                           # Authelia: "Remote-User" (default)
   #                           # Authentik: "X-authentik-username"
   #                           # oauth2-proxy: "X-Forwarded-User"
+
+notifications:
+  # Web push VAPID subscriber claim (RFC 8292 "sub"). Used by the push
+  # service operator (Apple, Google, Mozilla) to reach you about abuse.
+  # Must be a raw email address (e.g. "admin@example.com") — do NOT
+  # include the "mailto:" prefix, the push library adds it. You can also
+  # use an https:// URL like "https://vedetta.example.com/contact".
+  #
+  # Apple's push relay rejects the JWT with HTTP 403 BadJwtToken if the
+  # value is not well-formed. Unset = fallback to "admin@example.com"
+  # with a startup warning; set a real contact for production.
+  vapid_subscriber: admin@example.com

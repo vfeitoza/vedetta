@@ -1355,3 +1355,169 @@ func TestCameraStoppedState(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPushSubscriptionsTable(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("seed auth_users: %v", err)
+	}
+	_, err = db.Raw().Exec(`INSERT INTO push_subscriptions (username, endpoint, p256dh, auth, user_agent) VALUES (?, ?, ?, ?, ?)`,
+		"alice", "https://fcm.googleapis.com/fcm/send/abc", "pubkey", "authsecret", "iPhone")
+	if err != nil {
+		t.Fatalf("insert push_subscription: %v", err)
+	}
+}
+
+func TestNotificationPrefsTable(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("seed auth_users: %v", err)
+	}
+	_, err = db.Raw().Exec(`INSERT INTO notification_prefs (username, camera, object_class, enabled) VALUES ('alice', 'front', 'person', 0)`)
+	if err != nil {
+		t.Fatalf("insert pref: %v", err)
+	}
+}
+
+func TestPushSubscriptionCRUD(t *testing.T) {
+	db := newTestDB(t)
+
+	_, _ = db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash'), ('bob', 'hash')`)
+
+	// Insert
+	id, err := db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/a", P256dh: "k1", Auth: "a1", UserAgent: "iPhone",
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if id == 0 {
+		t.Fatalf("expected nonzero id")
+	}
+
+	// Find by endpoint
+	got, err := db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got == nil || got.Username != "alice" || got.ID != id {
+		t.Fatalf("unexpected subscription: %+v", got)
+	}
+
+	// Upsert same endpoint, same user → same id, updated keys
+	id2, err := db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/a", P256dh: "k2", Auth: "a2", UserAgent: "iPad",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("expected id %d, got %d", id, id2)
+	}
+	got, _ = db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if got.P256dh != "k2" || got.UserAgent != "iPad" {
+		t.Fatalf("upsert did not overwrite fields: %+v", got)
+	}
+
+	// Upsert same endpoint, different user → ErrSubscriptionOwnedByOther
+	_, err = db.SavePushSubscription(PushSubscription{
+		Username: "bob", Endpoint: "https://push.example/a", P256dh: "k3", Auth: "a3",
+	})
+	if err != ErrSubscriptionOwnedByOther {
+		t.Fatalf("expected ErrSubscriptionOwnedByOther, got %v", err)
+	}
+
+	// List by user
+	_, _ = db.SavePushSubscription(PushSubscription{
+		Username: "alice", Endpoint: "https://push.example/b", P256dh: "k", Auth: "a",
+	})
+	list, err := db.ListPushSubscriptionsByUser("alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 subs, got %d", len(list))
+	}
+
+	// Delete by id + user (wrong user)
+	err = db.DeletePushSubscription(id, "bob")
+	if err != ErrPushSubscriptionNotFound {
+		t.Fatalf("expected ErrPushSubscriptionNotFound for wrong-user delete, got %v", err)
+	}
+
+	// Delete by id + user (right user)
+	if err := db.DeletePushSubscription(id, "alice"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, _ = db.FindPushSubscriptionByEndpoint("https://push.example/a")
+	if got != nil {
+		t.Fatalf("expected nil after delete, got %+v", got)
+	}
+
+	// Delete by endpoint (used by dispatcher on 410)
+	if err := db.DeletePushSubscriptionByEndpoint("https://push.example/b"); err != nil {
+		t.Fatalf("delete by endpoint: %v", err)
+	}
+}
+
+func TestNotificationPrefsCRUD(t *testing.T) {
+	db := newTestDB(t)
+	_, _ = db.Raw().Exec(`INSERT INTO auth_users (username, password_hash) VALUES ('alice', 'hash')`)
+
+	// Default: no rows → IsNotificationEnabled returns true for any (camera, class)
+	enabled, err := db.IsNotificationEnabled("alice", "front", "person")
+	if err != nil {
+		t.Fatalf("enabled: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("default should be enabled")
+	}
+
+	// Opt out specific (camera, class)
+	if err := db.SetNotificationPref("alice", "front", "person", false); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	enabled, _ = db.IsNotificationEnabled("alice", "front", "person")
+	if enabled {
+		t.Fatalf("expected disabled")
+	}
+	// Sibling class still enabled
+	enabled, _ = db.IsNotificationEnabled("alice", "front", "car")
+	if !enabled {
+		t.Fatalf("sibling class should still be enabled")
+	}
+
+	// Wildcard disable beats specific enable
+	_ = db.SetNotificationPref("alice", "back", "*", false)
+	_ = db.SetNotificationPref("alice", "back", "person", true)
+	enabled, _ = db.IsNotificationEnabled("alice", "back", "person")
+	if enabled {
+		t.Fatalf("wildcard disable should beat specific enable")
+	}
+
+	// List all prefs.
+	// Only two disabled rows are stored: (front,person,0) and (back,*,0).
+	// The (back,person,true) call above is a no-op because the sparse-table
+	// contract stores only disabled rows — a request to enable something
+	// that's already default-enabled DELETEs any existing row (there is none).
+	list, err := db.ListNotificationPrefs("alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(list))
+	}
+
+	// Re-setting to default (enabled=true) should remove the row to keep the table sparse
+	_ = db.SetNotificationPref("alice", "front", "person", true)
+	list, _ = db.ListNotificationPrefs("alice")
+	for _, p := range list {
+		if p.Camera == "front" && p.ObjectClass == "person" {
+			t.Fatalf("expected row to be removed when reset to default, got %+v", p)
+		}
+	}
+}

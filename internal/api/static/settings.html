@@ -8,7 +8,9 @@
   <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
   <meta name="theme-color" content="#0a0e14">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="apple-touch-icon" href="/favicon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Vedetta">
 </head>
 <body>
 
@@ -243,6 +245,137 @@
             <button type="submit" class="btn btn-primary btn-small">Change Password</button>
             <div id="pw-status" style="min-height:1.3rem;margin-top:0.75rem;font-size:0.92rem;color:var(--muted)"></div>
           </form>
+        </div>
+      </div>
+
+      <div class="sys-card" id="notifications-card">
+        <div class="sys-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          Notifications
+        </div>
+        <div class="sys-card-body">
+          <style>
+            #notifications-card .push-banner {
+              padding: 0.6rem 0.8rem;
+              border-radius: 8px;
+              font-size: 0.92rem;
+              margin-bottom: 0.75rem;
+              background: rgba(4, 12, 18, 0.7);
+              border: 1px solid rgba(159, 180, 198, 0.18);
+              color: var(--muted);
+            }
+            #notifications-card .push-banner.banner-ok {
+              border-color: rgba(58, 210, 120, 0.4);
+              color: var(--text);
+            }
+            #notifications-card .push-banner.banner-warn {
+              border-color: rgba(255, 168, 77, 0.5);
+              color: #ffd29a;
+            }
+            #notifications-card .push-banner.banner-info {
+              border-color: rgba(93, 215, 255, 0.35);
+              color: #cfeaff;
+            }
+            #notifications-card .push-form-row {
+              margin-bottom: 0.75rem;
+              font-size: 0.92rem;
+              color: var(--muted);
+            }
+            #notifications-card .push-form-row label {
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              cursor: pointer;
+            }
+            #notifications-card .push-form-row input[type="range"] {
+              flex: 1;
+              accent-color: var(--accent);
+            }
+            #notifications-card .push-prefs-grid {
+              display: flex;
+              flex-direction: column;
+              gap: 0.75rem;
+              margin-bottom: 0.75rem;
+            }
+            #notifications-card .push-prefs-row {
+              padding: 0.5rem 0.65rem;
+              border-radius: 8px;
+              background: rgba(4, 12, 18, 0.45);
+              border: 1px solid rgba(159, 180, 198, 0.12);
+              display: flex;
+              flex-wrap: wrap;
+              align-items: center;
+              gap: 0.55rem 0.85rem;
+              font-size: 0.88rem;
+            }
+            #notifications-card .push-prefs-row strong {
+              color: var(--text);
+              margin-right: 0.35rem;
+            }
+            #notifications-card .push-prefs-row label {
+              display: inline-flex;
+              align-items: center;
+              gap: 0.3rem;
+              color: var(--muted);
+              cursor: pointer;
+            }
+            #notifications-card .push-devices-list {
+              list-style: none;
+              margin: 0;
+              padding: 0;
+              display: flex;
+              flex-direction: column;
+              gap: 0.5rem;
+            }
+            #notifications-card .push-devices-list li {
+              padding: 0.55rem 0.7rem;
+              border-radius: 8px;
+              background: rgba(4, 12, 18, 0.45);
+              border: 1px solid rgba(159, 180, 198, 0.12);
+              font-size: 0.88rem;
+              color: var(--muted);
+              display: flex;
+              align-items: center;
+              gap: 0.75rem;
+            }
+            #notifications-card .push-devices-list li .device-label {
+              flex: 1;
+              word-break: break-word;
+            }
+            #notifications-card h3 {
+              margin: 0.9rem 0 0.45rem;
+              font-size: 0.92rem;
+              color: var(--muted);
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+            }
+          </style>
+          <div id="push-state-banner" class="push-banner">Loading…</div>
+
+          <div id="push-enable-row" hidden>
+            <button id="push-enable-btn" class="btn btn-primary btn-small">Enable notifications on this device</button>
+            <p style="margin:0.5rem 0 0;font-size:0.85rem;color:var(--muted)">Requires iOS 16.4+ and the app installed to your home screen.</p>
+          </div>
+
+          <div id="push-settings-row" hidden>
+            <div class="push-form-row">
+              <label><input type="checkbox" id="push-muted"> Mute all notifications on this account</label>
+            </div>
+            <div class="push-form-row">
+              <label>
+                Cooldown
+                <input type="range" id="push-cooldown" min="60" max="900" step="30" value="180">
+                <output id="push-cooldown-out">180</output>s
+              </label>
+            </div>
+            <h3>Cameras &amp; object classes</h3>
+            <div id="push-prefs-grid" class="push-prefs-grid">Loading…</div>
+            <div class="push-form-row">
+              <button id="push-test-btn" class="btn btn-small">Send test notification</button>
+            </div>
+            <h3>Devices</h3>
+            <ul id="push-devices-list" class="push-devices-list"><li>Loading…</li></ul>
+          </div>
         </div>
       </div>
 
@@ -565,6 +698,242 @@
   loadRecording();
   loadDetect();
   loadAuthInfo();
+})();
+  </script>
+
+  <script>
+// Notifications (PWA push) settings section controller.
+// CSRF is added automatically by the fetch wrapper in app.js.
+(function () {
+  var vapidKey = null;
+  var banner = document.getElementById('push-state-banner');
+  var enableRow = document.getElementById('push-enable-row');
+  var settingsRow = document.getElementById('push-settings-row');
+
+  function isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+           window.navigator.standalone === true;
+  }
+  function isPushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  }
+
+  function setBannerClass(cls) {
+    banner.className = 'push-banner';
+    if (cls) banner.classList.add(cls);
+  }
+
+  function setState(state) {
+    enableRow.hidden = true;
+    settingsRow.hidden = true;
+    if (state === 'not-installed') {
+      banner.textContent = 'Add Vedetta to your home screen to enable notifications.';
+      setBannerClass('banner-info');
+      return;
+    }
+    if (state === 'unsupported') {
+      banner.textContent = 'Push notifications are not supported in this browser. Requires iOS 16.4+ or a modern Chromium / Firefox.';
+      setBannerClass('banner-warn');
+      return;
+    }
+    if (state === 'needs-permission') {
+      banner.textContent = 'Notifications are ready to enable.';
+      setBannerClass('banner-info');
+      enableRow.hidden = false;
+      return;
+    }
+    if (state === 'subscribed') {
+      banner.textContent = 'Notifications are on for this device.';
+      setBannerClass('banner-ok');
+      settingsRow.hidden = false;
+      loadPrefs();
+      loadDevices();
+      return;
+    }
+  }
+
+  async function detectAndRender() {
+    if (!isPushSupported()) return setState('unsupported');
+    if (!isStandalone()) return setState('not-installed');
+    try {
+      var reg = await navigator.serviceWorker.ready;
+      var sub = await reg.pushManager.getSubscription();
+      if (sub) return setState('subscribed');
+      return setState('needs-permission');
+    } catch (err) {
+      console.warn('push detect', err);
+      return setState('unsupported');
+    }
+  }
+
+  async function fetchVapidKey() {
+    if (vapidKey) return vapidKey;
+    var r = await fetch('/api/push/vapid-public-key', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('vapid key fetch failed');
+    var j = await r.json();
+    vapidKey = j.key;
+    return vapidKey;
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    var padding = '='.repeat((4 - base64String.length % 4) % 4);
+    var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    var raw = atob(base64);
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; ++i) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function enableNotifications() {
+    try {
+      var perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        banner.textContent = 'Permission denied. Enable in iOS Settings \u2192 Notifications \u2192 Vedetta.';
+        setBannerClass('banner-warn');
+        return;
+      }
+      var reg = await navigator.serviceWorker.ready;
+      var key = await fetchVapidKey();
+      var sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      var body = sub.toJSON();
+      var r = await fetch('/api/push/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          endpoint: body.endpoint,
+          keys: body.keys,
+          userAgent: navigator.userAgent.slice(0, 200),
+        }),
+      });
+      if (!r.ok) throw new Error('subscribe POST failed: ' + r.status);
+      setState('subscribed');
+    } catch (err) {
+      console.error(err);
+      banner.textContent = 'Could not enable notifications: ' + err.message;
+      setBannerClass('banner-warn');
+    }
+  }
+
+  async function loadPrefs() {
+    var r = await fetch('/api/push/prefs', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    var j = await r.json();
+    document.getElementById('push-muted').checked = !!j.muted;
+    var cd = j.cooldown_seconds || 180;
+    document.getElementById('push-cooldown').value = cd;
+    document.getElementById('push-cooldown-out').value = cd;
+    var grid = document.getElementById('push-prefs-grid');
+    grid.innerHTML = '';
+    var cameras = j.cameras || {};
+    var camNames = Object.keys(cameras).sort();
+    if (!camNames.length) {
+      grid.textContent = 'No cameras configured.';
+      return;
+    }
+    camNames.forEach(function (cam) {
+      var row = document.createElement('div');
+      row.className = 'push-prefs-row';
+      var label = document.createElement('strong');
+      label.textContent = cam;
+      row.appendChild(label);
+      Object.keys(cameras[cam]).sort().forEach(function (cls) {
+        var wrap = document.createElement('label');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!cameras[cam][cls];
+        cb.dataset.camera = cam;
+        cb.dataset.class = cls;
+        cb.addEventListener('change', savePrefs);
+        wrap.appendChild(cb);
+        wrap.appendChild(document.createTextNode(' ' + cls));
+        row.appendChild(wrap);
+      });
+      grid.appendChild(row);
+    });
+  }
+
+  async function savePrefs() {
+    var cameras = {};
+    document.querySelectorAll('#push-prefs-grid input[type="checkbox"]').forEach(function (cb) {
+      var cam = cb.dataset.camera;
+      var cls = cb.dataset.class;
+      cameras[cam] = cameras[cam] || {};
+      cameras[cam][cls] = cb.checked;
+    });
+    var body = {
+      muted: document.getElementById('push-muted').checked,
+      cooldown_seconds: parseInt(document.getElementById('push-cooldown').value, 10),
+      cameras: cameras,
+    };
+    await fetch('/api/push/prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function loadDevices() {
+    var r = await fetch('/api/push/subscriptions', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    var list = await r.json();
+    var ul = document.getElementById('push-devices-list');
+    ul.innerHTML = '';
+    if (!list || !list.length) {
+      var empty = document.createElement('li');
+      empty.textContent = 'No devices subscribed.';
+      ul.appendChild(empty);
+      return;
+    }
+    list.forEach(function (d) {
+      var li = document.createElement('li');
+      var span = document.createElement('span');
+      span.className = 'device-label';
+      span.textContent = (d.userAgent || 'Unknown device') + ' \u00b7 added ' + (d.createdAt || '');
+      li.appendChild(span);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-small';
+      btn.textContent = 'Remove';
+      btn.addEventListener('click', async function () {
+        btn.disabled = true;
+        await fetch('/api/push/subscriptions/' + encodeURIComponent(d.id), {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        });
+        loadDevices();
+        detectAndRender();
+      });
+      li.appendChild(btn);
+      ul.appendChild(li);
+    });
+  }
+
+  // Wire up controls.
+  document.getElementById('push-enable-btn').addEventListener('click', enableNotifications);
+  document.getElementById('push-cooldown').addEventListener('input', function (e) {
+    document.getElementById('push-cooldown-out').value = e.target.value;
+  });
+  document.getElementById('push-cooldown').addEventListener('change', savePrefs);
+  document.getElementById('push-muted').addEventListener('change', savePrefs);
+  document.getElementById('push-test-btn').addEventListener('click', async function () {
+    var btn = document.getElementById('push-test-btn');
+    btn.disabled = true;
+    try {
+      await fetch('/api/push/test', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  detectAndRender();
 })();
   </script>
 </body>

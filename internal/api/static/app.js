@@ -4114,3 +4114,79 @@ function bindPTZControls(cameraName) {
     }
   });
 }
+
+// ---------- PWA install + service worker registration ----------
+(function () {
+  // Register the service worker on every page load. No-op if already registered.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function (err) {
+      console.warn('sw register failed', err);
+    });
+  }
+
+  // Install hint for iOS Safari, shown only when the app is NOT already
+  // running in standalone mode and the user hasn't dismissed it.
+  var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  var isStandalone =
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+    window.navigator.standalone === true;
+  var dismissed = false;
+  try {
+    dismissed = localStorage.getItem('vedetta-install-hint-dismissed') === '1';
+  } catch (e) {
+    // Private-mode Safari throws on localStorage access — treat as not dismissed.
+  }
+
+  if (isIOS && !isStandalone && !dismissed) {
+    window.addEventListener('DOMContentLoaded', function () {
+      var banner = document.createElement('div');
+      banner.className = 'pwa-install-hint';
+      banner.style.cssText =
+        'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;' +
+        'background:#1a1f2a;color:#eaeaea;border:1px solid #2a3340;' +
+        'border-radius:12px;padding:12px 16px;font-size:14px;line-height:1.4;' +
+        'display:flex;align-items:center;gap:12px;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
+      banner.innerHTML =
+        '<div style="flex:1">Add Vedetta to your home screen for notifications. Tap Share \u2192 Add to Home Screen.</div>' +
+        '<button type="button" aria-label="Dismiss" style="background:none;border:0;color:#888;font-size:20px;cursor:pointer;padding:4px 8px">\u00d7</button>';
+      banner.querySelector('button').addEventListener('click', function () {
+        try {
+          localStorage.setItem('vedetta-install-hint-dismissed', '1');
+        } catch (e) { /* ignore */ }
+        banner.remove();
+      });
+      document.body.appendChild(banner);
+    });
+  }
+})();
+
+// ---------- Auto-promote Remember-me for standalone logins ----------
+// When the login form loads inside the installed PWA, pre-check the
+// Remember-me box so the session lasts long enough for notifications.
+// NOTE: login.html currently does not load app.js, so this block is a
+// defensive no-op for the moment. If login.html ever loads app.js, this
+// will kick in and keep PWA users logged in across notification delivery.
+(function () {
+  if (location.pathname !== '/login.html') return;
+  var isStandalone =
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+    window.navigator.standalone === true;
+  if (!isStandalone) return;
+  window.addEventListener('DOMContentLoaded', function () {
+    var cb = document.getElementById('remember');
+    if (cb && !cb.checked) cb.checked = true;
+  });
+})();
+
+// ---------- Service worker → page navigation bridge ----------
+// The SW's notificationclick handler posts a {type:"notify-navigate",url}
+// message when we need to navigate the already-open PWA window. iOS
+// ignores clients.openWindow() in standalone mode.
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'notify-navigate' && e.data.url) {
+      window.location.href = e.data.url;
+    }
+  });
+})();

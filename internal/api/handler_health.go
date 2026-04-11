@@ -221,6 +221,11 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(&b, "vedetta_camera_degraded{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Degraded))
 	}
 
+	// Push notification counters — only emitted when a dispatcher is wired.
+	if s.notifier != nil {
+		s.notifier.Metrics().WriteProm(&b)
+	}
+
 	_, _ = w.Write([]byte(b.String()))
 }
 

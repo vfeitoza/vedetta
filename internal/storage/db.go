@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -225,6 +226,26 @@ func migrate(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS kv_store (
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS push_subscriptions (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			username    TEXT    NOT NULL,
+			endpoint    TEXT    NOT NULL UNIQUE,
+			p256dh      TEXT    NOT NULL,
+			auth        TEXT    NOT NULL,
+			user_agent  TEXT,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_seen   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(username);
+
+		CREATE TABLE IF NOT EXISTS notification_prefs (
+			username     TEXT NOT NULL,
+			camera       TEXT NOT NULL,
+			object_class TEXT NOT NULL,
+			enabled      BOOLEAN NOT NULL DEFAULT 1,
+			PRIMARY KEY (username, camera, object_class)
 		);
 	`)
 	if err != nil {
@@ -2049,6 +2070,27 @@ func (d *DB) DeleteSetting(key string) error {
 	return err
 }
 
+// GetKV reads a kv_store row, distinguishing missing keys from empty values.
+// Wrapper that makes *DB satisfy notify.KVStore without forcing callers to
+// reason about GetSetting's "empty string on missing" contract.
+func (d *DB) GetKV(key string) (string, bool, error) {
+	var val string
+	err := d.db.QueryRow("SELECT value FROM kv_store WHERE key = ?", key).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return val, true, nil
+}
+
+// SetKV upserts a kv_store row. Equivalent to SetSetting; exists so that
+// *DB satisfies notify.KVStore with symmetric naming.
+func (d *DB) SetKV(key, value string) error {
+	return d.SetSetting(key, value)
+}
+
 // SetCameraStopped marks a camera as stopped (true) or running (false) in the kv_store.
 func (d *DB) SetCameraStopped(name string, stopped bool) error {
 	key := "camera_stopped:" + name
@@ -2091,4 +2133,225 @@ func decodeZonePoints(z *camera.Zone, pointsJSON string) error {
 		{z.X1, z.Y2},
 	}
 	return nil
+}
+
+// Raw returns the underlying *sql.DB for tests that need to seed or inspect rows directly.
+// Production code should not use this.
+func (d *DB) Raw() *sql.DB {
+	return d.db
+}
+
+// PushSubscription is a row in push_subscriptions.
+type PushSubscription struct {
+	ID        int64
+	Username  string
+	Endpoint  string
+	P256dh    string
+	Auth      string
+	UserAgent string
+	CreatedAt time.Time
+	LastSeen  time.Time
+}
+
+var (
+	ErrPushSubscriptionNotFound = errors.New("push subscription not found")
+	ErrSubscriptionOwnedByOther = errors.New("push subscription endpoint already registered to another user")
+)
+
+// SavePushSubscription inserts or updates a subscription.
+// If an existing row has the same endpoint:
+//   - owned by the same user: keys/user_agent are updated, last_seen bumped, same id returned.
+//   - owned by a different user: ErrSubscriptionOwnedByOther is returned.
+func (d *DB) SavePushSubscription(sub PushSubscription) (int64, error) {
+	var existingID int64
+	var existingUser string
+	err := d.db.QueryRow(`SELECT id, username FROM push_subscriptions WHERE endpoint = ?`, sub.Endpoint).
+		Scan(&existingID, &existingUser)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, err
+	}
+	if err == nil {
+		if existingUser != sub.Username {
+			return 0, ErrSubscriptionOwnedByOther
+		}
+		_, uerr := d.db.Exec(`
+			UPDATE push_subscriptions
+			   SET p256dh = ?, auth = ?, user_agent = ?, last_seen = CURRENT_TIMESTAMP
+			 WHERE id = ?`,
+			sub.P256dh, sub.Auth, nullString(sub.UserAgent), existingID)
+		if uerr != nil {
+			return 0, uerr
+		}
+		return existingID, nil
+	}
+	res, err := d.db.Exec(`
+		INSERT INTO push_subscriptions (username, endpoint, p256dh, auth, user_agent)
+		VALUES (?, ?, ?, ?, ?)`,
+		sub.Username, sub.Endpoint, sub.P256dh, sub.Auth, nullString(sub.UserAgent))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// FindPushSubscriptionByEndpoint returns the subscription with the given endpoint, or nil if none.
+func (d *DB) FindPushSubscriptionByEndpoint(endpoint string) (*PushSubscription, error) {
+	var s PushSubscription
+	var userAgent sql.NullString
+	err := d.db.QueryRow(`
+		SELECT id, username, endpoint, p256dh, auth, user_agent, created_at, last_seen
+		  FROM push_subscriptions WHERE endpoint = ?`, endpoint).
+		Scan(&s.ID, &s.Username, &s.Endpoint, &s.P256dh, &s.Auth, &userAgent, &s.CreatedAt, &s.LastSeen)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if userAgent.Valid {
+		s.UserAgent = userAgent.String
+	}
+	return &s, nil
+}
+
+// ListPushSubscriptionsByUser returns all subscriptions for the given user.
+func (d *DB) ListPushSubscriptionsByUser(username string) ([]PushSubscription, error) {
+	rows, err := d.db.Query(`
+		SELECT id, username, endpoint, p256dh, auth, user_agent, created_at, last_seen
+		  FROM push_subscriptions WHERE username = ? ORDER BY id`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushSubscription
+	for rows.Next() {
+		var s PushSubscription
+		var userAgent sql.NullString
+		if err := rows.Scan(&s.ID, &s.Username, &s.Endpoint, &s.P256dh, &s.Auth, &userAgent, &s.CreatedAt, &s.LastSeen); err != nil {
+			return nil, err
+		}
+		if userAgent.Valid {
+			s.UserAgent = userAgent.String
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DeletePushSubscription removes a subscription by id, but only if it belongs to username.
+// Returns ErrPushSubscriptionNotFound if no row matches.
+func (d *DB) DeletePushSubscription(id int64, username string) error {
+	res, err := d.db.Exec(`DELETE FROM push_subscriptions WHERE id = ? AND username = ?`, id, username)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrPushSubscriptionNotFound
+	}
+	return nil
+}
+
+// DeletePushSubscriptionByEndpoint removes a subscription by endpoint, regardless of owner.
+// Used by the dispatcher to prune after 404/410 responses from the push service.
+func (d *DB) DeletePushSubscriptionByEndpoint(endpoint string) error {
+	_, err := d.db.Exec(`DELETE FROM push_subscriptions WHERE endpoint = ?`, endpoint)
+	return err
+}
+
+// CountPushSubscriptions returns the total number of push subscriptions across all users.
+func (d *DB) CountPushSubscriptions() (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM push_subscriptions`).Scan(&n)
+	return n, err
+}
+
+// NotificationPref represents a per-user, per-camera, per-class notification opt-out.
+// Only disabled rows are stored; missing rows mean enabled.
+type NotificationPref struct {
+	Username    string
+	Camera      string
+	ObjectClass string
+	Enabled     bool
+}
+
+// IsNotificationEnabled returns true unless an explicit disable row exists for
+// (username, camera, class) or (username, camera, "*").
+func (d *DB) IsNotificationEnabled(username, camera, class string) (bool, error) {
+	var count int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM notification_prefs
+		 WHERE username = ? AND camera = ?
+		   AND (object_class = ? OR object_class = '*')
+		   AND enabled = 0`,
+		username, camera, class).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+// SetNotificationPref sets or unsets a pref row.
+// To keep the table sparse, an enabled=true call DELETEs any existing row (default is enabled).
+// A false call INSERTs or UPDATEs the row with enabled=0.
+func (d *DB) SetNotificationPref(username, camera, class string, enabled bool) error {
+	if enabled {
+		_, err := d.db.Exec(`
+			DELETE FROM notification_prefs
+			 WHERE username = ? AND camera = ? AND object_class = ?`,
+			username, camera, class)
+		return err
+	}
+	_, err := d.db.Exec(`
+		INSERT INTO notification_prefs (username, camera, object_class, enabled)
+		VALUES (?, ?, ?, 0)
+		ON CONFLICT(username, camera, object_class) DO UPDATE SET enabled = 0`,
+		username, camera, class)
+	return err
+}
+
+// ListNotificationPrefs returns all disabled rows for a user (enabled rows aren't stored).
+func (d *DB) ListNotificationPrefs(username string) ([]NotificationPref, error) {
+	rows, err := d.db.Query(`
+		SELECT username, camera, object_class, enabled
+		  FROM notification_prefs WHERE username = ? ORDER BY camera, object_class`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NotificationPref
+	for rows.Next() {
+		var p NotificationPref
+		if err := rows.Scan(&p.Username, &p.Camera, &p.ObjectClass, &p.Enabled); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListAllUsernames returns every username that has at least one push
+// subscription. It is the source of truth for the notification dispatcher's
+// per-event fanout loop.
+//
+// Deliberately NOT "SELECT username FROM auth_users": push subscriptions
+// can belong to users authenticated by any source (direct session, reverse-
+// proxy Remote-User, bearer token), and those usernames do not all appear
+// in auth_users. Iterating push_subscriptions directly also avoids doing
+// pref/mute/cooldown work for users who aren't subscribed.
+func (d *DB) ListAllUsernames() ([]string, error) {
+	rows, err := d.db.Query(`SELECT DISTINCT username FROM push_subscriptions ORDER BY username`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }

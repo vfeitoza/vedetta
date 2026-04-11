@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/notify"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/storage"
@@ -79,6 +81,14 @@ type Server struct {
 	objectRematchPending map[int64]bool
 	faceBackfillRunning  atomic.Bool
 	objectRematchFn      func(int64)
+
+	// Push notification dispatcher and cached camera names. notifier is nil
+	// when push is disabled (e.g. VAPID setup failed or operator opted out);
+	// cameraNamesCached is populated by main.go after config load so the
+	// prefs handler can render the full (camera × class) grid without
+	// walking the live camera.Manager on every request.
+	notifier          *notify.NotificationDispatcher
+	cameraNamesCached []string
 
 	// ctx is the application lifetime context (cancelled on shutdown).
 	ctx context.Context
@@ -241,10 +251,25 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/system/codecs/openh264", s.GetOpenH264Status)
 	s.mux.HandleFunc("POST /api/system/codecs/openh264/install", s.InstallOpenH264)
 
+	// Push notification endpoints
+	s.mux.HandleFunc("GET /api/push/vapid-public-key", s.GetVAPIDPublicKey)
+	s.mux.HandleFunc("POST /api/push/subscriptions", s.CreatePushSubscription)
+	s.mux.HandleFunc("GET /api/push/subscriptions", s.ListPushSubscriptions)
+	s.mux.HandleFunc("DELETE /api/push/subscriptions/{id}", s.DeletePushSubscription)
+	s.mux.HandleFunc("GET /api/push/prefs", s.GetPushPrefs)
+	s.mux.HandleFunc("PUT /api/push/prefs", s.PutPushPrefs)
+	s.mux.HandleFunc("POST /api/push/test", s.TestPush)
+	s.mux.HandleFunc("GET /api/push/snapshot/{id}", s.GetPushSnapshot)
+
 	// Setup status endpoint (returns "running" in normal mode)
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "running"})
 	})
+
+	// Ensure .webmanifest files are served with the correct Content-Type.
+	// mime.AddExtensionType is process-global and idempotent; http.FileServer
+	// consults the mime package lazily on first request.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 
 	// Serve static files at root
 	staticSub, err := fs.Sub(staticFiles, "static")
@@ -321,6 +346,20 @@ func (s *Server) SetDetector(d *detect.Detector) {
 
 func (s *Server) SetRecordingConfig(cfg config.RecordingConfig) {
 	s.recordingConfig = cfg
+}
+
+// SetNotifier wires the push notification dispatcher. May be called with nil
+// to keep push disabled — for example, when VAPID setup failed but the
+// operator still wants the rest of the API to come up.
+func (s *Server) SetNotifier(n *notify.NotificationDispatcher) {
+	s.notifier = n
+}
+
+// SetCameraNames caches the list of configured camera names used by the
+// push preferences handler to seed its (camera × class) response grid.
+// Called from main.go after config load.
+func (s *Server) SetCameraNames(names []string) {
+	s.cameraNamesCached = append([]string(nil), names...)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

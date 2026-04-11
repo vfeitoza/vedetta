@@ -26,6 +26,7 @@ import (
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/mqtt"
+	"github.com/rvben/vedetta/internal/notify"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/snapshot"
@@ -49,6 +50,7 @@ type subsystems struct {
 	hub            *rtsp.Hub
 	recorder       *recording.Recorder
 	manager        *camera.Manager
+	notifier       *notify.NotificationDispatcher
 	events         chan camera.Event
 	eventEnds      chan camera.EventEnd
 	presenceEvents chan camera.PresenceEvent
@@ -134,6 +136,9 @@ func main() {
 
 		sub := initSubsystems(ctx, cancel, cfg, db)
 		defer closeSubsystems(sub)
+
+		sub.notifier = setupNotifier(db, cfg)
+		wireNotifier(ctx, server, sub.notifier, cfg)
 
 		// Reconcile event media availability with the filesystem
 		go reconcileEventMediaAvailability(db)
@@ -232,6 +237,9 @@ func main() {
 
 	sub := initSubsystems(ctx, cancel, cfg, db)
 	defer closeSubsystems(sub)
+
+	sub.notifier = setupNotifier(db, cfg)
+	wireNotifier(ctx, server, sub.notifier, cfg)
 
 	runEventLoop(ctx, cfg, db, sub, server)
 	startOnvifSubscribers(ctx, cfg, server)
@@ -510,6 +518,66 @@ func ensureOpenH264(ctx context.Context, cfg *config.Config) {
 		"path", installed.Path)
 }
 
+// setupNotifier constructs the push NotificationDispatcher and loads (or
+// generates) the VAPID keypair from the database. Fail-closed: if the VAPID
+// load fails (corrupt keys, storage error), push notifications are disabled
+// and nil is returned — the rest of Vedetta continues to start. Handlers
+// already guard on a nil dispatcher and return 503 for push endpoints.
+func setupNotifier(db *storage.DB, cfg *config.Config) *notify.NotificationDispatcher {
+	vapid, err := notify.LoadOrGenerateVAPID(db)
+	if err != nil {
+		slog.Error("push notifications disabled: vapid load failed", "error", err)
+		return nil
+	}
+	signer, err := notify.LoadOrGenerateSnapshotSigner(db)
+	if err != nil {
+		slog.Error("push notifications disabled: snapshot signer load failed", "error", err)
+		return nil
+	}
+	// Resolve the VAPID subscriber. webpush-go's getVAPIDAuthorizationHeader
+	// prepends "mailto:" to any value that does not start with "https:", so
+	// pass a raw email or an https URL — never a pre-formed "mailto:" URI.
+	subscriber := cfg.Notifications.VAPIDSubscriber
+	if subscriber == "" {
+		subscriber = config.DefaultVAPIDSubscriber
+		slog.Warn("notifications.vapid_subscriber is unset; using placeholder — set a real contact in config.yml before production use",
+			"default", subscriber)
+	}
+	return notify.New(notify.Options{
+		Store:          db,
+		Sender:         &notify.WebPushSender{Subscriber: subscriber},
+		VAPID:          vapid,
+		SnapshotSigner: signer,
+		Logger:         slog.Default(),
+	})
+}
+
+// wireNotifier attaches the dispatcher and the configured camera names to the
+// API server and, when a dispatcher exists, starts its worker goroutines on
+// the supplied context. Safe to call with a nil dispatcher — the server
+// tolerates it and push endpoints return 503 in that case.
+func wireNotifier(ctx context.Context, server *api.Server, notifier *notify.NotificationDispatcher, cfg *config.Config) {
+	server.SetNotifier(notifier)
+	server.SetCameraNames(configuredCameraNames(cfg))
+	if notifier != nil {
+		notifier.Start(ctx)
+	}
+}
+
+// configuredCameraNames returns the list of enabled camera names from config.
+// Used to seed the push preferences handler so it can enumerate per-camera
+// toggles in the settings UI.
+func configuredCameraNames(cfg *config.Config) []string {
+	names := make([]string, 0, len(cfg.Cameras))
+	for _, cam := range cfg.Cameras {
+		if !cam.IsEnabled() {
+			continue
+		}
+		names = append(names, cam.Name)
+	}
+	return names
+}
+
 // closeSubsystems releases resources held by subsystems.
 func closeSubsystems(sub *subsystems) {
 	if sub.mqttClient != nil {
@@ -643,13 +711,18 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					"score", fmt.Sprintf("%.2f", event.Score),
 				)
 
-				if err := db.SaveEvent(event); err != nil {
-					slog.Error("failed to save event", "error", err)
+				saveErr := db.SaveEvent(event)
+				if saveErr != nil {
+					slog.Error("failed to save event", "error", saveErr)
 				} else if event.SnapshotImage != nil && event.SnapshotPath != "" {
 					if err := snapshot.SaveSnapshot(event.SnapshotImage, event.SnapshotPath, cfg.Events.SnapshotQuality); err != nil {
 						slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
 					} else if err := db.UpdateEventSnapshotPath(event.ID, event.SnapshotPath); err != nil {
 						slog.Error("failed to persist event snapshot path", "event", event.ID, "error", err)
+					} else {
+						// Main.go is the authoritative setter of this bit for
+						// downstream consumers (MQTT publish, push dispatcher).
+						event.SnapshotAvailable = true
 					}
 				}
 
@@ -711,6 +784,14 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					event:      event,
 					timer:      timer,
 					tempCancel: tempCancel,
+				}
+
+				// Fan out to push notification subscribers. Enqueue is
+				// non-blocking and guarded by its own cooldown; we skip it
+				// only when the event failed to persist (saveErr != nil) so
+				// we never push an event users can't look up via the API.
+				if sub.notifier != nil && saveErr == nil {
+					sub.notifier.Enqueue(event)
 				}
 
 			case end := <-eventEnds:
