@@ -12,6 +12,11 @@ import (
 // removes recordings older than the configured retention period.
 // When disk space is critically low, cleanup runs every 30 seconds
 // instead of every hour to recover space as quickly as possible.
+// If normal age-based cleanup is still not enough to free space,
+// EmergencyDelete is invoked: it drops the oldest segments regardless
+// of retain_days, preserving only the last UrgentCleanup.MinRetention
+// of recordings. This prevents the recorder from silently pausing when
+// disk fills completely.
 func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 	go func() {
 		r.runCleanup()
@@ -28,9 +33,29 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 			case <-normalTicker.C:
 				r.runCleanup()
 			case <-urgentTicker.C:
-				if r.segments.DiskAvailable() < r.segments.Disk().MinRequired() {
-					slog.Warn("urgent retention cleanup triggered by low disk space")
-					r.runCleanup()
+				threshold := r.segments.Disk().MinRequired()
+				avail := r.segments.DiskAvailable()
+				if avail >= threshold {
+					continue
+				}
+				slog.Warn("urgent retention cleanup triggered by low disk space",
+					"available_mb", avail/(1024*1024),
+					"threshold_mb", threshold/(1024*1024),
+				)
+				r.runCleanup()
+
+				// Re-check after normal cleanup. If still below threshold,
+				// escalate to floor-breaking emergency deletion.
+				if r.segments.DiskAvailable() < threshold && r.config.UrgentCleanup.Enabled {
+					n, err := r.EmergencyDelete(ctx, r.config.UrgentCleanup)
+					if err != nil {
+						slog.Error("emergency cleanup failed", "error", err)
+					} else if n > 0 {
+						slog.Warn("emergency cleanup freed space by dropping segments below retain_days",
+							"segments_deleted", n,
+							"min_retention", r.config.UrgentCleanup.MinRetention,
+						)
+					}
 				}
 			}
 		}
