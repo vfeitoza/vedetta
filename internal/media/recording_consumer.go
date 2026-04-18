@@ -14,11 +14,6 @@ import (
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
-// MinDiskSpace is the minimum free space required to start or continue recording.
-// Below this threshold, recording pauses to prevent filesystem corruption,
-// incomplete segments, and cascading write errors.
-const MinDiskSpace = 256 * 1024 * 1024 // 256 MB
-
 // diskPauseRetryInterval is how often a paused consumer retries the disk check.
 const diskPauseRetryInterval = 30 * time.Second
 
@@ -159,13 +154,14 @@ func (rc *RecordingConsumer) handlePaused() {
 	}
 
 	avail := rc.disk.Available()
-	if avail < MinDiskSpace {
+	threshold := rc.disk.MinRequired()
+	if avail < threshold {
 		rc.pausedSince = time.Now()
 		if time.Since(rc.lastDiskWarning) > time.Minute {
 			slog.Warn("recording still paused, disk space low",
 				"camera", rc.camera,
 				"available_mb", avail/(1024*1024),
-				"required_mb", MinDiskSpace/(1024*1024),
+				"required_mb", threshold/(1024*1024),
 			)
 			rc.lastDiskWarning = time.Now()
 		}
@@ -235,12 +231,13 @@ func (rc *RecordingConsumer) ensureSegment() error {
 
 	// Check disk space before creating a new segment
 	avail := rc.disk.Available()
-	if avail < MinDiskSpace {
+	threshold := rc.disk.MinRequired()
+	if avail < threshold {
 		if time.Since(rc.lastDiskWarning) > time.Minute {
 			slog.Warn("recording paused, insufficient disk space",
 				"camera", rc.camera,
 				"available_mb", avail/(1024*1024),
-				"required_mb", MinDiskSpace/(1024*1024),
+				"required_mb", threshold/(1024*1024),
 			)
 			rc.lastDiskWarning = time.Now()
 		}

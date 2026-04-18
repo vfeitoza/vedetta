@@ -169,7 +169,7 @@ func newTestServerWithAuth(t *testing.T) (*Server, http.Handler, *auth.Checker) 
 
 	rec := recording.New(config.RecordingConfig{
 		Path: t.TempDir(),
-	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "")
+	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "")
 
 	srv := New(apiCfg, checker, db)
 	srv.SetSubsystems(nil, rec, nil, nil, nil, "", "", nil, nil)

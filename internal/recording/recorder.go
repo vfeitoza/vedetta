@@ -82,23 +82,25 @@ type StorageProjection struct {
 
 // Recorder manages saving video clips for detected events.
 type Recorder struct {
-	config        config.RecordingConfig
-	eventConfig   config.EventConfig
-	db            *storage.DB
-	hub           *rtsp.Hub
-	segments      *SegmentRecorder
-	recompressor  *Recompressor
-	cameraURLs    map[string]string // camera name → record RTSP URL
-	startTime     time.Time
-	snapshotPath  string
-	exportProcess func(inputs []string, outputPath string, start, duration time.Duration) error
+	config               config.RecordingConfig
+	eventConfig          config.EventConfig
+	db                   *storage.DB
+	hub                  *rtsp.Hub
+	segments             *SegmentRecorder
+	recompressor         *Recompressor
+	cameraURLs           map[string]string // camera name → record RTSP URL
+	cameraRetention      map[string]int    // camera name → retain_days override (only cameras with explicit overrides)
+	startTime            time.Time
+	snapshotPath         string
+	snapshotFallbackPath string
+	exportProcess        func(inputs []string, outputPath string, start, duration time.Duration) error
 
 	// Cached storage stats refreshed in background
 	statsMu     sync.RWMutex
 	cachedStats StorageStats
 }
 
-func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -108,15 +110,17 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 	os.RemoveAll(exportDir)
 
 	return &Recorder{
-		config:       cfg,
-		eventConfig:  eventCfg,
-		db:           db,
-		hub:          hub,
-		segments:     NewSegmentRecorder(cfg, db, hub),
-		recompressor: NewRecompressor(cfg.TieredStorage, cameras, db),
-		cameraURLs:   make(map[string]string),
-		startTime:    time.Now(),
-		snapshotPath: snapshotPath,
+		config:               cfg,
+		eventConfig:          eventCfg,
+		db:                   db,
+		hub:                  hub,
+		segments:             NewSegmentRecorder(cfg, db, hub),
+		recompressor:         NewRecompressor(cfg.TieredStorage, cameras, db),
+		cameraURLs:           make(map[string]string),
+		cameraRetention:      buildCameraRetention(cameras),
+		startTime:            time.Now(),
+		snapshotPath:         snapshotPath,
+		snapshotFallbackPath: snapshotFallbackPath,
 		exportProcess: func(inputs []string, outputPath string, start, duration time.Duration) error {
 			if len(inputs) == 1 {
 				return media.TrimMP4(inputs[0], outputPath, start, duration)
@@ -287,7 +291,7 @@ func (r *Recorder) RefreshStats() {
 	}
 
 	stats.DiskAvailable = r.segments.DiskAvailable()
-	stats.DiskLow = stats.DiskAvailable < media.MinDiskSpace
+	stats.DiskLow = stats.DiskAvailable < r.segments.Disk().MinRequired()
 	stats.RecordingPaused = r.segments.AnyPaused()
 	rStats := r.recompressor.Stats()
 	stats.Recompression = RecompressionStats{
@@ -384,6 +388,17 @@ func (r *Recorder) StorageStats() StorageStats {
 // DiskAvailable returns the bytes available on the recording filesystem.
 func (r *Recorder) DiskAvailable() uint64 {
 	return r.segments.DiskAvailable()
+}
+
+// AnyCameraPaused returns true if any recording consumer has paused due to disk pressure.
+func (r *Recorder) AnyCameraPaused() bool {
+	return r.segments.AnyPaused()
+}
+
+// DiskMonitorSampler returns the DiskSampler used by DiskMonitor. Convenience
+// accessor so main.go doesn't need to reach through r.segments.Disk().
+func (r *Recorder) DiskMonitorSampler() DiskSampler {
+	return r.segments.Disk()
 }
 
 // HasSegments returns true if there are any segments covering the given time for a camera.
@@ -547,4 +562,16 @@ func (r *Recorder) ListSegmentsForDate(cameraName string, date time.Time) []stor
 		return nil
 	}
 	return segments
+}
+
+// buildCameraRetention constructs a map from camera name to retain_days for
+// cameras that have an explicit per-camera override set.
+func buildCameraRetention(cams []config.CameraConfig) map[string]int {
+	m := make(map[string]int, len(cams))
+	for _, c := range cams {
+		if c.RetainDays != nil && *c.RetainDays > 0 {
+			m[c.Name] = *c.RetainDays
+		}
+	}
+	return m
 }

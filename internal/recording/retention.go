@@ -6,14 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/rvben/vedetta/internal/media"
 )
 
 // StartRetentionCleanup runs a background goroutine that periodically
 // removes recordings older than the configured retention period.
 // When disk space is critically low, cleanup runs every 30 seconds
 // instead of every hour to recover space as quickly as possible.
+// If normal age-based cleanup is still not enough to free space,
+// EmergencyDelete is invoked: it drops the oldest segments regardless
+// of retain_days, preserving only the last UrgentCleanup.MinRetention
+// of recordings. This prevents the recorder from silently pausing when
+// disk fills completely.
 func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 	go func() {
 		r.runCleanup()
@@ -30,9 +33,29 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 			case <-normalTicker.C:
 				r.runCleanup()
 			case <-urgentTicker.C:
-				if r.segments.DiskAvailable() < media.MinDiskSpace {
-					slog.Warn("urgent retention cleanup triggered by low disk space")
-					r.runCleanup()
+				threshold := r.segments.Disk().MinRequired()
+				avail := r.segments.DiskAvailable()
+				if avail >= threshold {
+					continue
+				}
+				slog.Warn("urgent retention cleanup triggered by low disk space",
+					"available_mb", avail/(1024*1024),
+					"threshold_mb", threshold/(1024*1024),
+				)
+				r.runCleanup()
+
+				// Re-check after normal cleanup. If still below threshold,
+				// escalate to floor-breaking emergency deletion.
+				if r.segments.DiskAvailable() < threshold && r.config.UrgentCleanup.Enabled {
+					n, err := r.EmergencyDelete(ctx, r.config.UrgentCleanup)
+					if err != nil {
+						slog.Error("emergency cleanup failed", "error", err)
+					} else if n > 0 {
+						slog.Warn("emergency cleanup freed space by dropping segments below retain_days",
+							"segments_deleted", n,
+							"min_retention", r.config.UrgentCleanup.MinRetention,
+						)
+					}
 				}
 			}
 		}
@@ -42,11 +65,11 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 func (r *Recorder) runCleanup() {
 	slog.Debug("running retention cleanup")
 
-	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
 	eventMetadataCutoff := time.Now().Add(-time.Duration(r.eventConfig.RetainDays) * 24 * time.Hour)
+	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 
-	r.cleanSegments(segmentCutoff)
+	r.cleanSegments()
 	r.cleanClips(eventCutoff)
 	r.cleanSnapshots(eventCutoff)
 	r.cleanEventMetadata(eventMetadataCutoff)
@@ -107,15 +130,37 @@ func (r *Recorder) enforceStorageCap() {
 	}
 }
 
-func (r *Recorder) cleanSegments(cutoff time.Time) {
-	// Query the database directly for all expired segments, regardless of
-	// which camera they belong to. Filesystem-based iteration (listCameras)
-	// used to miss orphan segments from cameras that had been removed from
-	// the config — their DB rows would live forever.
-	expired, err := r.db.GetSegmentsEndingBefore(cutoff)
+// cleanSegments removes expired segments. Each camera uses its per-camera
+// retain_days override if configured; otherwise the global RetainDays applies.
+//
+// Per-camera overrides can extend OR shorten retention relative to the global.
+// When extending (e.g. global=7, cam=30), segments selected by the global
+// query are filtered out for that camera. When shortening (e.g. global=7,
+// cam=1), an additional per-camera query catches segments the global query
+// would miss.
+func (r *Recorder) cleanSegments() {
+	now := time.Now()
+	globalCutoff := now.Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
+
+	expired, err := r.db.GetSegmentsEndingBefore(globalCutoff)
 	if err != nil {
 		slog.Error("failed to query expired segments", "error", err)
 		return
+	}
+
+	// For cameras with shorter-than-global retention, also pick up segments
+	// that are older than the per-camera cutoff but still inside the global window.
+	for cam, days := range r.cameraRetention {
+		camCutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+		if !camCutoff.After(globalCutoff) {
+			continue // override is >= global; the global query already covered it
+		}
+		more, err := r.db.GetSegmentsEndingBeforeForCamera(cam, camCutoff)
+		if err != nil {
+			slog.Error("failed to query expired segments for camera", "camera", cam, "error", err)
+			continue
+		}
+		expired = append(expired, more...)
 	}
 
 	if len(expired) == 0 {
@@ -123,7 +168,22 @@ func (r *Recorder) cleanSegments(cutoff time.Time) {
 	}
 
 	slog.Debug("retention cleanup: removing expired segments", "count", len(expired))
+	seen := make(map[string]struct{}, len(expired))
 	for _, seg := range expired {
+		if _, dup := seen[seg.Path]; dup {
+			continue
+		}
+		seen[seg.Path] = struct{}{}
+
+		// For cameras with longer-than-global retention, the global query may
+		// have included segments that should still be kept.
+		if days, ok := r.cameraRetention[seg.Camera]; ok {
+			camCutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+			if seg.EndTime.After(camCutoff) {
+				continue
+			}
+		}
+
 		slog.Debug("removing expired segment",
 			"camera", seg.Camera,
 			"path", seg.Path,
@@ -174,11 +234,18 @@ func (r *Recorder) cleanClips(cutoff time.Time) {
 }
 
 func (r *Recorder) cleanSnapshots(cutoff time.Time) {
-	if r.snapshotPath == "" {
+	cleanSnapshotDir(r.snapshotPath, cutoff)
+	cleanSnapshotDir(r.snapshotFallbackPath, cutoff)
+}
+
+// cleanSnapshotDir removes .jpg files older than cutoff from dir. It is a
+// no-op when dir is empty or does not exist.
+func cleanSnapshotDir(dir string, cutoff time.Time) {
+	if dir == "" {
 		return
 	}
 
-	err := filepath.Walk(r.snapshotPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -191,8 +258,8 @@ func (r *Recorder) cleanSnapshots(cutoff time.Time) {
 		}
 		return nil
 	})
-	if err != nil {
-		slog.Error("error walking snapshots directory", "error", err)
+	if err != nil && !os.IsNotExist(err) {
+		slog.Error("error walking snapshots directory", "path", dir, "error", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/rvben/vedetta/internal/camera"
@@ -20,6 +21,8 @@ type Publisher interface {
 	PublishDiscovery(cameraNames []string)
 	PublishPresenceDiscovery(zones []ZoneInfo)
 	PublishObjectCount(cameraName, label string, count int)
+	PublishDiskStatus(freeBytes, totalBytes uint64, recordingPaused bool)
+	PublishDiskDiscovery()
 	Close()
 }
 
@@ -371,6 +374,91 @@ func (c *Client) publishCameraDiscovery(cameraName string) {
 	}
 
 	slog.Info("published HA discovery", "camera", cameraName)
+}
+
+// BuildDiskStatusPayload constructs the JSON body published to vedetta/status/disk.
+// Extracted for testability — PublishDiskStatus calls this.
+func BuildDiskStatusPayload(freeBytes, totalBytes uint64, recordingPaused bool) []byte {
+	usedPct := uint64(0)
+	if totalBytes > 0 {
+		usedPct = 100 - (freeBytes*100)/totalBytes
+	}
+	payload := map[string]any{
+		"free_bytes":       freeBytes,
+		"total_bytes":      totalBytes,
+		"free_mb":          freeBytes / (1024 * 1024),
+		"total_mb":         totalBytes / (1024 * 1024),
+		"used_percent":     usedPct,
+		"recording_paused": recordingPaused,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+	body, _ := json.Marshal(payload)
+	return body
+}
+
+// PublishDiskStatus publishes free/total byte counts and the recording-paused
+// flag as a retained JSON payload to vedetta/status/disk.
+func (c *Client) PublishDiskStatus(freeBytes, totalBytes uint64, recordingPaused bool) {
+	body := BuildDiskStatusPayload(freeBytes, totalBytes, recordingPaused)
+	topic := c.topic + "/status/disk"
+	token := c.client.Publish(topic, 1, true, body)
+	token.Wait()
+	if err := token.Error(); err != nil {
+		slog.Error("failed to publish disk status", "topic", topic, "error", err)
+	}
+}
+
+// PublishDiskDiscovery publishes Home Assistant MQTT discovery configs for the
+// disk-free sensor, disk-used percentage sensor, and recording-paused binary sensor.
+func (c *Client) PublishDiskDiscovery() {
+	base := c.topic + "/status/disk"
+	availTopic := c.topic + "/availability"
+
+	freeCfg := map[string]any{
+		"name":                "Vedetta Disk Free",
+		"unique_id":           "vedetta_disk_free_mb",
+		"state_topic":         base,
+		"value_template":      "{{ value_json.free_mb }}",
+		"unit_of_measurement": "MB",
+		"device_class":        "data_size",
+		"availability_topic":  availTopic,
+	}
+	usedCfg := map[string]any{
+		"name":                "Vedetta Disk Used",
+		"unique_id":           "vedetta_disk_used_pct",
+		"state_topic":         base,
+		"value_template":      "{{ value_json.used_percent }}",
+		"unit_of_measurement": "%",
+		"availability_topic":  availTopic,
+	}
+	pausedCfg := map[string]any{
+		"name":               "Vedetta Recording Paused",
+		"unique_id":          "vedetta_recording_paused",
+		"state_topic":        base,
+		"value_template":     "{{ 'ON' if value_json.recording_paused else 'OFF' }}",
+		"device_class":       "problem",
+		"payload_on":         "ON",
+		"payload_off":        "OFF",
+		"availability_topic": availTopic,
+	}
+
+	discoveries := map[string]map[string]any{
+		"homeassistant/sensor/vedetta_disk_free/config":     freeCfg,
+		"homeassistant/sensor/vedetta_disk_used/config":     usedCfg,
+		"homeassistant/binary_sensor/vedetta_paused/config": pausedCfg,
+	}
+	for discoveryTopic, cfg := range discoveries {
+		body, err := json.Marshal(cfg)
+		if err != nil {
+			slog.Error("failed to marshal disk discovery", "topic", discoveryTopic, "error", err)
+			continue
+		}
+		token := c.client.Publish(discoveryTopic, 1, true, body)
+		token.Wait()
+		if err := token.Error(); err != nil {
+			slog.Error("failed to publish disk discovery", "topic", discoveryTopic, "error", err)
+		}
+	}
 }
 
 func (c *Client) Close() {

@@ -43,20 +43,21 @@ var Version = "dev"
 // subsystems holds all initialized runtime components so both the normal and
 // setup-mode startup paths can share the same initialization logic.
 type subsystems struct {
-	mqttClient     *mqtt.Client
-	detector       *detect.Detector
-	faceRecognizer *detect.FaceRecognizer
-	objectEmbedder *detect.ObjectEmbedder
-	hub            *rtsp.Hub
-	recorder       *recording.Recorder
-	manager        *camera.Manager
-	notifier       *notify.NotificationDispatcher
-	events         chan camera.Event
-	eventEnds      chan camera.EventEnd
-	presenceEvents chan camera.PresenceEvent
-	faceEvents     chan camera.FaceEvent
-	motionActivity chan camera.MotionActivity
-	ptzClients     map[string]*camera.PTZClient
+	mqttClient      *mqtt.Client
+	detector        *detect.Detector
+	faceRecognizer  *detect.FaceRecognizer
+	objectEmbedder  *detect.ObjectEmbedder
+	hub             *rtsp.Hub
+	recorder        *recording.Recorder
+	manager         *camera.Manager
+	notifier        *notify.NotificationDispatcher
+	snapshotSaver   *snapshot.Saver
+	events          chan camera.Event
+	eventEnds       chan camera.EventEnd
+	presenceEvents  chan camera.PresenceEvent
+	faceEvents      chan camera.FaceEvent
+	motionActivity  chan camera.MotionActivity
+	ptzClients      map[string]*camera.PTZClient
 }
 
 func main() {
@@ -337,7 +338,10 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	// Create RTSP Hub — central connection manager
 	sub.hub = rtsp.NewHub(ctx)
 
-	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath)
+	snapshotFallbackRoot := snapshot.DefaultFallbackRoot()
+	sub.snapshotSaver = snapshot.NewSaver(cfg.Events.SnapshotPath, snapshotFallbackRoot, cfg.Events.SnapshotQuality)
+
+	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath, snapshotFallbackRoot)
 
 	// Register cameras for recording
 	for _, cam := range cfg.Cameras {
@@ -424,6 +428,34 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 		if len(zoneInfos) > 0 {
 			sub.mqttClient.PublishPresenceDiscovery(zoneInfos)
 		}
+	}
+
+	// Disk pressure monitoring — emits log events on transitions and every 30s.
+	diskMonitor := recording.NewDiskMonitor(sub.recorder.DiskMonitorSampler())
+	go diskMonitor.Run(ctx, 30*time.Second)
+
+	if sub.mqttClient != nil {
+		sub.mqttClient.PublishDiskDiscovery()
+
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			publish := func() {
+				sampler := sub.recorder.DiskMonitorSampler()
+				paused := sub.recorder.AnyCameraPaused()
+				diskMonitor.SetPaused(paused)
+				sub.mqttClient.PublishDiskStatus(sampler.Available(), sampler.Total(), paused)
+			}
+			publish()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					publish()
+				}
+			}
+		}()
 	}
 
 	sub.manager.Start(ctx, stoppedCameras)
@@ -715,11 +747,14 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if saveErr != nil {
 					slog.Error("failed to save event", "error", saveErr)
 				} else if event.SnapshotImage != nil && event.SnapshotPath != "" {
-					if err := snapshot.SaveSnapshot(event.SnapshotImage, event.SnapshotPath, cfg.Events.SnapshotQuality); err != nil {
+					if actualPath, err := sub.snapshotSaver.Save(event.SnapshotImage, event.SnapshotPath); err != nil {
 						slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
-					} else if err := db.UpdateEventSnapshotPath(event.ID, event.SnapshotPath); err != nil {
+					} else if err := db.UpdateEventSnapshotPath(event.ID, actualPath); err != nil {
 						slog.Error("failed to persist event snapshot path", "event", event.ID, "error", err)
 					} else {
+						// Update so downstream consumers (MQTT, push) see the path
+						// that was actually written, which may be the fallback.
+						event.SnapshotPath = actualPath
 						// Main.go is the authoritative setter of this bit for
 						// downstream consumers (MQTT publish, push dispatcher).
 						event.SnapshotAvailable = true

@@ -44,12 +44,14 @@ func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hu
 	if abs, err := filepath.Abs(baseDir); err == nil {
 		baseDir = abs
 	}
+	disk := media.NewDiskSpace(baseDir)
+	disk.SetThreshold(uint64(cfg.MinDiskFreeBytes()), db.GetLargestSegmentSizeSince)
 	return &SegmentRecorder{
 		config:      cfg,
 		baseDir:     baseDir,
 		db:          db,
 		hub:         hub,
-		disk:        media.NewDiskSpace(baseDir),
+		disk:        disk,
 		cancelFuncs: make(map[string]context.CancelFunc),
 	}
 }
@@ -105,6 +107,12 @@ func (sr *SegmentRecorder) DiskAvailable() uint64 {
 		return 0
 	}
 	return sr.disk.Available()
+}
+
+// Disk exposes the underlying DiskSpace monitor for callers that need to
+// read the dynamic MinRequired threshold (e.g. retention emergency path).
+func (sr *SegmentRecorder) Disk() *media.DiskSpace {
+	return sr.disk
 }
 
 // AnyPaused returns true if any recording consumer is paused due to low disk space.

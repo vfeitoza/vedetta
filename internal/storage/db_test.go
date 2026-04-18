@@ -55,6 +55,30 @@ func mustSaveSegment(t *testing.T, db *DB, s SegmentRecord) {
 	}
 }
 
+func TestGetSegmentsEndingBeforeForCamera(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+
+	// Seed:
+	//   cam1: 2 segments — one 2h old (expired vs cutoff=1h), one 30min old (kept)
+	//   cam2: 1 segment 2h old (must NOT appear in cam1 results)
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/old.mp4", now.Add(-2*time.Hour-10*time.Minute), now.Add(-2*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/recent.mp4", now.Add(-30*time.Minute-10*time.Minute), now.Add(-30*time.Minute), 100))
+	mustSaveSegment(t, db, makeSegment("cam2", "/cam2/old.mp4", now.Add(-2*time.Hour-10*time.Minute), now.Add(-2*time.Hour), 100))
+
+	cutoff := now.Add(-1 * time.Hour)
+	got, err := db.GetSegmentsEndingBeforeForCamera("cam1", cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].Path != "/cam1/old.mp4" {
+		t.Errorf("got path %q, want /cam1/old.mp4", got[0].Path)
+	}
+}
+
 // --- Database creation ---
 
 func TestNew_CreatesDatabase(t *testing.T) {
@@ -1519,5 +1543,85 @@ func TestNotificationPrefsCRUD(t *testing.T) {
 		if p.Camera == "front" && p.ObjectClass == "person" {
 			t.Fatalf("expected row to be removed when reset to default, got %+v", p)
 		}
+	}
+}
+
+// --- Emergency cleanup and size-priority recompression queries ---
+
+func TestGetOldestSegmentsOlderThan(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC()
+
+	// Three segments at -4h, -2h, -30m relative to now.
+	mustSaveSegment(t, db, makeSegment("a", "/old.mp4", base.Add(-4*time.Hour-10*time.Minute), base.Add(-4*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/mid.mp4", base.Add(-2*time.Hour-10*time.Minute), base.Add(-2*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/new.mp4", base.Add(-40*time.Minute), base.Add(-30*time.Minute), 100))
+
+	// cutoff = now-1h: segments ending before it are old enough for deletion;
+	// "old" (-4h) and "mid" (-2h) qualify, "new" (-30m) is protected.
+	segs, err := db.GetOldestSegmentsOlderThan(10, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 2 {
+		t.Fatalf("got %d segments, want 2", len(segs))
+	}
+	if segs[0].Path != "/old.mp4" {
+		t.Fatalf("first = %q, want /old.mp4", segs[0].Path)
+	}
+	if segs[1].Path != "/mid.mp4" {
+		t.Fatalf("second = %q, want /mid.mp4", segs[1].Path)
+	}
+}
+
+func TestGetLargestSegmentSizeSince(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC()
+
+	mustSaveSegment(t, db, makeSegment("a", "/s.mp4", base.Add(-2*time.Hour), base.Add(-2*time.Hour+time.Minute), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/m.mp4", base.Add(-30*time.Minute), base.Add(-30*time.Minute+time.Minute), 500))
+	mustSaveSegment(t, db, makeSegment("a", "/l.mp4", base.Add(-5*time.Minute), base.Add(-5*time.Minute+time.Minute), 2000))
+
+	// Only segments with start_time after now-1h are in scope: /m.mp4 (500) and /l.mp4 (2000).
+	got, err := db.GetLargestSegmentSizeSince(base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2000 {
+		t.Fatalf("GetLargestSegmentSizeSince = %d, want 2000", got)
+	}
+}
+
+func TestGetLargestSegmentSizeSince_NoRows(t *testing.T) {
+	db := newTestDB(t)
+
+	// Empty DB — must return 0, not an error.
+	got, err := db.GetLargestSegmentSizeSince(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GetLargestSegmentSizeSince on empty DB: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("GetLargestSegmentSizeSince on empty DB = %d, want 0", got)
+	}
+}
+
+func TestGetRecompressionCandidatesBySize(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC().Add(-4 * 24 * time.Hour)
+
+	mustSaveSegment(t, db, makeSegment("a", "/small.mp4", base, base.Add(time.Minute), 10))
+	mustSaveSegment(t, db, makeSegment("a", "/big.mp4", base, base.Add(time.Minute), 500))
+	mustSaveSegment(t, db, makeSegment("a", "/mid.mp4", base, base.Add(time.Minute), 100))
+
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	segs, err := db.GetRecompressionCandidatesBySize("a", cutoff, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 3 {
+		t.Fatalf("got %d, want 3", len(segs))
+	}
+	if segs[0].Path != "/big.mp4" || segs[1].Path != "/mid.mp4" || segs[2].Path != "/small.mp4" {
+		t.Fatalf("order = %v, want big,mid,small", []string{segs[0].Path, segs[1].Path, segs[2].Path})
 	}
 }

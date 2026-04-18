@@ -84,6 +84,7 @@ type CameraConfig struct {
 	Enabled       *bool                     `yaml:"enabled"`
 	Doorbell      DoorbellConfig            `yaml:"doorbell"`
 	TieredStorage CameraTieredStorageConfig `yaml:"tiered_storage"`
+	RetainDays    *int                      `yaml:"retain_days"` // Per-camera override for recording.retain_days; nil means use global value.
 }
 
 type DoorbellConfig struct {
@@ -144,19 +145,34 @@ type RecordingConfig struct {
 	RetainDays       int                 `yaml:"retain_days"`
 	EventRetain      int                 `yaml:"event_retain_days"` // Keep event clips longer than continuous
 	SegmentLength    time.Duration       `yaml:"segment_length"`
-	Continuous       bool                `yaml:"continuous"`  // Record continuously, not just events
-	MaxStorage       string              `yaml:"max_storage"` // Human-readable max storage (e.g. "10GB", "500MB"); 0 or empty = unlimited
+	Continuous       bool                `yaml:"continuous"`    // Record continuously, not just events
+	MaxStorage       string              `yaml:"max_storage"`   // Human-readable max storage (e.g. "10GB", "500MB"); 0 or empty = unlimited
+	MinDiskFree      string              `yaml:"min_disk_free"` // Hard threshold below which recording pauses (e.g. "2GB"); 0 or empty = no limit
+	UrgentCleanup    UrgentCleanupConfig `yaml:"urgent_cleanup"`
 	TieredStorage    TieredStorageConfig `yaml:"tiered_storage"`
 	maxStorageBytes  int64
+	minDiskFreeBytes int64
+}
+
+// UrgentCleanupConfig controls emergency retention-floor-breaking disk cleanup.
+type UrgentCleanupConfig struct {
+	// Enabled allows the retention floor to be broken when disk usage is critical.
+	Enabled bool `yaml:"enabled"`
+	// MinRetention is the minimum amount of recording to preserve even during emergency cleanup.
+	MinRetention time.Duration `yaml:"min_retention"`
+	// BatchSize is the number of oldest segments to drop per emergency cleanup pass.
+	BatchSize int `yaml:"batch_size"`
 }
 
 // TieredStorageConfig controls scheduled overnight recompression of old segments.
 type TieredStorageConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	AfterDays    int    `yaml:"after_days"`
-	TargetWidth  int    `yaml:"target_width"`
-	TargetHeight int    `yaml:"target_height"`
-	Schedule     string `yaml:"schedule"` // "HH:MM-HH:MM", local time, may span midnight
+	Enabled      bool          `yaml:"enabled"`
+	AfterDays    int           `yaml:"after_days"`
+	TargetWidth  int           `yaml:"target_width"`
+	TargetHeight int           `yaml:"target_height"`
+	Schedule     string        `yaml:"schedule"`  // "HH:MM-HH:MM", local time, may span midnight
+	Interval     time.Duration `yaml:"interval"`  // How often the recompress worker ticks inside the schedule window
+	Priority     string        `yaml:"priority"`  // "largest" | "oldest" — which eligible segment to recompress first
 }
 
 // CameraTieredStorageConfig holds per-camera overrides for tiered storage.
@@ -169,6 +185,20 @@ type CameraTieredStorageConfig struct {
 // MaxStorageBytes returns the parsed max storage limit in bytes.
 func (r *RecordingConfig) MaxStorageBytes() int64 {
 	return r.maxStorageBytes
+}
+
+// MinDiskFreeBytes returns the parsed minimum free disk space threshold in bytes.
+// Recording pauses when free space falls below this value. Returns 0 when not configured.
+func (r *RecordingConfig) MinDiskFreeBytes() int64 {
+	return r.minDiskFreeBytes
+}
+
+// EffectiveRetainDays returns this camera's retain_days if set, otherwise the global value.
+func (c CameraConfig) EffectiveRetainDays(globalRetain int) int {
+	if c.RetainDays != nil && *c.RetainDays > 0 {
+		return *c.RetainDays
+	}
+	return globalRetain
 }
 
 type EventConfig struct {
@@ -313,12 +343,20 @@ func Defaults() *Config {
 			EventRetain:      30,
 			SegmentLength:    10 * time.Minute,
 			Continuous:       true,
+			MinDiskFree:      "2GB",
+			UrgentCleanup: UrgentCleanupConfig{
+				Enabled:      true,
+				MinRetention: time.Hour,
+				BatchSize:    50,
+			},
 			TieredStorage: TieredStorageConfig{
 				Enabled:      false,
 				AfterDays:    1,
 				TargetWidth:  1280,
 				TargetHeight: 720,
-				Schedule:     "02:00-05:00",
+				Schedule:     "22:00-06:00",
+				Interval:     30 * time.Second,
+				Priority:     "largest",
 			},
 		},
 		Events: EventConfig{
@@ -380,6 +418,28 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("recording.max_storage: %w", err)
 		}
 		cfg.Recording.maxStorageBytes = bytes
+	}
+	if cfg.Recording.MinDiskFree != "" {
+		bytes, err := parseByteSize(cfg.Recording.MinDiskFree)
+		if err != nil {
+			return nil, fmt.Errorf("recording.min_disk_free: %w", err)
+		}
+		cfg.Recording.minDiskFreeBytes = bytes
+	}
+	if cfg.Recording.UrgentCleanup.BatchSize <= 0 {
+		cfg.Recording.UrgentCleanup.BatchSize = 50
+	}
+	if cfg.Recording.UrgentCleanup.MinRetention <= 0 {
+		cfg.Recording.UrgentCleanup.MinRetention = time.Hour
+	}
+	if cfg.Recording.TieredStorage.Interval <= 0 {
+		cfg.Recording.TieredStorage.Interval = 30 * time.Second
+	}
+	if cfg.Recording.TieredStorage.Priority == "" {
+		cfg.Recording.TieredStorage.Priority = "largest"
+	}
+	if cfg.Recording.TieredStorage.Priority != "largest" && cfg.Recording.TieredStorage.Priority != "oldest" {
+		return nil, fmt.Errorf("recording.tiered_storage.priority: must be \"largest\" or \"oldest\"")
 	}
 
 	// Validate TLS config: both cert and key must be set together
