@@ -1521,3 +1521,83 @@ func TestNotificationPrefsCRUD(t *testing.T) {
 		}
 	}
 }
+
+// --- Emergency cleanup and size-priority recompression queries ---
+
+func TestGetOldestSegmentsNewerThan(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC()
+
+	// Three segments at -4h, -2h, -30m relative to now.
+	mustSaveSegment(t, db, makeSegment("a", "/old.mp4", base.Add(-4*time.Hour-10*time.Minute), base.Add(-4*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/mid.mp4", base.Add(-2*time.Hour-10*time.Minute), base.Add(-2*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/new.mp4", base.Add(-40*time.Minute), base.Add(-30*time.Minute), 100))
+
+	// keepAfter = now-1h: only segments with end_time > (now-1h) are kept;
+	// "old" (-4h) and "mid" (-2h) end before the floor → eligible for deletion.
+	segs, err := db.GetOldestSegmentsNewerThan(10, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 2 {
+		t.Fatalf("got %d segments, want 2", len(segs))
+	}
+	if segs[0].Path != "/old.mp4" {
+		t.Fatalf("first = %q, want /old.mp4", segs[0].Path)
+	}
+	if segs[1].Path != "/mid.mp4" {
+		t.Fatalf("second = %q, want /mid.mp4", segs[1].Path)
+	}
+}
+
+func TestGetLargestSegmentSizeSince(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC()
+
+	mustSaveSegment(t, db, makeSegment("a", "/s.mp4", base.Add(-2*time.Hour), base.Add(-2*time.Hour+time.Minute), 100))
+	mustSaveSegment(t, db, makeSegment("a", "/m.mp4", base.Add(-30*time.Minute), base.Add(-30*time.Minute+time.Minute), 500))
+	mustSaveSegment(t, db, makeSegment("a", "/l.mp4", base.Add(-5*time.Minute), base.Add(-5*time.Minute+time.Minute), 2000))
+
+	// Only segments with start_time after now-1h are in scope: /m.mp4 (500) and /l.mp4 (2000).
+	got, err := db.GetLargestSegmentSizeSince(base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2000 {
+		t.Fatalf("GetLargestSegmentSizeSince = %d, want 2000", got)
+	}
+}
+
+func TestGetLargestSegmentSizeSince_NoRows(t *testing.T) {
+	db := newTestDB(t)
+
+	// Empty DB — must return 0, not an error.
+	got, err := db.GetLargestSegmentSizeSince(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GetLargestSegmentSizeSince on empty DB: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("GetLargestSegmentSizeSince on empty DB = %d, want 0", got)
+	}
+}
+
+func TestGetRecompressionCandidatesBySize(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Now().UTC().Add(-4 * 24 * time.Hour)
+
+	mustSaveSegment(t, db, makeSegment("a", "/small.mp4", base, base.Add(time.Minute), 10))
+	mustSaveSegment(t, db, makeSegment("a", "/big.mp4", base, base.Add(time.Minute), 500))
+	mustSaveSegment(t, db, makeSegment("a", "/mid.mp4", base, base.Add(time.Minute), 100))
+
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	segs, err := db.GetRecompressionCandidatesBySize("a", cutoff, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 3 {
+		t.Fatalf("got %d, want 3", len(segs))
+	}
+	if segs[0].Path != "/big.mp4" || segs[1].Path != "/mid.mp4" || segs[2].Path != "/small.mp4" {
+		t.Fatalf("order = %v, want big,mid,small", []string{segs[0].Path, segs[1].Path, segs[2].Path})
+	}
+}

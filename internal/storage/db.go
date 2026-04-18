@@ -837,6 +837,72 @@ func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	return scanSegments(rows)
 }
 
+// GetOldestSegmentsNewerThan returns the N oldest segments whose end_time is
+// before keepAfter, ordered by start_time ASC. keepAfter is the minimum-retention
+// floor: segments ending before it are old enough for emergency cleanup to delete,
+// while segments ending after it are protected.
+func (d *DB) GetOldestSegmentsNewerThan(limit int, keepAfter time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE replace(end_time, 'T', ' ') < ?
+		ORDER BY start_time ASC
+		LIMIT ?`,
+		utc(keepAfter).Format(layout),
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// GetLargestSegmentSizeSince returns the maximum size_bytes among segments
+// whose start_time is after since. Used to dynamically size the disk-free
+// threshold so it covers at least one full segment. Returns 0 if no segments
+// match.
+func (d *DB) GetLargestSegmentSizeSince(since time.Time) (int64, error) {
+	const layout = "2006-01-02 15:04:05"
+	var max sql.NullInt64
+	err := d.db.QueryRow(`
+		SELECT MAX(size_bytes) FROM segments
+		WHERE replace(start_time, 'T', ' ') > ?`,
+		utc(since).Format(layout),
+	).Scan(&max)
+	if err != nil {
+		return 0, err
+	}
+	return max.Int64, nil
+}
+
+// GetRecompressionCandidatesBySize returns segments for a specific camera that
+// are older than cutoff, have not been recompressed, and have fewer than 3
+// failures. Results are ordered by size_bytes DESC so the largest segments are
+// compressed first, maximising recovered disk space per operation.
+func (d *DB) GetRecompressionCandidatesBySize(camera string, cutoff time.Time, limit int) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ?
+		  AND replace(end_time, 'T', ' ') < ?
+		  AND recompressed = 0
+		  AND recompress_failures < 3
+		ORDER BY size_bytes DESC, start_time ASC
+		LIMIT ?`,
+		camera,
+		utc(cutoff).Format(layout),
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
 // GetSegmentsForRecompression returns segments eligible for recompression:
 // not yet recompressed, fewer than 3 failures, end_time before olderThan,
 // ordered oldest first.
