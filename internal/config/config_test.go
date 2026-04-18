@@ -573,8 +573,8 @@ cameras:
 	if ts.TargetHeight != 720 {
 		t.Errorf("target_height = %d, want 720", ts.TargetHeight)
 	}
-	if ts.Schedule != "02:00-05:00" {
-		t.Errorf("schedule = %q, want \"02:00-05:00\"", ts.Schedule)
+	if ts.Schedule != "22:00-06:00" {
+		t.Errorf("schedule = %q, want \"22:00-06:00\"", ts.Schedule)
 	}
 }
 
@@ -662,6 +662,81 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseStorageResilienceConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yml")
+	os.WriteFile(path, []byte(`
+recording:
+  path: /tmp
+  retain_days: 7
+  min_disk_free: "2GB"
+  urgent_cleanup:
+    enabled: true
+    min_retention: "2h"
+    batch_size: 100
+  tiered_storage:
+    enabled: true
+    interval: "45s"
+    schedule: "23:00-05:00"
+    priority: "largest"
+cameras:
+  - name: cam1
+    url: rtsp://1.2.3.4/s
+    retain_days: 3
+auth:
+  users:
+    - username: a
+      password_hash: x
+`), 0o644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Recording.MinDiskFreeBytes(); got != 2*1024*1024*1024 {
+		t.Fatalf("MinDiskFreeBytes = %d, want 2 GiB", got)
+	}
+	if !cfg.Recording.UrgentCleanup.Enabled {
+		t.Fatalf("UrgentCleanup.Enabled = false, want true")
+	}
+	if got := cfg.Recording.UrgentCleanup.MinRetention; got != 2*time.Hour {
+		t.Fatalf("MinRetention = %v, want 2h", got)
+	}
+	if cfg.Recording.UrgentCleanup.BatchSize != 100 {
+		t.Fatalf("BatchSize = %d, want 100", cfg.Recording.UrgentCleanup.BatchSize)
+	}
+	if got := cfg.Recording.TieredStorage.Interval; got != 45*time.Second {
+		t.Fatalf("TieredStorage.Interval = %v, want 45s", got)
+	}
+	if cfg.Recording.TieredStorage.Priority != "largest" {
+		t.Fatalf("TieredStorage.Priority = %q", cfg.Recording.TieredStorage.Priority)
+	}
+	if cfg.Cameras[0].RetainDays == nil || *cfg.Cameras[0].RetainDays != 3 {
+		t.Fatalf("Cameras[0].RetainDays = %v, want 3", cfg.Cameras[0].RetainDays)
+	}
+}
+
+func TestStorageResilienceDefaults(t *testing.T) {
+	def := Defaults()
+	if def.Recording.UrgentCleanup.Enabled != true {
+		t.Fatalf("default UrgentCleanup.Enabled should be true")
+	}
+	if def.Recording.UrgentCleanup.MinRetention != time.Hour {
+		t.Fatalf("default MinRetention = %v, want 1h", def.Recording.UrgentCleanup.MinRetention)
+	}
+	if def.Recording.UrgentCleanup.BatchSize != 50 {
+		t.Fatalf("default BatchSize = %d, want 50", def.Recording.UrgentCleanup.BatchSize)
+	}
+	if def.Recording.TieredStorage.Interval != 30*time.Second {
+		t.Fatalf("default Interval = %v, want 30s", def.Recording.TieredStorage.Interval)
+	}
+	if def.Recording.TieredStorage.Priority != "largest" {
+		t.Fatalf("default Priority = %q, want largest", def.Recording.TieredStorage.Priority)
+	}
+	if def.Recording.TieredStorage.Schedule != "22:00-06:00" {
+		t.Fatalf("default Schedule = %q", def.Recording.TieredStorage.Schedule)
+	}
 }
 
 func TestOpenH264ConfigShouldAutoInstall(t *testing.T) {
