@@ -426,6 +426,34 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 		}
 	}
 
+	// Disk pressure monitoring — emits log events on transitions and every 30s.
+	diskMonitor := recording.NewDiskMonitor(sub.recorder.DiskMonitorSampler())
+	go diskMonitor.Run(ctx, 30*time.Second)
+
+	if sub.mqttClient != nil {
+		sub.mqttClient.PublishDiskDiscovery()
+
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			publish := func() {
+				sampler := sub.recorder.DiskMonitorSampler()
+				paused := sub.recorder.AnyCameraPaused()
+				diskMonitor.SetPaused(paused)
+				sub.mqttClient.PublishDiskStatus(sampler.Available(), sampler.Total(), paused)
+			}
+			publish()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					publish()
+				}
+			}
+		}()
+	}
+
 	sub.manager.Start(ctx, stoppedCameras)
 
 	// Probe cameras for PTZ support (concurrent, non-blocking)

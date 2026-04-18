@@ -245,6 +245,45 @@ func TestEventPayloadWithOptionalFields(t *testing.T) {
 	}
 }
 
+func TestBuildDiskStatusPayload(t *testing.T) {
+	payload := BuildDiskStatusPayload(1*1024*1024*1024, 10*1024*1024*1024, false)
+
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got["free_bytes"].(float64) != float64(1*1024*1024*1024) {
+		t.Errorf("free_bytes = %v, want %d", got["free_bytes"], 1*1024*1024*1024)
+	}
+	if got["total_bytes"].(float64) != float64(10*1024*1024*1024) {
+		t.Errorf("total_bytes = %v", got["total_bytes"])
+	}
+	if got["used_percent"].(float64) != 90 {
+		t.Errorf("used_percent = %v, want 90", got["used_percent"])
+	}
+	if got["recording_paused"].(bool) != false {
+		t.Errorf("recording_paused = %v, want false", got["recording_paused"])
+	}
+	if _, ok := got["timestamp"].(string); !ok {
+		t.Errorf("timestamp missing or wrong type")
+	}
+}
+
+func TestBuildDiskStatusPayload_PausedAndZeroTotal(t *testing.T) {
+	payload := BuildDiskStatusPayload(0, 0, true)
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["used_percent"].(float64) != 0 {
+		t.Errorf("used_percent on zero total = %v, want 0", got["used_percent"])
+	}
+	if got["recording_paused"].(bool) != true {
+		t.Errorf("recording_paused = %v, want true", got["recording_paused"])
+	}
+}
+
 func TestEventPayloadOmitsEmptyOptionalFields(t *testing.T) {
 	event := camera.Event{
 		ID:         "cam1-t1-1234",

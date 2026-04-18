@@ -388,6 +388,17 @@ func (r *Recorder) DiskAvailable() uint64 {
 	return r.segments.DiskAvailable()
 }
 
+// AnyCameraPaused returns true if any recording consumer has paused due to disk pressure.
+func (r *Recorder) AnyCameraPaused() bool {
+	return r.segments.AnyPaused()
+}
+
+// DiskMonitorSampler returns the DiskSampler used by DiskMonitor. Convenience
+// accessor so main.go doesn't need to reach through r.segments.Disk().
+func (r *Recorder) DiskMonitorSampler() DiskSampler {
+	return r.segments.Disk()
+}
+
 // HasSegments returns true if there are any segments covering the given time for a camera.
 func (r *Recorder) HasSegments(cameraName string, t time.Time) bool {
 	// Check a small window around the timestamp

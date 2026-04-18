@@ -26,6 +26,7 @@ type DiskSpace struct {
 
 	mu        sync.Mutex
 	available uint64
+	total     uint64
 	checkedAt time.Time
 
 	thMu          sync.Mutex
@@ -60,7 +61,19 @@ func (ds *DiskSpace) refresh() {
 		return
 	}
 	ds.available = stat.Bavail * uint64(stat.Bsize)
+	ds.total = stat.Blocks * uint64(stat.Bsize)
 	ds.checkedAt = time.Now()
+}
+
+// Total returns the total capacity of the filesystem in bytes. The value is
+// cached for diskCheckInterval to avoid excessive syscalls.
+func (ds *DiskSpace) Total() uint64 {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	if time.Since(ds.checkedAt) > diskCheckInterval {
+		ds.refresh()
+	}
+	return ds.total
 }
 
 // SetThreshold configures the minimum-free-space threshold. `staticFloor`
