@@ -287,7 +287,7 @@ func (r *Recorder) RefreshStats() {
 	}
 
 	stats.DiskAvailable = r.segments.DiskAvailable()
-	stats.DiskLow = stats.DiskAvailable < media.MinDiskSpace
+	stats.DiskLow = stats.DiskAvailable < r.segments.Disk().MinRequired()
 	stats.RecordingPaused = r.segments.AnyPaused()
 	rStats := r.recompressor.Stats()
 	stats.Recompression = RecompressionStats{

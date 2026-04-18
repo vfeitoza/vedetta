@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/rvben/vedetta/internal/media"
 )
 
 // StartRetentionCleanup runs a background goroutine that periodically
@@ -30,7 +28,7 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 			case <-normalTicker.C:
 				r.runCleanup()
 			case <-urgentTicker.C:
-				if r.segments.DiskAvailable() < media.MinDiskSpace {
+				if r.segments.DiskAvailable() < r.segments.Disk().MinRequired() {
 					slog.Warn("urgent retention cleanup triggered by low disk space")
 					r.runCleanup()
 				}
