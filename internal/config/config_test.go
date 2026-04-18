@@ -719,7 +719,7 @@ auth:
 
 func TestStorageResilienceDefaults(t *testing.T) {
 	def := Defaults()
-	if def.Recording.UrgentCleanup.Enabled != true {
+	if !def.Recording.UrgentCleanup.Enabled {
 		t.Fatalf("default UrgentCleanup.Enabled should be true")
 	}
 	if def.Recording.UrgentCleanup.MinRetention != time.Hour {
@@ -736,6 +736,84 @@ func TestStorageResilienceDefaults(t *testing.T) {
 	}
 	if def.Recording.TieredStorage.Schedule != "22:00-06:00" {
 		t.Fatalf("default Schedule = %q", def.Recording.TieredStorage.Schedule)
+	}
+}
+
+func TestLoadFillsDefaultsForOmittedStorageResilienceFields(t *testing.T) {
+	// A config that enables tiered_storage but omits interval, priority, and the
+	// entire urgent_cleanup block. Load() must fill in the missing values via its
+	// default-fill guards, not rely solely on the Defaults() struct literal.
+	path := writeConfig(t, `
+cameras:
+  - name: cam1
+    url: rtsp://1.2.3.4/s
+recording:
+  tiered_storage:
+    enabled: true
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Recording.UrgentCleanup.BatchSize != 50 {
+		t.Errorf("UrgentCleanup.BatchSize = %d, want 50", cfg.Recording.UrgentCleanup.BatchSize)
+	}
+	if cfg.Recording.UrgentCleanup.MinRetention != time.Hour {
+		t.Errorf("UrgentCleanup.MinRetention = %v, want 1h", cfg.Recording.UrgentCleanup.MinRetention)
+	}
+	if cfg.Recording.TieredStorage.Interval != 30*time.Second {
+		t.Errorf("TieredStorage.Interval = %v, want 30s", cfg.Recording.TieredStorage.Interval)
+	}
+	if cfg.Recording.TieredStorage.Priority != "largest" {
+		t.Errorf("TieredStorage.Priority = %q, want \"largest\"", cfg.Recording.TieredStorage.Priority)
+	}
+}
+
+func TestLoadRejectsInvalidTieredStoragePriority(t *testing.T) {
+	path := writeConfig(t, `
+cameras:
+  - name: cam1
+    url: rtsp://1.2.3.4/s
+recording:
+  tiered_storage:
+    enabled: true
+    priority: "garbage"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() should return error for invalid tiered_storage.priority")
+	}
+	if !contains(err.Error(), "tiered_storage.priority") {
+		t.Errorf("error %q should mention \"tiered_storage.priority\"", err.Error())
+	}
+}
+
+func TestCameraConfigEffectiveRetainDays(t *testing.T) {
+	globalRetain := 7
+
+	zero := 0
+	three := 3
+
+	tests := []struct {
+		name       string
+		retainDays *int
+		want       int
+	}{
+		{"nil uses global", nil, globalRetain},
+		{"explicit zero uses global", &zero, globalRetain},
+		{"explicit three overrides global", &three, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cam := CameraConfig{RetainDays: tt.retainDays}
+			got := cam.EffectiveRetainDays(globalRetain)
+			if got != tt.want {
+				t.Errorf("EffectiveRetainDays(%d) = %d, want %d", globalRetain, got, tt.want)
+			}
+		})
 	}
 }
 
