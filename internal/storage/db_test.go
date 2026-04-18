@@ -1524,7 +1524,7 @@ func TestNotificationPrefsCRUD(t *testing.T) {
 
 // --- Emergency cleanup and size-priority recompression queries ---
 
-func TestGetOldestSegmentsNewerThan(t *testing.T) {
+func TestGetOldestSegmentsOlderThan(t *testing.T) {
 	db := newTestDB(t)
 	base := time.Now().UTC()
 
@@ -1533,9 +1533,9 @@ func TestGetOldestSegmentsNewerThan(t *testing.T) {
 	mustSaveSegment(t, db, makeSegment("a", "/mid.mp4", base.Add(-2*time.Hour-10*time.Minute), base.Add(-2*time.Hour), 100))
 	mustSaveSegment(t, db, makeSegment("a", "/new.mp4", base.Add(-40*time.Minute), base.Add(-30*time.Minute), 100))
 
-	// keepAfter = now-1h: only segments with end_time > (now-1h) are kept;
-	// "old" (-4h) and "mid" (-2h) end before the floor → eligible for deletion.
-	segs, err := db.GetOldestSegmentsNewerThan(10, base.Add(-time.Hour))
+	// cutoff = now-1h: segments ending before it are old enough for deletion;
+	// "old" (-4h) and "mid" (-2h) qualify, "new" (-30m) is protected.
+	segs, err := db.GetOldestSegmentsOlderThan(10, base.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

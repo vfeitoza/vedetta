@@ -837,11 +837,12 @@ func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 	return scanSegments(rows)
 }
 
-// GetOldestSegmentsNewerThan returns the N oldest segments whose end_time is
-// before keepAfter, ordered by start_time ASC. keepAfter is the minimum-retention
-// floor: segments ending before it are old enough for emergency cleanup to delete,
-// while segments ending after it are protected.
-func (d *DB) GetOldestSegmentsNewerThan(limit int, keepAfter time.Time) ([]SegmentRecord, error) {
+// GetOldestSegmentsOlderThan returns the N oldest segments whose end_time
+// predates cutoff. Used by emergency cleanup: when normal age-based
+// retention is not enough, this returns the candidates least painful to
+// delete (the oldest of what remains), while leaving anything younger
+// than cutoff untouched as the minimum-retention safety floor.
+func (d *DB) GetOldestSegmentsOlderThan(limit int, cutoff time.Time) ([]SegmentRecord, error) {
 	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
@@ -849,7 +850,7 @@ func (d *DB) GetOldestSegmentsNewerThan(limit int, keepAfter time.Time) ([]Segme
 		WHERE replace(end_time, 'T', ' ') < ?
 		ORDER BY start_time ASC
 		LIMIT ?`,
-		utc(keepAfter).Format(layout),
+		utc(cutoff).Format(layout),
 		limit,
 	)
 	if err != nil {
