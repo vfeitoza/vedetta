@@ -106,6 +106,9 @@ func (m *DiskMonitor) Subscribe(ch chan<- DiskEvent) {
 // Run starts the periodic sampling loop. It samples immediately, then
 // every interval until ctx is cancelled.
 func (m *DiskMonitor) Run(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	m.sampleOnce()
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -128,7 +131,7 @@ func (m *DiskMonitor) sampleOnce() {
 		return
 	}
 	m.lastLevel = level
-	subs := m.subscribers
+	subs := append([]chan<- DiskEvent(nil), m.subscribers...)
 	m.mu.Unlock()
 
 	avail := m.sampler.Available()
