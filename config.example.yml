@@ -2,6 +2,8 @@ cameras:
   - name: front_door
     url: rtsp://user:pass@192.168.1.100:554/stream1
     record_url: rtsp://user:pass@192.168.1.100:554/stream0  # optional high-res stream
+    # Optional per-camera override for retain_days. Unset = use recording.retain_days.
+    # retain_days: 3
     detect:
       enabled: true
       width: 640
@@ -40,6 +42,36 @@ recording:
   post_capture: 10s         # seconds after event to include in clip
   retain_days: 7            # delete continuous segments after N days
   event_retain_days: 30     # keep event clips longer
+
+  # Maximum total storage used by segments+clips. Triggers proactive trimming
+  # of the oldest segments. Recommended: 80-90% of the recording disk size.
+  # Default: empty (unlimited — relies purely on retain_days, risky on constrained disks).
+  # max_storage: "400GB"
+
+  # Minimum free space required to continue recording. Recording pauses below
+  # this floor. The effective threshold is max(min_disk_free, 2x largest recent segment).
+  # Should be at least 2x your largest segment size. Default: "2GB".
+  min_disk_free: "2GB"
+
+  # Emergency mode: when disk drops below min_disk_free and normal age-based
+  # cleanup cannot recover space, drop the oldest segments regardless of
+  # retain_days, preserving only min_retention. Prevents silent recording
+  # pause when the disk fills completely.
+  urgent_cleanup:
+    enabled: true
+    min_retention: 1h       # keep at least this much, even in emergency
+    batch_size: 50          # max segments dropped per emergency pass
+
+  # Tiered storage: scheduled overnight recompression of old segments to
+  # smaller resolutions, freeing disk while preserving history.
+  tiered_storage:
+    enabled: false
+    after_days: 3           # only recompress segments older than this
+    target_width: 1280
+    target_height: 720
+    schedule: "22:00-06:00" # local time; may span midnight
+    interval: 30s           # how often the worker processes one segment in-window
+    priority: largest       # "largest" reclaims disk fastest; "oldest" processes FIFO
 
 events:
   cooldown_seconds: 30
