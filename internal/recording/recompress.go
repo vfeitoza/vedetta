@@ -73,7 +73,11 @@ func (r *Recompressor) Start(ctx context.Context) {
 	}
 
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		interval := r.cfg.Interval
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -146,15 +150,29 @@ func (r *Recompressor) safeTranscode(path string) (result media.TranscodeResult,
 	return r.transcodeFn(path, r.cfg.TargetWidth, r.cfg.TargetHeight)
 }
 
-// processOne picks the oldest eligible segment across all enabled cameras and transcodes it.
+// processOne picks the single best eligible segment across all enabled cameras and transcodes it.
+// When priority is "largest" (default), picks the segment with the most bytes to reclaim.
+// When priority is "oldest", picks the segment with the earliest end time.
 // Returns true if a segment was processed, false if nothing was eligible.
 func (r *Recompressor) processOne() bool {
 	now := time.Now()
 
+	priority := r.cfg.Priority
+	if priority == "" {
+		priority = "largest"
+	}
+
 	var bestSeg *storage.SegmentRecord
 	for camName, eff := range r.eligibleCameras() {
 		cutoff := now.Add(-time.Duration(eff.AfterDays) * 24 * time.Hour)
-		segs, err := r.db.GetSegmentsForRecompression(camName, cutoff)
+
+		var segs []storage.SegmentRecord
+		var err error
+		if priority == "largest" {
+			segs, err = r.db.GetRecompressionCandidatesBySize(camName, cutoff, 1)
+		} else {
+			segs, err = r.db.GetSegmentsForRecompression(camName, cutoff)
+		}
 		if err != nil {
 			slog.Warn("recompression: query failed", "camera", camName, "error", err)
 			continue
@@ -163,8 +181,19 @@ func (r *Recompressor) processOne() bool {
 			continue
 		}
 		candidate := segs[0]
-		if bestSeg == nil || candidate.EndTime.Before(bestSeg.EndTime) {
+
+		if bestSeg == nil {
 			bestSeg = &candidate
+			continue
+		}
+		if priority == "largest" {
+			if candidate.SizeBytes > bestSeg.SizeBytes {
+				bestSeg = &candidate
+			}
+		} else {
+			if candidate.EndTime.Before(bestSeg.EndTime) {
+				bestSeg = &candidate
+			}
 		}
 	}
 

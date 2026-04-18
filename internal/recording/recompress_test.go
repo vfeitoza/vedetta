@@ -212,6 +212,113 @@ func TestRecompressionJob_PanicRecovery(t *testing.T) {
 	}
 }
 
+func TestRecompressorPicksLargestFirst(t *testing.T) {
+	_, db := newTestRecompressor(t)
+	dir := t.TempDir()
+	now := time.Now()
+	old := now.Add(-4 * 24 * time.Hour)
+
+	pathA := filepath.Join(dir, "a.mp4")
+	pathB := filepath.Join(dir, "b.mp4")
+	pathC := filepath.Join(dir, "c.mp4")
+	for _, p := range []string{pathA, pathB, pathC} {
+		if err := os.WriteFile(p, make([]byte, 100), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// cam_a: 10MB but oldest. cam_b: 500MB (largest, newer) and 100MB (newest).
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam_a", Path: pathA,
+		StartTime: old, EndTime: old.Add(time.Minute), SizeBytes: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam_b", Path: pathB,
+		StartTime: old.Add(time.Hour), EndTime: old.Add(time.Hour).Add(time.Minute), SizeBytes: 500,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam_b", Path: pathC,
+		StartTime: old.Add(2 * time.Hour), EndTime: old.Add(2 * time.Hour).Add(time.Minute), SizeBytes: 100,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.TieredStorageConfig{
+		Enabled: true, AfterDays: 1, Schedule: "00:00-23:59",
+		Interval: time.Second, Priority: "largest",
+		TargetWidth: 640, TargetHeight: 360,
+	}
+	cams := []config.CameraConfig{{Name: "cam_a"}, {Name: "cam_b"}}
+	r := NewRecompressor(cfg, cams, db)
+
+	var transcoded []string
+	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {
+		transcoded = append(transcoded, path)
+		return media.TranscodeResult{OriginalSize: 500, NewSize: 50}, nil
+	}
+
+	if !r.processOne() {
+		t.Fatal("processOne returned false, want true")
+	}
+	if len(transcoded) != 1 || transcoded[0] != pathB {
+		t.Fatalf("first transcode = %v, want [%s]", transcoded, pathB)
+	}
+}
+
+func TestRecompressorPicksOldestWhenConfigured(t *testing.T) {
+	_, db := newTestRecompressor(t)
+	dir := t.TempDir()
+	now := time.Now()
+	old := now.Add(-4 * 24 * time.Hour)
+
+	pathA := filepath.Join(dir, "a.mp4")
+	pathB := filepath.Join(dir, "b.mp4")
+	for _, p := range []string{pathA, pathB} {
+		if err := os.WriteFile(p, make([]byte, 100), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// cam_a: 10MB, oldest. cam_b: 500MB, newer. With Priority=oldest, /a.mp4 wins.
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam_a", Path: pathA,
+		StartTime: old, EndTime: old.Add(time.Minute), SizeBytes: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam_b", Path: pathB,
+		StartTime: old.Add(time.Hour), EndTime: old.Add(time.Hour).Add(time.Minute), SizeBytes: 500,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.TieredStorageConfig{
+		Enabled: true, AfterDays: 1, Schedule: "00:00-23:59",
+		Interval: time.Second, Priority: "oldest",
+		TargetWidth: 640, TargetHeight: 360,
+	}
+	cams := []config.CameraConfig{{Name: "cam_a"}, {Name: "cam_b"}}
+	r := NewRecompressor(cfg, cams, db)
+
+	var transcoded []string
+	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {
+		transcoded = append(transcoded, path)
+		return media.TranscodeResult{OriginalSize: 10, NewSize: 5}, nil
+	}
+
+	if !r.processOne() {
+		t.Fatal("processOne returned false, want true")
+	}
+	if len(transcoded) != 1 || transcoded[0] != pathA {
+		t.Fatalf("first transcode = %v, want [%s]", transcoded, pathA)
+	}
+}
+
 func TestRecompressionJob_UpdatesDBOnSuccess(t *testing.T) {
 	_, db := newTestRecompressor(t)
 	dir := t.TempDir()
