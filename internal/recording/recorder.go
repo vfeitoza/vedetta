@@ -82,24 +82,25 @@ type StorageProjection struct {
 
 // Recorder manages saving video clips for detected events.
 type Recorder struct {
-	config          config.RecordingConfig
-	eventConfig     config.EventConfig
-	db              *storage.DB
-	hub             *rtsp.Hub
-	segments        *SegmentRecorder
-	recompressor    *Recompressor
-	cameraURLs      map[string]string // camera name → record RTSP URL
-	cameraRetention map[string]int    // camera name → retain_days override (only cameras with explicit overrides)
-	startTime       time.Time
-	snapshotPath    string
-	exportProcess   func(inputs []string, outputPath string, start, duration time.Duration) error
+	config               config.RecordingConfig
+	eventConfig          config.EventConfig
+	db                   *storage.DB
+	hub                  *rtsp.Hub
+	segments             *SegmentRecorder
+	recompressor         *Recompressor
+	cameraURLs           map[string]string // camera name → record RTSP URL
+	cameraRetention      map[string]int    // camera name → retain_days override (only cameras with explicit overrides)
+	startTime            time.Time
+	snapshotPath         string
+	snapshotFallbackPath string
+	exportProcess        func(inputs []string, outputPath string, start, duration time.Duration) error
 
 	// Cached storage stats refreshed in background
 	statsMu     sync.RWMutex
 	cachedStats StorageStats
 }
 
-func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -109,16 +110,17 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 	os.RemoveAll(exportDir)
 
 	return &Recorder{
-		config:          cfg,
-		eventConfig:     eventCfg,
-		db:              db,
-		hub:             hub,
-		segments:        NewSegmentRecorder(cfg, db, hub),
-		recompressor:    NewRecompressor(cfg.TieredStorage, cameras, db),
-		cameraURLs:      make(map[string]string),
-		cameraRetention: buildCameraRetention(cameras),
-		startTime:       time.Now(),
-		snapshotPath:    snapshotPath,
+		config:               cfg,
+		eventConfig:          eventCfg,
+		db:                   db,
+		hub:                  hub,
+		segments:             NewSegmentRecorder(cfg, db, hub),
+		recompressor:         NewRecompressor(cfg.TieredStorage, cameras, db),
+		cameraURLs:           make(map[string]string),
+		cameraRetention:      buildCameraRetention(cameras),
+		startTime:            time.Now(),
+		snapshotPath:         snapshotPath,
+		snapshotFallbackPath: snapshotFallbackPath,
 		exportProcess: func(inputs []string, outputPath string, start, duration time.Duration) error {
 			if len(inputs) == 1 {
 				return media.TrimMP4(inputs[0], outputPath, start, duration)

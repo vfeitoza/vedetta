@@ -234,11 +234,18 @@ func (r *Recorder) cleanClips(cutoff time.Time) {
 }
 
 func (r *Recorder) cleanSnapshots(cutoff time.Time) {
-	if r.snapshotPath == "" {
+	cleanSnapshotDir(r.snapshotPath, cutoff)
+	cleanSnapshotDir(r.snapshotFallbackPath, cutoff)
+}
+
+// cleanSnapshotDir removes .jpg files older than cutoff from dir. It is a
+// no-op when dir is empty or does not exist.
+func cleanSnapshotDir(dir string, cutoff time.Time) {
+	if dir == "" {
 		return
 	}
 
-	err := filepath.Walk(r.snapshotPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -251,8 +258,8 @@ func (r *Recorder) cleanSnapshots(cutoff time.Time) {
 		}
 		return nil
 	})
-	if err != nil {
-		slog.Error("error walking snapshots directory", "error", err)
+	if err != nil && !os.IsNotExist(err) {
+		slog.Error("error walking snapshots directory", "path", dir, "error", err)
 	}
 }
 
