@@ -55,6 +55,30 @@ func mustSaveSegment(t *testing.T, db *DB, s SegmentRecord) {
 	}
 }
 
+func TestGetSegmentsEndingBeforeForCamera(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+
+	// Seed:
+	//   cam1: 2 segments — one 2h old (expired vs cutoff=1h), one 30min old (kept)
+	//   cam2: 1 segment 2h old (must NOT appear in cam1 results)
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/old.mp4", now.Add(-2*time.Hour-10*time.Minute), now.Add(-2*time.Hour), 100))
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/recent.mp4", now.Add(-30*time.Minute-10*time.Minute), now.Add(-30*time.Minute), 100))
+	mustSaveSegment(t, db, makeSegment("cam2", "/cam2/old.mp4", now.Add(-2*time.Hour-10*time.Minute), now.Add(-2*time.Hour), 100))
+
+	cutoff := now.Add(-1 * time.Hour)
+	got, err := db.GetSegmentsEndingBeforeForCamera("cam1", cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].Path != "/cam1/old.mp4" {
+		t.Errorf("got path %q, want /cam1/old.mp4", got[0].Path)
+	}
+}
+
 // --- Database creation ---
 
 func TestNew_CreatesDatabase(t *testing.T) {

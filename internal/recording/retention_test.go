@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,8 +70,7 @@ func TestCleanSegments_RemovesOrphanCameraRows(t *testing.T) {
 	}
 
 	// Run the cleanup.
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	rec.cleanSegments(cutoff)
+	rec.cleanSegments()
 
 	// The orphan segment should be gone from the DB.
 	if existing, _ := db.GetSegmentByPath(oldPath); existing != nil {
@@ -107,10 +107,72 @@ func TestCleanSegments_KeepsRecentSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	rec.cleanSegments(cutoff)
+	rec.cleanSegments()
 
 	if existing, _ := db.GetSegmentByPath(recentPath); existing == nil {
 		t.Error("expected recent segment to remain, but it was deleted")
+	}
+}
+
+// TestCleanSegments_PerCameraRetention verifies that per-camera retain_days
+// overrides are honoured: a shorter override deletes earlier, a longer
+// override keeps segments beyond the global window, and cameras without an
+// explicit override fall back to the global setting.
+func TestCleanSegments_PerCameraRetention(t *testing.T) {
+	rec, db := newTestRecorder(t)
+	rec.config.RetainDays = 7
+	rec.cameraRetention = map[string]int{
+		"cam_short": 1,  // shorter than global → 1.5d-old must be deleted
+		"cam_long":  30, // longer than global → 10d-old must be kept
+	}
+	now := time.Now()
+
+	seed := func(cam string, age time.Duration) string {
+		end := now.Add(-age)
+		segDir := filepath.Join(rec.config.Path, cam, "segments")
+		if err := os.MkdirAll(segDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(segDir, fmt.Sprintf("%s_%d.mp4", cam, age))
+		if err := os.WriteFile(path, []byte("seg"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveSegment(storage.SegmentRecord{
+			Camera:    cam,
+			Path:      path,
+			StartTime: end.Add(-10 * time.Minute),
+			EndTime:   end,
+			SizeBytes: 3,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	shortYoung := seed("cam_short", 12*time.Hour)       // < 1d → keep
+	shortOld := seed("cam_short", 36*time.Hour)         // > 1d → delete
+	longOld := seed("cam_long", 10*24*time.Hour)        // > 7d but < 30d → keep
+	defaultYoung := seed("cam_default", 3*24*time.Hour) // < 7d → keep
+	defaultOld := seed("cam_default", 8*24*time.Hour)   // > 7d → delete
+
+	rec.cleanSegments()
+
+	cases := []struct {
+		path     string
+		wantKept bool
+		label    string
+	}{
+		{shortYoung, true, "cam_short young"},
+		{shortOld, false, "cam_short old (override)"},
+		{longOld, true, "cam_long old (override extends)"},
+		{defaultYoung, true, "cam_default young"},
+		{defaultOld, false, "cam_default old (global)"},
+	}
+	for _, tc := range cases {
+		seg, _ := db.GetSegmentByPath(tc.path)
+		kept := seg != nil
+		if kept != tc.wantKept {
+			t.Errorf("%s: kept=%v, want=%v", tc.label, kept, tc.wantKept)
+		}
 	}
 }

@@ -82,16 +82,17 @@ type StorageProjection struct {
 
 // Recorder manages saving video clips for detected events.
 type Recorder struct {
-	config        config.RecordingConfig
-	eventConfig   config.EventConfig
-	db            *storage.DB
-	hub           *rtsp.Hub
-	segments      *SegmentRecorder
-	recompressor  *Recompressor
-	cameraURLs    map[string]string // camera name → record RTSP URL
-	startTime     time.Time
-	snapshotPath  string
-	exportProcess func(inputs []string, outputPath string, start, duration time.Duration) error
+	config          config.RecordingConfig
+	eventConfig     config.EventConfig
+	db              *storage.DB
+	hub             *rtsp.Hub
+	segments        *SegmentRecorder
+	recompressor    *Recompressor
+	cameraURLs      map[string]string // camera name → record RTSP URL
+	cameraRetention map[string]int    // camera name → retain_days override (only cameras with explicit overrides)
+	startTime       time.Time
+	snapshotPath    string
+	exportProcess   func(inputs []string, outputPath string, start, duration time.Duration) error
 
 	// Cached storage stats refreshed in background
 	statsMu     sync.RWMutex
@@ -108,15 +109,16 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 	os.RemoveAll(exportDir)
 
 	return &Recorder{
-		config:       cfg,
-		eventConfig:  eventCfg,
-		db:           db,
-		hub:          hub,
-		segments:     NewSegmentRecorder(cfg, db, hub),
-		recompressor: NewRecompressor(cfg.TieredStorage, cameras, db),
-		cameraURLs:   make(map[string]string),
-		startTime:    time.Now(),
-		snapshotPath: snapshotPath,
+		config:          cfg,
+		eventConfig:     eventCfg,
+		db:              db,
+		hub:             hub,
+		segments:        NewSegmentRecorder(cfg, db, hub),
+		recompressor:    NewRecompressor(cfg.TieredStorage, cameras, db),
+		cameraURLs:      make(map[string]string),
+		cameraRetention: buildCameraRetention(cameras),
+		startTime:       time.Now(),
+		snapshotPath:    snapshotPath,
 		exportProcess: func(inputs []string, outputPath string, start, duration time.Duration) error {
 			if len(inputs) == 1 {
 				return media.TrimMP4(inputs[0], outputPath, start, duration)
@@ -547,4 +549,16 @@ func (r *Recorder) ListSegmentsForDate(cameraName string, date time.Time) []stor
 		return nil
 	}
 	return segments
+}
+
+// buildCameraRetention constructs a map from camera name to retain_days for
+// cameras that have an explicit per-camera override set.
+func buildCameraRetention(cams []config.CameraConfig) map[string]int {
+	m := make(map[string]int, len(cams))
+	for _, c := range cams {
+		if c.RetainDays != nil && *c.RetainDays > 0 {
+			m[c.Name] = *c.RetainDays
+		}
+	}
+	return m
 }

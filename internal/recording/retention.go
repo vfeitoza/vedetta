@@ -65,11 +65,11 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 func (r *Recorder) runCleanup() {
 	slog.Debug("running retention cleanup")
 
-	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
 	eventMetadataCutoff := time.Now().Add(-time.Duration(r.eventConfig.RetainDays) * 24 * time.Hour)
+	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 
-	r.cleanSegments(segmentCutoff)
+	r.cleanSegments()
 	r.cleanClips(eventCutoff)
 	r.cleanSnapshots(eventCutoff)
 	r.cleanEventMetadata(eventMetadataCutoff)
@@ -130,15 +130,37 @@ func (r *Recorder) enforceStorageCap() {
 	}
 }
 
-func (r *Recorder) cleanSegments(cutoff time.Time) {
-	// Query the database directly for all expired segments, regardless of
-	// which camera they belong to. Filesystem-based iteration (listCameras)
-	// used to miss orphan segments from cameras that had been removed from
-	// the config — their DB rows would live forever.
-	expired, err := r.db.GetSegmentsEndingBefore(cutoff)
+// cleanSegments removes expired segments. Each camera uses its per-camera
+// retain_days override if configured; otherwise the global RetainDays applies.
+//
+// Per-camera overrides can extend OR shorten retention relative to the global.
+// When extending (e.g. global=7, cam=30), segments selected by the global
+// query are filtered out for that camera. When shortening (e.g. global=7,
+// cam=1), an additional per-camera query catches segments the global query
+// would miss.
+func (r *Recorder) cleanSegments() {
+	now := time.Now()
+	globalCutoff := now.Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
+
+	expired, err := r.db.GetSegmentsEndingBefore(globalCutoff)
 	if err != nil {
 		slog.Error("failed to query expired segments", "error", err)
 		return
+	}
+
+	// For cameras with shorter-than-global retention, also pick up segments
+	// that are older than the per-camera cutoff but still inside the global window.
+	for cam, days := range r.cameraRetention {
+		camCutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+		if !camCutoff.After(globalCutoff) {
+			continue // override is >= global; the global query already covered it
+		}
+		more, err := r.db.GetSegmentsEndingBeforeForCamera(cam, camCutoff)
+		if err != nil {
+			slog.Error("failed to query expired segments for camera", "camera", cam, "error", err)
+			continue
+		}
+		expired = append(expired, more...)
 	}
 
 	if len(expired) == 0 {
@@ -146,7 +168,22 @@ func (r *Recorder) cleanSegments(cutoff time.Time) {
 	}
 
 	slog.Debug("retention cleanup: removing expired segments", "count", len(expired))
+	seen := make(map[string]struct{}, len(expired))
 	for _, seg := range expired {
+		if _, dup := seen[seg.Path]; dup {
+			continue
+		}
+		seen[seg.Path] = struct{}{}
+
+		// For cameras with longer-than-global retention, the global query may
+		// have included segments that should still be kept.
+		if days, ok := r.cameraRetention[seg.Camera]; ok {
+			camCutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+			if seg.EndTime.After(camCutoff) {
+				continue
+			}
+		}
+
 		slog.Debug("removing expired segment",
 			"camera", seg.Camera,
 			"path", seg.Path,
