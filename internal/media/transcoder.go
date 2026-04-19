@@ -495,17 +495,19 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			if nLayers > maxLayers {
 				nLayers = maxLayers
 			}
-			// Capture C pointer values as uintptr (not pointer-typed — the GC
-			// does not trace uintptr fields) before doing any allocation.
+			// Capture C pointer values before doing any allocation. The buffers
+			// point to memory owned by the encoder (C-allocated in cgo mode,
+			// Go-allocated in purego mode) and remain valid until the next
+			// EncodeFrame or destroy call, both serialized by OpenH264Lock.
 			var (
-				layerBufPtrs   [maxLayers]uintptr
-				layerLenPtrs   [maxLayers]uintptr
+				layerBufPtrs   [maxLayers]*uint8
+				layerLenPtrs   [maxLayers]*int32
 				layerNalCounts [maxLayers]int32
 			)
 			for iLayer := 0; iLayer < nLayers; iLayer++ {
 				layer := &encInfo.SLayerInfo[iLayer]
-				layerBufPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PBsBuf))
-				layerLenPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PNalLengthInByte))
+				layerBufPtrs[iLayer] = layer.PBsBuf
+				layerLenPtrs[iLayer] = layer.PNalLengthInByte
 				layerNalCounts[iLayer] = layer.INalCount
 			}
 			OpenH264Unlock()
@@ -516,38 +518,25 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			pinner.Unpin()
 			pinner = &runtime.Pinner{}
 
-			// Copy NAL bytes from the C-owned buffers into Go-owned slices.
-			// The C buffers remain valid until the next EncodeFrame or
-			// WelsDestroySVCEncoder call (serialized by OpenH264Lock above).
-			//
-			// We access C memory via uintptr pointer arithmetic rather than
-			// unsafe.Slice to avoid creating any slice header whose Data field
-			// holds a C pointer (even transiently on the Go heap).
+			// Copy NAL bytes from the encoder buffers into Go-owned slices.
 			var nalBytes []byte
 			if encRet == openh264.CmResultSuccess && encFrameType != openh264.VideoFrameTypeSkip {
 				for iLayer := 0; iLayer < nLayers; iLayer++ {
 					nalCount := layerNalCounts[iLayer]
 					nalLenPtr := layerLenPtrs[iLayer]
 					bufPtr := layerBufPtrs[iLayer]
-					if nalCount <= 0 || nalLenPtr == 0 || bufPtr == 0 {
+					if nalCount <= 0 || nalLenPtr == nil || bufPtr == nil {
 						continue
 					}
-					// Sum NAL unit lengths by stepping through the C-owned int32 array
-					// one element at a time. No slice header with a C data pointer.
+					nalLens := unsafe.Slice(nalLenPtr, nalCount)
 					var layerSize int32
-					for i := int32(0); i < nalCount; i++ {
-						l := *(*int32)(unsafe.Pointer(nalLenPtr + uintptr(i)*4)) //nolint:govet // C pointer stored as uintptr; GC cannot move C-owned memory
+					for _, l := range nalLens {
 						layerSize += l
 					}
 					if layerSize <= 0 {
 						continue
 					}
-					// Copy NAL bytes from the C-owned buffer into a Go-owned slice.
-					layerCopy := make([]byte, layerSize)
-					for i := int32(0); i < layerSize; i++ {
-						layerCopy[i] = *(*uint8)(unsafe.Pointer(bufPtr + uintptr(i))) //nolint:govet // C pointer stored as uintptr; GC cannot move C-owned memory
-					}
-					nalBytes = append(nalBytes, layerCopy...)
+					nalBytes = append(nalBytes, unsafe.Slice(bufPtr, layerSize)...)
 				}
 			}
 
