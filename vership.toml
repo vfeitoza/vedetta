@@ -1,0 +1,9 @@
+[project]
+branch = "main"
+
+[changelog]
+unconventional = "exclude"
+
+[[version_files]]
+glob = "pypi/pyproject.toml"
+field = "version"
