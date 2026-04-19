@@ -174,6 +174,7 @@ func NewSetupMode(cfg config.APIConfig, db *storage.DB, configPath string, setup
 	s.mux.HandleFunc("GET /api/discover", sh.HandleDiscover)
 	s.mux.HandleFunc("POST /api/discover/probe", sh.HandleProbe)
 	s.mux.HandleFunc("GET /api/discover/thumbnail/{ip}", sh.HandleThumbnail)
+	s.mux.HandleFunc("POST /api/setup/test-rtsp", sh.HandleTestRTSP)
 	s.mux.HandleFunc("POST /api/cameras", sh.HandleAddCameras)
 	s.mux.HandleFunc("POST /api/setup/complete", sh.HandleComplete)
 	s.mux.HandleFunc("GET /api/setup/status", func(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +234,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/cameras/manage", s.AddCameraManage)
 	s.mux.HandleFunc("PUT /api/cameras/manage/{index}", s.UpdateCameraManage)
 	s.mux.HandleFunc("DELETE /api/cameras/manage/{index}", s.RemoveCameraManage)
+	s.mux.HandleFunc("POST /api/cameras/test-rtsp", s.TestRTSPConnection)
 
 	// Settings API endpoints
 	s.mux.HandleFunc("GET /api/settings/mqtt", s.GetMQTTSettings)

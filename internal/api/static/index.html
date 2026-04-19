@@ -174,11 +174,19 @@
         </div>
         <div style="margin-bottom:0.75rem">
           <label for="addcam-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
-          <input type="text" id="addcam-url" placeholder="rtsp://..." class="form-input">
+          <div style="display:flex;gap:0.5rem">
+            <input type="text" id="addcam-url" placeholder="rtsp://..." class="form-input" style="flex:1">
+            <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('addcam-url','addcam-url-result')">Test</button>
+          </div>
+          <div id="addcam-url-result" class="rtsp-test-result" aria-live="polite"></div>
         </div>
         <div style="margin-bottom:0.75rem">
           <label for="addcam-recurl" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Record URL</label>
-          <input type="text" id="addcam-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input">
+          <div style="display:flex;gap:0.5rem">
+            <input type="text" id="addcam-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input" style="flex:1">
+            <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('addcam-recurl','addcam-recurl-result')">Test</button>
+          </div>
+          <div id="addcam-recurl-result" class="rtsp-test-result" aria-live="polite"></div>
         </div>
         <div style="margin-bottom:0.75rem">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">

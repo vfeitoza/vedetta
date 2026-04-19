@@ -172,6 +172,7 @@ var allowedDataActionFunctions = new Set([
   'removeCam',
   'saveCam',
   'saveCamSettings',
+  'testRtspFromInput',
   'toggleCam',
   'toggleCamSettings',
   'zoneCancelDraw',
@@ -2830,6 +2831,44 @@ function closeAccountModal() {
 
   backdrop.classList.remove('open');
   modal.classList.remove('open');
+}
+
+// ─── RTSP Test Connection ───
+function testRtspFromInput(inputId, resultId) {
+  var input = document.getElementById(inputId);
+  var result = document.getElementById(resultId);
+  if (!input || !result) return;
+  var url = input.value.trim();
+  if (!url) {
+    result.textContent = 'Enter a URL first';
+    result.className = 'rtsp-test-result error';
+    return;
+  }
+  result.textContent = 'Testing...';
+  result.className = 'rtsp-test-result pending';
+  var endpoint = location.pathname === '/setup.html' ? '/api/setup/test-rtsp' : '/api/cameras/test-rtsp';
+  fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (!data.ok) {
+      var msg = (data.error || 'unknown error')
+        .replace(/^dial tcp .*: connect: /, '')
+        .replace(/^read tcp .*: /, '');
+      result.textContent = 'Failed: ' + msg;
+      result.className = 'rtsp-test-result error';
+      return;
+    }
+    var parts = [data.codec];
+    if (data.width && data.height) parts.push(data.width + '×' + data.height);
+    if (data.has_audio) parts.push('audio: ' + data.audio_codec);
+    result.textContent = '✓ ' + parts.join(' · ');
+    result.className = 'rtsp-test-result success';
+  }).catch(function() {
+    result.textContent = 'Network error';
+    result.className = 'rtsp-test-result error';
+  });
 }
 
 (function() {
