@@ -59,7 +59,7 @@
 
   <!-- Keyboard Shortcut Modal -->
   <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
     <div class="shortcut-modal-header">
       <h2>Keyboard Shortcuts</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
@@ -93,6 +93,17 @@
       el.setAttribute('hx-get', '/partials/event/' + encodeURIComponent(id));
       el.setAttribute('hx-trigger', 'load');
       htmx.process(el);
+
+      el.addEventListener('htmx:afterSwap', function() {
+        const root = el.querySelector('.event-detail-root');
+        if (!root) return;
+        const camera = root.dataset.eventCamera || '';
+        const label = root.dataset.eventLabel || '';
+        const time = root.dataset.eventTime || '';
+        const crumb = document.getElementById('event-breadcrumb');
+        if (crumb && camera) crumb.textContent = camera + ' · ' + time;
+        if (camera && label) document.title = label + ' · ' + camera + ' - Vedetta';
+      });
     })();
   </script>
 </body>

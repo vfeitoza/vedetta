@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>People - Vedetta</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/style.css">
   <meta name="theme-color" content="#0a0e14">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -93,7 +94,7 @@
 
   <!-- Identification Modal -->
   <div id="id-modal-backdrop" class="shortcut-backdrop"></div>
-  <div id="id-modal" class="id-modal" role="dialog" aria-label="Identify person" style="display:none">
+  <div id="id-modal" class="id-modal" role="dialog" aria-modal="true" aria-label="Identify person" style="display:none">
     <div class="id-modal-layout">
       <div class="id-modal-visual">
         <img id="id-modal-snapshot" src="" alt="snapshot" style="max-width:100%;max-height:55vh;border-radius:var(--radius);display:block">
@@ -137,7 +138,7 @@
 
   <!-- Snapshot Viewer Modal -->
   <div id="snapshot-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:950;cursor:pointer"></div>
-  <div id="snapshot-modal" role="dialog" aria-label="Face snapshot" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:960;max-width:90vw;max-height:90vh;text-align:center">
+  <div id="snapshot-modal" role="dialog" aria-modal="true" aria-label="Face snapshot" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:960;max-width:90vw;max-height:90vh;text-align:center">
     <button data-action-click="closeSnapshotModal()" aria-label="Close" style="position:absolute;top:-2rem;right:0;background:none;border:none;color:#fff;font-size:1.5rem;cursor:pointer">&times;</button>
     <img id="snapshot-img" src="" alt="Full snapshot" style="max-width:90vw;max-height:85vh;border-radius:0.5rem;display:block">
     <div id="snapshot-meta" style="margin-top:0.5rem;font-size:var(--text-sm);color:var(--text-tertiary)"></div>
@@ -145,9 +146,9 @@
 
   <!-- Merge Confirm Modal -->
   <div class="shortcut-backdrop" id="merge-backdrop"></div>
-  <div class="shortcut-modal" id="merge-modal" role="dialog" aria-label="Merge people">
+  <div class="shortcut-modal" id="merge-modal" role="dialog" aria-modal="true" aria-labelledby="merge-title">
     <div class="shortcut-modal-header">
-      <h2>Merge People</h2>
+      <h2 id="merge-title">Merge People</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeMergeModal()" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -163,7 +164,7 @@
 
   <!-- Assign Modal -->
   <div class="shortcut-backdrop" id="assign-backdrop"></div>
-  <div class="shortcut-modal" id="assign-modal" role="dialog" aria-label="Assign face to person">
+  <div class="shortcut-modal" id="assign-modal" role="dialog" aria-modal="true" aria-label="Assign face to person">
     <div class="shortcut-modal-header">
       <h2>Assign to Person</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeAssignModal()" aria-label="Close">
@@ -178,7 +179,7 @@
 
   <!-- Keyboard Shortcut Modal -->
   <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
     <div class="shortcut-modal-header">
       <h2>Keyboard Shortcuts</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
@@ -220,7 +221,7 @@
     function renderPeople(people) {
       var grid = document.getElementById('people-grid');
       if (!people.length) {
-        grid.innerHTML = '<div class="loading-state">No people found. Faces will appear here once face recognition detects them.</div>';
+        grid.innerHTML = '<div class="empty-state"><p>No people found. Faces will appear here once face recognition detects them.</p></div>';
         return;
       }
       var html = '';
@@ -308,7 +309,7 @@
         }
 
         if (!faces.length && !events.length) {
-          html = '<div class="loading-state" style="padding:0.5rem">No faces or appearances found.</div>';
+          html = '<div class="empty-state" style="padding:0.5rem"><p>No faces or appearances found.</p></div>';
         }
 
         el.innerHTML = html;
@@ -332,9 +333,12 @@
     }
 
     function showMergeConfirm(target, sourceId) {
+      document.getElementById('merge-title').textContent = 'Merge People';
       var msg = document.getElementById('merge-message');
       msg.textContent = '"' + target.name + '" already exists with ' + target.face_count + ' face' + (target.face_count !== 1 ? 's' : '') + '. Merge into them?';
       var btn = document.getElementById('merge-confirm-btn');
+      btn.textContent = 'Merge';
+      btn.className = 'btn btn-sm btn-primary';
       btn.onclick = function() {
         closeMergeModal();
         fetch('/api/people/merge', {
@@ -343,11 +347,11 @@
           body: JSON.stringify({ target_id: target.id, source_id: sourceId })
         }).then(function(r) {
           if (!r.ok) throw new Error('Failed');
-          if (typeof showToast === 'function') showToast('Merged into ' + target.name);
+          if (typeof toast === 'function') toast('Merged into ' + target.name);
           loadPeople();
           loadUnmatched();
         }).catch(function() {
-          if (typeof showToast === 'function') showToast('Merge failed');
+          if (typeof toast === 'function') toast('Merge failed');
         });
       };
       document.getElementById('merge-backdrop').classList.add('open');
@@ -360,18 +364,19 @@
     }
 
     function doRename(id, name) {
+      var trimmed = (name || '').trim();
       fetch('/api/people/' + id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name })
+        body: JSON.stringify({ name: trimmed })
       }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
         // Update local data so future renames can match
         var p = peopleData.find(function(pp) { return pp.id === id; });
-        if (p) p.name = name;
-        if (typeof showToast === 'function') showToast('Renamed to ' + name);
+        if (p) p.name = trimmed;
+        if (typeof toast === 'function') toast(trimmed ? ('Renamed to ' + trimmed) : 'Name cleared');
       }).catch(function() {
-        if (typeof showToast === 'function') showToast('Failed to rename');
+        if (typeof toast === 'function') toast('Failed to rename');
       });
     }
 
@@ -387,25 +392,28 @@
     }
 
     function deletePerson(id, name) {
+      document.getElementById('merge-title').textContent = 'Delete Person';
       var msg = document.getElementById('merge-message');
       msg.textContent = 'Delete "' + (name || 'Unnamed') + '"? Their faces will become unmatched.';
       var btn = document.getElementById('merge-confirm-btn');
       btn.textContent = 'Delete';
+      btn.className = 'btn btn-sm btn-danger';
       btn.onclick = function() {
         closeMergeModal();
-        btn.textContent = 'Merge';
-        doDeletePerson(id);
+        doDeletePerson(id, name);
       };
       document.getElementById('merge-backdrop').classList.add('open');
       document.getElementById('merge-modal').classList.add('open');
-      return;
     }
 
-    function doDeletePerson(id) {
+    function doDeletePerson(id, name) {
       fetch('/api/people/' + id, { method: 'DELETE' }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
+        if (typeof toast === 'function') toast('Deleted ' + (name || 'person'));
         loadPeople();
         loadUnmatched();
+      }).catch(function() {
+        if (typeof toast === 'function') toast('Failed to delete person', 'error');
       });
     }
 
@@ -688,17 +696,21 @@
     }
 
     function assignToNewPerson() {
-      var name = prompt('Person name:');
-      if (!name) return;
-      fetch('/api/faces/' + assigningFaceId + '/assign', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ person_id: 0, name: name })
-      }).then(function(r) {
-        if (!r.ok) throw new Error('Failed');
-        closeAssignModal();
-        loadPeople();
-        loadUnmatched();
+      var faceId = assigningFaceId;
+      showInputModal('Assign face', 'Name for the new person:', '', function(name) {
+        if (!name) return;
+        fetch('/api/faces/' + faceId + '/assign', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ person_id: 0, name: name })
+        }).then(function(r) {
+          if (!r.ok) throw new Error('Failed');
+          closeAssignModal();
+          loadPeople();
+          loadUnmatched();
+        }).catch(function() {
+          if (typeof toast === 'function') toast('Failed to assign face');
+        });
       });
     }
 
@@ -729,7 +741,7 @@
 
     function showFaceSnapshot(faceId, eventId, camera) {
       if (!eventId) {
-        if (typeof showToast === 'function') showToast('No snapshot linked to this face');
+        if (typeof toast === 'function') toast('No snapshot linked to this face');
         return;
       }
       var modal = document.getElementById('snapshot-modal');

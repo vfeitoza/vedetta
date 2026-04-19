@@ -274,7 +274,8 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 	}
 
 	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
-		`<div class="page-header"><h1>{{.Label}} Detection</h1></div>` +
+		`<div class="event-detail-root" data-event-camera="{{.CameraName}}" data-event-label="{{.Label}}" data-event-time="{{.Timestamp.Format "2006-01-02 15:04:05"}}"></div>` +
+			`<div class="page-header"><h1>{{.Label}} Detection</h1></div>` +
 			`<div class="event-detail-layout">` +
 			`<div class="event-media">` +
 			`{{if .SnapshotAvailable}}<div class="detection-overlay-wrap" id="detection-wrap">` +

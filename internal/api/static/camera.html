@@ -20,7 +20,7 @@
       <span>vedetta</span>
     </a>
     <div class="topnav-links">
-      <a href="/" class="topnav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
       <a href="/events.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
       <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
       <a href="/people.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
@@ -71,6 +71,10 @@
           <video id="live-video" autoplay playsinline muted class="hidden"></video>
           <img id="live-mjpeg" class="hidden" alt="MJPEG stream">
           <img id="live-snapshot" alt="Latest snapshot">
+          <div class="stream-connecting hidden" id="stream-connecting" role="status" aria-live="polite">
+            <div class="spinner"></div>
+            <span id="stream-connecting-label">Connecting...</span>
+          </div>
           <div class="stream-stats" id="stream-stats"></div>
           <div class="video-pause-indicator hidden" id="video-pause-indicator">
             <svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -229,21 +233,21 @@
             <svg id="cam-settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="margin-left:auto;transition:transform 0.2s"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
           <div class="sys-card-body" id="cam-settings-body" style="display:none">
-            <div id="cam-settings-restart" style="display:none;padding:0.75rem 1rem;margin-bottom:1rem;border-radius:8px;background:rgba(255,200,50,0.12);border:1px solid rgba(255,200,50,0.3);color:var(--text);font-size:var(--text-sm)">
+            <div id="cam-settings-restart" style="display:none;padding:0.75rem 1rem;margin-bottom:1rem;border-radius:var(--radius-sm);background:var(--amber-dim);border:1px solid var(--amber);color:var(--amber);font-size:var(--text-sm)">
               Camera configuration has changed. Restart Vedetta for changes to take effect.
             </div>
             <form id="cam-settings-form">
               <div style="margin-bottom:0.75rem">
                 <label for="cam-set-name" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Name</label>
-                <input type="text" id="cam-set-name" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+                <input type="text" id="cam-set-name" class="form-input">
               </div>
               <div style="margin-bottom:0.75rem">
                 <label for="cam-set-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
-                <input type="text" id="cam-set-url" placeholder="rtsp://..." style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+                <input type="text" id="cam-set-url" placeholder="rtsp://..." class="form-input">
               </div>
               <div style="margin-bottom:0.75rem">
                 <label for="cam-set-recurl" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Record URL</label>
-                <input type="text" id="cam-set-recurl" placeholder="rtsp://... (optional, uses URL if empty)" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+                <input type="text" id="cam-set-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input">
               </div>
               <div style="margin-bottom:0.75rem">
                 <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
@@ -255,15 +259,15 @@
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;margin-bottom:0.75rem">
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">W</label>
-                  <input type="number" id="cam-set-dw" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-dw" class="form-input-sm">
                 </div>
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">H</label>
-                  <input type="number" id="cam-set-dh" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-dh" class="form-input-sm">
                 </div>
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">FPS</label>
-                  <input type="number" id="cam-set-df" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-df" class="form-input-sm">
                 </div>
                 <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem">
                   <input type="checkbox" id="cam-set-det-enabled" style="accent-color:var(--accent)">On
@@ -273,15 +277,15 @@
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:1rem">
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">W</label>
-                  <input type="number" id="cam-set-rw" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-rw" class="form-input-sm">
                 </div>
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">H</label>
-                  <input type="number" id="cam-set-rh" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-rh" class="form-input-sm">
                 </div>
                 <div>
                   <label style="font-size:0.8rem;color:var(--muted)">FPS</label>
-                  <input type="number" id="cam-set-rf" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem">
+                  <input type="number" id="cam-set-rf" class="form-input-sm">
                 </div>
               </div>
               <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
@@ -298,7 +302,7 @@
 
   <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
     <div class="bottom-tabs-inner">
-      <a href="/" class="bottom-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
+      <a href="/" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
       <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
       <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
       <a href="/people.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
@@ -309,7 +313,7 @@
 
   <!-- Keyboard Shortcut Modal -->
   <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
     <div class="shortcut-modal-header">
       <h2>Keyboard Shortcuts</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
@@ -448,16 +452,25 @@
 
     function deleteCamSettings() {
       if (camSettingsIndex < 0) return;
-      if (!confirm('Remove this camera from configuration?')) return;
-      fetch('/api/cameras/manage/' + camSettingsIndex, { method: 'DELETE' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          if (data && data.error) {
-            alert(data.error);
-          } else {
-            location.href = '/';
-          }
-        });
+      showConfirmModal(
+        'Remove camera',
+        'Remove this camera from configuration? This cannot be undone.',
+        function() {
+          fetch('/api/cameras/manage/' + camSettingsIndex, { method: 'DELETE' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data && data.error) {
+                if (typeof toast === 'function') toast(data.error, 'error');
+              } else {
+                location.href = '/';
+              }
+            })
+            .catch(function() {
+              if (typeof toast === 'function') toast('Failed to remove camera', 'error');
+            });
+        },
+        { confirmLabel: 'Remove', destructive: true }
+      );
     }
 
     (function() {

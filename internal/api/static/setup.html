@@ -479,7 +479,7 @@
       <p class="subtitle">Set up the admin credentials for your NVR.</p>
       <form id="admin-form">
         <label for="admin-username">Username</label>
-        <input id="admin-username" type="text" autocomplete="username" required>
+        <input id="admin-username" type="text" autocomplete="username" autofocus required>
         <label for="admin-password">Password</label>
         <input id="admin-password" type="password" autocomplete="new-password" required>
         <label for="admin-confirm">Confirm password</label>
@@ -551,7 +551,10 @@
               </svg>
             </div>
             <h3>No cameras found</h3>
-            <p>ONVIF discovery didn't find any devices. If you're running in Docker, host networking is required. You can add cameras manually from Settings.</p>
+            <p>ONVIF discovery didn't find any devices. If you're running in Docker, host networking is required.</p>
+            <p style="margin-top:0.75rem">
+              <a href="/" class="btn btn-secondary btn-small">Finish setup and add manually</a>
+            </p>
           </div>
         </div>
 
@@ -571,6 +574,7 @@
           <div class="actions">
             <button type="button" class="btn btn-primary" id="add-cameras" disabled>Add Selected Cameras</button>
           </div>
+          <div class="status" id="add-cameras-status" style="margin-top:0.5rem"></div>
         </div>
 
         <div class="actions">
@@ -1018,12 +1022,18 @@
           .then(function(resp) { return resp.json(); })
           .then(function(data) {
             if (data.status === 'config_readonly' && data.yaml_snippets) {
-              alert('Could not write to config file. Please add cameras manually:\n\n' + data.yaml_snippets.join('\n'));
+              var statusEl = $('add-cameras-status');
+              statusEl.innerHTML = 'Could not write to config file. Add these cameras to your <code>config.yml</code> manually:<pre style="margin-top:0.5rem;padding:0.75rem;background:var(--surface-2);border-radius:var(--radius-sm);overflow:auto;font-size:0.8rem;white-space:pre-wrap">' + escapeHtml(data.yaml_snippets.join('\n')) + '</pre>';
+              statusEl.style.color = 'var(--amber)';
+              btn.disabled = false;
+              return;
             }
             location.href = '/';
           })
           .catch(function(err) {
-            alert('Failed to add cameras: ' + err.message);
+            var statusEl = $('add-cameras-status');
+            statusEl.textContent = 'Failed to add cameras: ' + err.message;
+            statusEl.style.color = 'var(--danger)';
             btn.disabled = false;
           });
       });

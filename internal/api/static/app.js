@@ -416,6 +416,7 @@ function startMSE() {
   var name = getCameraName();
   if (!name) return;
   stopStream();
+  showStreamConnecting('MSE');
 
   if (typeof MediaSource === 'undefined') {
     console.warn('MSE not supported, falling back to WebRTC');
@@ -494,6 +495,7 @@ function startMSE() {
 
       currentStream = 'mse';
       mseReconnectAttempts = 0;
+      hideStreamConnecting();
       updateStreamButtons();
       updateMuteButton(codecStr.indexOf('mp4a') !== -1);
       startMSEStats();
@@ -617,6 +619,7 @@ async function startWebRTC() {
   const name = getCameraName();
   if (!name) return;
   stopStream();
+  showStreamConnecting('WebRTC');
 
   try {
     peerConnection = new RTCPeerConnection({
@@ -661,6 +664,7 @@ async function startWebRTC() {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
 
     currentStream = 'webrtc';
+    hideStreamConnecting();
     updateStreamButtons();
     startStreamStats();
 
@@ -685,9 +689,18 @@ function startMJPEG() {
   const name = getCameraName();
   if (!name) return;
   stopStream();
+  showStreamConnecting('MJPEG');
 
   const mjpeg = el('live-mjpeg');
-  if (!mjpeg) return;
+  if (!mjpeg) { hideStreamConnecting(); return; }
+  mjpeg.onerror = function () {
+    if (currentStream !== 'mjpeg') return;
+    hideStreamConnecting();
+    stopStreamStats();
+    mjpeg.classList.add('hidden');
+    toast('MJPEG stream failed — check that the camera is online', 'error');
+  };
+  mjpeg.onload = function () { hideStreamConnecting(); };
   mjpeg.src = '/api/cameras/' + encodeURIComponent(name) + '/mjpeg';
   mjpeg.classList.remove('hidden');
   hide('live-snapshot');
@@ -822,6 +835,19 @@ function initViewportPause() {
   setInterval(function() { updatePauseUI(); }, 2000);
 }
 
+function showStreamConnecting(label) {
+  var ov = el('stream-connecting');
+  if (!ov) return;
+  var lbl = el('stream-connecting-label');
+  if (lbl) lbl.textContent = 'Connecting ' + (label || '') + '...';
+  ov.classList.remove('hidden');
+}
+
+function hideStreamConnecting() {
+  var ov = el('stream-connecting');
+  if (ov) ov.classList.add('hidden');
+}
+
 function stopStream() {
   if (mseReconnectTimer) {
     clearTimeout(mseReconnectTimer);
@@ -832,6 +858,7 @@ function stopStream() {
     webrtcReconnectTimer = null;
   }
 
+  hideStreamConnecting();
   cleanupMSE();
 
   if (peerConnection) {
@@ -2177,7 +2204,11 @@ document.addEventListener('keydown', function(e) {
       break;
     case 'l':
     case 'L':
-      if (playbackMode) returnToLive();
+      if (typeof playbackMode !== 'undefined' && playbackMode) {
+        returnToLive();
+      } else if (el('btn-go-live') && !el('btn-go-live').classList.contains('hidden')) {
+        seekToLive();
+      }
       break;
     case 'a':
     case 'A':
@@ -2189,10 +2220,6 @@ document.addEventListener('keydown', function(e) {
       break;
     case ' ':
       if (el('live-video')) { togglePause(); e.preventDefault(); }
-      break;
-    case 'l':
-    case 'L':
-      if (el('btn-go-live') && !el('btn-go-live').classList.contains('hidden')) { seekToLive(); }
       break;
     case 'ArrowLeft': {
       var prev = document.querySelector('[data-prev-id]');
@@ -2294,15 +2321,37 @@ function setConnStatus(status, detail) {
   }
 }
 
-document.addEventListener('htmx:sendError', function() {
+function showHtmxFallback(target) {
+  if (!target || !target.getAttribute) return;
+  if (target.getAttribute('data-htmx-no-fallback') === '1') return;
+  // Only replace content if the target is currently showing a loading placeholder
+  // or is empty — don't wipe real content on a periodic poll failure.
+  var hasLoader = target.querySelector && target.querySelector('.loading-state, .skeleton');
+  if (!hasLoader && target.children && target.children.length > 0) return;
+  target.innerHTML = '<div class="empty-state"><p>Failed to load. <button type="button" class="btn btn-sm" data-htmx-retry>Retry</button></p></div>';
+}
+
+document.addEventListener('htmx:sendError', function(e) {
   clearTimeout(connDebounceTimer);
   setConnStatus('error');
+  if (e && e.detail) showHtmxFallback(e.detail.target || e.target);
 });
 
 document.addEventListener('htmx:responseError', function(e) {
   console.error('HTMX error:', e.detail);
   clearTimeout(connDebounceTimer);
   setConnStatus('error');
+  if (e && e.detail) showHtmxFallback(e.detail.target || e.target);
+});
+
+document.addEventListener('click', function(e) {
+  var btn = e.target && e.target.closest && e.target.closest('[data-htmx-retry]');
+  if (!btn) return;
+  var holder = btn.closest('[hx-get]');
+  if (holder && window.htmx) {
+    holder.innerHTML = '<div class="loading-state">Loading...</div>';
+    htmx.trigger(holder, 'load');
+  }
 });
 
 document.addEventListener('htmx:afterRequest', function(e) {
@@ -2340,6 +2389,14 @@ document.addEventListener('visibilitychange', function() {
     stopBirdseye();
     stopGridSnapshotRefresh();
     stopStatsRefresh();
+    if (typeof zoneSnapshotTimer !== 'undefined' && zoneSnapshotTimer) {
+      clearInterval(zoneSnapshotTimer);
+      zoneSnapshotTimer = null;
+    }
+    if (typeof zonePresenceTimer !== 'undefined' && zonePresenceTimer) {
+      clearInterval(zonePresenceTimer);
+      zonePresenceTimer = null;
+    }
   } else {
     if (localStorage.getItem('vedetta-view') === 'birdseye') {
       var birdseyeGrid = el('birdseye-grid');
@@ -2351,6 +2408,18 @@ document.addEventListener('visibilitychange', function() {
     }
     if (el('stats-row')) {
       startStatsRefresh();
+    }
+    if (el('zone-snapshot') && typeof initZones === 'function' && typeof zoneSnapshotTimer !== 'undefined' && !zoneSnapshotTimer) {
+      var zname = getCameraName();
+      if (zname) {
+        var zsnap = el('zone-snapshot');
+        zoneSnapshotTimer = setInterval(function() {
+          zsnap.src = '/api/cameras/' + encodeURIComponent(zname) + '/zones/snapshot?t=' + Date.now();
+        }, 10000);
+      }
+    }
+    if (typeof startPresencePolling === 'function' && typeof zoneData !== 'undefined' && zoneData.length && !zonePresenceTimer) {
+      startPresencePolling();
     }
   }
 });
@@ -3307,7 +3376,7 @@ function showInputModal(title, message, defaultValue, onConfirm) {
   var modal = document.getElementById('input-modal');
   if (!modal) {
     var html = '<div class="shortcut-backdrop" id="input-backdrop"></div>'
-      + '<div class="shortcut-modal" id="input-modal" role="dialog">'
+      + '<div class="shortcut-modal" id="input-modal" role="dialog" aria-modal="true" aria-label="Input">'
       + '<div class="shortcut-modal-header"><h2 id="input-title"></h2>'
       + '<button class="btn btn-icon btn-ghost" data-action-click="closeInputModal()" aria-label="Close">'
       + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>'
@@ -3347,6 +3416,49 @@ function closeInputModal() {
   if (backdrop) backdrop.classList.remove('open');
 }
 
+// Generic confirm modal (replaces confirm())
+function showConfirmModal(title, message, onConfirm, opts) {
+  opts = opts || {};
+  var confirmLabel = opts.confirmLabel || 'Confirm';
+  var destructive = !!opts.destructive;
+  var modal = document.getElementById('confirm-modal');
+  if (!modal) {
+    var html = '<div class="shortcut-backdrop" id="confirm-backdrop"></div>'
+      + '<div class="shortcut-modal" id="confirm-modal" role="dialog" aria-modal="true">'
+      + '<div class="shortcut-modal-header"><h2 id="confirm-title"></h2>'
+      + '<button class="btn btn-icon btn-ghost" data-action-click="closeConfirmModal()" aria-label="Close">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>'
+      + '<div class="shortcut-modal-body" style="grid-template-columns:1fr;gap:0.75rem;padding:1rem 1.25rem">'
+      + '<p id="confirm-message" style="margin:0;font-size:var(--text-sm);color:var(--text-secondary)"></p>'
+      + '<div style="display:flex;gap:0.5rem;justify-content:flex-end">'
+      + '<button class="btn btn-sm btn-ghost" data-action-click="closeConfirmModal()">Cancel</button>'
+      + '<button class="btn btn-sm" id="confirm-ok-btn">OK</button>'
+      + '</div></div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-backdrop').addEventListener('click', closeConfirmModal);
+  }
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-message').textContent = message;
+  var okBtn = document.getElementById('confirm-ok-btn');
+  okBtn.textContent = confirmLabel;
+  okBtn.className = 'btn btn-sm ' + (destructive ? 'btn-danger' : 'btn-primary');
+  okBtn.onclick = function() {
+    closeConfirmModal();
+    onConfirm();
+  };
+  document.getElementById('confirm-backdrop').classList.add('open');
+  modal.classList.add('open');
+  setTimeout(function() { okBtn.focus(); }, 100);
+}
+
+function closeConfirmModal() {
+  var modal = document.getElementById('confirm-modal');
+  var backdrop = document.getElementById('confirm-backdrop');
+  if (modal) modal.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('open');
+}
+
 function addObjectReference(objectId, objectName, eventId) {
   fetch('/api/objects/' + pathSegment(objectId) + '/references', {
     method: 'POST',
@@ -3363,28 +3475,84 @@ function addObjectReference(objectId, objectName, eventId) {
   });
 }
 
+// ─── Push notification discovery prompt ───
+(function() {
+  // Surface a one-time dismissible banner when push is supported but the user
+  // hasn't granted permission yet. Skips on the settings page (the full
+  // notifications UI already lives there) and when the user has dismissed it.
+  function eligible() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+    if (!('Notification' in window)) return false;
+    if (Notification.permission !== 'default') return false;
+    if (location.pathname === '/settings.html') return false;
+    if (localStorage.getItem('vedetta-push-prompt-dismissed') === '1') return false;
+    return true;
+  }
+
+  function showPushPrompt() {
+    if (!eligible()) return;
+    if (document.getElementById('push-prompt')) return;
+    var bar = document.createElement('div');
+    bar.id = 'push-prompt';
+    bar.className = 'push-prompt';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML =
+      '<span>Get alerts for new detections on this device.</span>' +
+      '<a class="btn btn-sm btn-primary" href="/settings.html#notifications-card">Enable</a>' +
+      '<button type="button" class="btn btn-sm btn-ghost" aria-label="Dismiss">Dismiss</button>';
+    bar.querySelector('button').addEventListener('click', function() {
+      localStorage.setItem('vedetta-push-prompt-dismissed', '1');
+      bar.remove();
+    });
+    document.body.appendChild(bar);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', showPushPrompt);
+  } else {
+    showPushPrompt();
+  }
+})();
+
 // ─── Real-time Event Stream (SSE) ───
 (function() {
   var evtSource = null;
   var reconnectTimer = null;
 
+  function closeSSE() {
+    if (evtSource) {
+      try { evtSource.close(); } catch(_) {}
+      evtSource = null;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
   function connectSSE() {
-    if (evtSource) return;
+    if (evtSource || document.hidden || navigator.onLine === false) return;
     evtSource = new EventSource('/api/events/stream');
 
-    evtSource.onmessage = function(e) {
+    evtSource.addEventListener('doorbell', function(e) {
+      try { showDoorbellNotification(JSON.parse(e.data)); } catch(err) {}
+    });
+
+    evtSource.addEventListener('event', function(e) {
       try {
-        var msg = JSON.parse(e.data);
-        if (msg.type === 'doorbell') {
-          showDoorbellNotification(msg.data);
-        }
+        var data = JSON.parse(e.data);
+        document.dispatchEvent(new CustomEvent('vedetta:event', { detail: data }));
       } catch(err) {}
-    };
+    });
 
     evtSource.onerror = function() {
-      evtSource.close();
-      evtSource = null;
-      if (!reconnectTimer) {
+      if (evtSource && evtSource.readyState === EventSource.CLOSED) {
+        closeSSE();
+      } else {
+        try { evtSource.close(); } catch(_) {}
+        evtSource = null;
+      }
+      if (!reconnectTimer && !document.hidden && navigator.onLine !== false) {
         reconnectTimer = setTimeout(function() {
           reconnectTimer = null;
           connectSSE();
@@ -3392,6 +3560,42 @@ function addObjectReference(objectId, objectName, eventId) {
       }
     };
   }
+
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      closeSSE();
+    } else {
+      connectSSE();
+    }
+  });
+
+  window.addEventListener('online', function() {
+    hideOfflineBanner();
+    connectSSE();
+  });
+  window.addEventListener('offline', function() {
+    showOfflineBanner();
+    closeSSE();
+  });
+
+  function ensureOfflineBanner() {
+    var banner = el('offline-banner');
+    if (banner) return banner;
+    banner = document.createElement('div');
+    banner.id = 'offline-banner';
+    banner.className = 'offline-banner';
+    banner.setAttribute('role', 'status');
+    banner.setAttribute('aria-live', 'polite');
+    banner.textContent = 'You are offline — live updates are paused.';
+    document.body.appendChild(banner);
+    return banner;
+  }
+  function showOfflineBanner() { ensureOfflineBanner().classList.add('visible'); }
+  function hideOfflineBanner() {
+    var b = el('offline-banner');
+    if (b) b.classList.remove('visible');
+  }
+  if (navigator.onLine === false) showOfflineBanner();
 
   function showDoorbellNotification(data) {
     var person = data.person || 'Someone';
@@ -3444,11 +3648,23 @@ function addObjectReference(objectId, objectName, eventId) {
       if (banner.parentElement) banner.remove();
     }, 30000);
 
-    // Play notification sound if available
+    // Play a short notification beep via Web Audio (more reliable than a data-URI WAV)
     try {
-      var audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ==');
-      audio.volume = 0.3;
-      audio.play().catch(function(){});
+      var Ctor = window.AudioContext || window.webkitAudioContext;
+      if (Ctor) {
+        var ctx = new Ctor();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+        osc.onended = function () { try { ctx.close(); } catch(_) {} };
+      }
     } catch(e) {}
   }
 
@@ -3460,6 +3676,25 @@ pollHealth();
 setInterval(pollHealth, 30000);
 
 // ─── Event Detail: Play Clip on Demand ───
+function attachPlaybackSpeed(video, media) {
+  var speeds = [0.5, 1, 1.5, 2, 4];
+  var picker = document.createElement('select');
+  picker.className = 'playback-speed';
+  picker.setAttribute('aria-label', 'Playback speed');
+  speeds.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s + '×';
+    if (s === 1) opt.selected = true;
+    picker.appendChild(opt);
+  });
+  picker.addEventListener('change', function() {
+    var rate = parseFloat(picker.value);
+    if (!isNaN(rate)) video.playbackRate = rate;
+  });
+  media.appendChild(picker);
+}
+
 function playEventClip(overlay, eventId) {
   var media = overlay.parentElement;
   var wrap = media.querySelector('#detection-wrap');
@@ -3472,7 +3707,19 @@ function playEventClip(overlay, eventId) {
   video.muted = true;
   video.playsInline = true;
   video.src = '/api/events/' + encodeURIComponent(eventId) + '/clip';
+  video.onerror = function () {
+    video.remove();
+    var picker = media.querySelector('.playback-speed');
+    if (picker) picker.remove();
+    var err = document.createElement('div');
+    err.className = 'empty-state';
+    err.textContent = 'Clip unavailable — the recording may still be processing or has been removed.';
+    media.appendChild(err);
+    if (wrap) wrap.style.display = '';
+    if (typeof toast === 'function') toast('Clip unavailable', 'error');
+  };
   media.appendChild(video);
+  attachPlaybackSpeed(video, media);
 }
 
 function playEventRecording(overlay, cameraName, timestamp) {
@@ -3506,6 +3753,7 @@ function playEventRecording(overlay, cameraName, timestamp) {
   } else {
     video.src = url;
   }
+  attachPlaybackSpeed(video, media);
 }
 
 // ─── Zones ───

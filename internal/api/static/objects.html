@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Objects - Vedetta</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/style.css">
   <meta name="theme-color" content="#0a0e14">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -44,7 +45,7 @@
     </div>
   </main>
 
-  <nav class="bottom-tabs" role="navigation" aria-label="Bottom">
+  <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
     <div class="bottom-tabs-inner">
       <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
       <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
@@ -57,7 +58,7 @@
 
   <!-- Confirm Modal -->
   <div class="shortcut-backdrop" id="confirm-backdrop"></div>
-  <div class="shortcut-modal" id="confirm-modal" role="dialog">
+  <div class="shortcut-modal" id="confirm-modal" role="dialog" aria-modal="true" aria-label="Confirm">
     <div class="shortcut-modal-header">
       <h2 id="confirm-title">Confirm</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeConfirmModal()" aria-label="Close">
@@ -221,15 +222,20 @@
     }
 
     function renameObject(id, name) {
+      var trimmed = (name || '').trim();
+      if (!trimmed) {
+        if (typeof toast === 'function') toast('Name cannot be empty', 'error');
+        return;
+      }
       fetch('/api/objects/' + id, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: name.trim()})
+        body: JSON.stringify({name: trimmed})
       }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
-        if (typeof toast === 'function') toast('Renamed to ' + name);
+        if (typeof toast === 'function') toast('Renamed to ' + trimmed);
       }).catch(function() {
-        if (typeof toast === 'function') toast('Rename failed');
+        if (typeof toast === 'function') toast('Rename failed', 'error');
       });
     }
 

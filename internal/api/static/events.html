@@ -98,7 +98,7 @@
 
   <!-- Keyboard Shortcut Modal -->
   <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
     <div class="shortcut-modal-header">
       <h2>Keyboard Shortcuts</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
@@ -127,6 +127,20 @@
     // Initialize search and infinite scroll
     initEventSearch();
     initInfiniteScroll();
+
+    // Refresh the gallery when a new event arrives via SSE, but only when
+    // the user is at the top of the list and no filters are applied, to avoid
+    // disturbing their scroll position mid-browse.
+    document.addEventListener('vedetta:event', function() {
+      var gallery = document.getElementById('events-gallery');
+      if (!gallery) return;
+      if (window.scrollY > 200) return;
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('q') || params.get('camera') || params.get('label')) return;
+      if (window.htmx && typeof htmx.ajax === 'function') {
+        htmx.ajax('GET', '/partials/events-gallery', { target: gallery, swap: 'innerHTML' });
+      }
+    });
 
     // Populate camera chips from API and fetch event counts
     Promise.all([

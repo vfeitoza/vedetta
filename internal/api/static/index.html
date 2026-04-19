@@ -134,7 +134,7 @@
 
   <!-- Keyboard Shortcut Modal -->
   <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
     <div class="shortcut-modal-header">
       <h2>Keyboard Shortcuts</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
@@ -174,7 +174,7 @@
 
   <!-- Account Modal -->
   <div class="shortcut-backdrop" id="account-backdrop"></div>
-  <div class="shortcut-modal" id="account-modal" role="dialog" aria-label="Account">
+  <div class="shortcut-modal" id="account-modal" role="dialog" aria-modal="true" aria-label="Account">
     <div class="shortcut-modal-header">
       <h2>Account</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeAccountModal()" aria-label="Close">
@@ -210,7 +210,7 @@
 
   <!-- Add Camera Modal -->
   <div class="shortcut-backdrop" id="add-camera-backdrop"></div>
-  <div class="shortcut-modal" id="add-camera-modal" role="dialog" aria-label="Add camera">
+  <div class="shortcut-modal" id="add-camera-modal" role="dialog" aria-modal="true" aria-label="Add camera">
     <div class="shortcut-modal-header">
       <h2>Add Camera</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeAddCameraModal()" aria-label="Close">
@@ -221,15 +221,15 @@
       <form id="add-camera-form">
         <div style="margin-bottom:0.75rem">
           <label for="addcam-name" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Name</label>
-          <input type="text" id="addcam-name" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+          <input type="text" id="addcam-name" class="form-input">
         </div>
         <div style="margin-bottom:0.75rem">
           <label for="addcam-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
-          <input type="text" id="addcam-url" placeholder="rtsp://..." style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+          <input type="text" id="addcam-url" placeholder="rtsp://..." class="form-input">
         </div>
         <div style="margin-bottom:0.75rem">
           <label for="addcam-recurl" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Record URL</label>
-          <input type="text" id="addcam-recurl" placeholder="rtsp://... (optional, uses URL if empty)" style="width:100%;padding:0.5rem;border:1px solid rgba(159,180,198,0.2);border-radius:8px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.95rem">
+          <input type="text" id="addcam-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input">
         </div>
         <div style="margin-bottom:0.75rem">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
@@ -239,16 +239,16 @@
         </div>
         <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Detection Stream</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;margin-bottom:0.75rem">
-          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-dw" value="640" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-dh" value="480" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-df" value="5" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-dw" value="640" class="form-input-sm"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-dh" value="480" class="form-input-sm"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-df" value="5" class="form-input-sm"></div>
           <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem"><input type="checkbox" id="addcam-det-enabled" checked style="accent-color:var(--accent)">On</label>
         </div>
         <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Record Stream</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:1rem">
-          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-rw" value="1920" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-rh" value="1080" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-rf" value="15" style="width:100%;padding:0.4rem;border:1px solid rgba(159,180,198,0.2);border-radius:6px;background:rgba(4,12,18,0.7);color:var(--text);font-size:0.9rem"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-rw" value="1920" class="form-input-sm"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-rh" value="1080" class="form-input-sm"></div>
+          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-rf" value="15" class="form-input-sm"></div>
         </div>
         <div style="display:flex;gap:0.5rem;justify-content:flex-end">
           <button type="button" class="btn btn-sm btn-ghost" data-action-click="closeAddCameraModal()">Cancel</button>
@@ -265,14 +265,25 @@
     function openAddCameraModal() {
       document.getElementById('add-camera-backdrop').classList.add('open');
       document.getElementById('add-camera-modal').classList.add('open');
+      setTimeout(function() {
+        var nameField = document.getElementById('addcam-name');
+        if (nameField) nameField.focus();
+      }, 100);
     }
     function closeAddCameraModal() {
       document.getElementById('add-camera-backdrop').classList.remove('open');
       document.getElementById('add-camera-modal').classList.remove('open');
     }
+    var _addCameraPending = false;
     function addNewCamera() {
+      if (_addCameraPending) return;
       var $ = function(id) { return document.getElementById(id); };
       var status = $('add-camera-status');
+      var name = $('addcam-name').value.trim();
+      var url = $('addcam-url').value.trim();
+      if (!name) { status.textContent = 'Name is required'; status.style.color = 'var(--danger)'; $('addcam-name').focus(); return; }
+      if (!url) { status.textContent = 'URL is required'; status.style.color = 'var(--danger)'; $('addcam-url').focus(); return; }
+      _addCameraPending = true;
       status.textContent = 'Adding...';
       status.style.color = 'var(--muted)';
       var intOr = function(id, def) { var v = parseInt($(id).value); return isNaN(v) ? def : v; };
@@ -280,8 +291,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: $('addcam-name').value,
-          url: $('addcam-url').value,
+          name: name,
+          url: url,
           record_url: $('addcam-recurl').value,
           enabled: $('addcam-enabled').checked,
           detect: { width: intOr('addcam-dw', 640), height: intOr('addcam-dh', 480), fps: intOr('addcam-df', 5), enabled: $('addcam-det-enabled').checked },
@@ -291,6 +302,7 @@
         if (data && data.error) {
           status.textContent = data.error;
           status.style.color = 'var(--danger)';
+          _addCameraPending = false;
         } else {
           status.textContent = 'Added — restart required';
           status.style.color = 'var(--success)';
@@ -299,6 +311,7 @@
       }).catch(function() {
         status.textContent = 'Add failed';
         status.style.color = 'var(--danger)';
+        _addCameraPending = false;
       });
     }
     document.getElementById('add-camera-backdrop').addEventListener('click', closeAddCameraModal);
