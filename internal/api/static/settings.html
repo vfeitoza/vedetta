@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Vedetta">
 </head>
-<body>
+<body data-shortcuts="nav,general">
 
   <nav class="topnav" role="navigation" aria-label="Main">
     <a href="/" class="topnav-brand" aria-label="Vedetta home">
@@ -394,30 +394,6 @@
   </nav>
 
   <!-- Keyboard Shortcut Modal -->
-  <div class="shortcut-backdrop" id="shortcut-backdrop"></div>
-  <div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-    <div class="shortcut-modal-header">
-      <h2>Keyboard Shortcuts</h2>
-      <button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="shortcut-modal-body">
-      <div class="shortcut-group">
-        <h3>Navigation</h3>
-        <div class="shortcut-row"><span>Cameras</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>1</kbd></span></div>
-        <div class="shortcut-row"><span>Events</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>2</kbd></span></div>
-        <div class="shortcut-row"><span>Recordings</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>3</kbd></span></div>
-        <div class="shortcut-row"><span>Settings</span><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>4</kbd></span></div>
-      </div>
-      <div class="shortcut-group">
-        <h3>General</h3>
-        <div class="shortcut-row"><span>This help</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
-        <div class="shortcut-row"><span>Dismiss / Back</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
-      </div>
-    </div>
-  </div>
-
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
@@ -431,16 +407,35 @@
     if (btn) btn.disabled = true;
     var settle = function(isSuccess) {
       if (btn) btn.disabled = false;
-      if (isSuccess && statusEl) {
-        setTimeout(function() {
-          if (statusEl.dataset.clearToken === settle.token) statusEl.textContent = '';
-        }, 4000);
+      if (isSuccess) {
+        if (form && form.id) markClean(form.id);
+        if (statusEl) {
+          setTimeout(function() {
+            if (statusEl.dataset.clearToken === settle.token) statusEl.textContent = '';
+          }, 4000);
+        }
       }
     };
     settle.token = String(Date.now()) + Math.random();
     if (statusEl) statusEl.dataset.clearToken = settle.token;
     return promiseFn().then(function(ok) { settle(!!ok); }, function() { settle(false); });
   }
+
+  // Dirty-tracking: warn before leaving the page if a form has unsaved changes.
+  var dirtyForms = new Set();
+  function markDirty(id) { dirtyForms.add(id); }
+  function markClean(id) { dirtyForms.delete(id); }
+  ['mqtt-form', 'recording-form', 'detect-form', 'password-form'].forEach(function(id) {
+    var form = document.getElementById(id);
+    if (!form) return;
+    form.addEventListener('input', function() { markDirty(id); });
+    form.addEventListener('change', function() { markDirty(id); });
+  });
+  window.addEventListener('beforeunload', function(e) {
+    if (dirtyForms.size === 0) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
 
   // --- MQTT ---
   function loadMQTT() {

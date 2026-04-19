@@ -2643,6 +2643,97 @@ document.addEventListener('htmx:afterSwap', function(e) {
 });
 
 // ─── Keyboard Shortcut Modal ───
+var SHORTCUT_SECTIONS = {
+  nav: {
+    title: 'Navigation',
+    rows: [
+      ['Cameras', ['Ctrl', '1']],
+      ['Events', ['Ctrl', '2']],
+      ['Recordings', ['Ctrl', '3']],
+      ['Settings', ['Ctrl', '4']],
+    ],
+  },
+  camera: {
+    title: 'Camera View',
+    rows: [
+      ['WebRTC stream', ['W']],
+      ['MJPEG stream', ['M']],
+      ['Stop stream', ['S']],
+      ['Return to live', ['L']],
+      ['Picture-in-Picture', ['P']],
+      ['Fullscreen', ['F']],
+    ],
+  },
+  cameraExt: {
+    title: 'Camera View',
+    rows: [
+      ['WebRTC stream', ['W']],
+      ['MJPEG stream', ['M']],
+      ['Stop stream', ['S']],
+      ['Return to live', ['L']],
+      ['Toggle audio', ['A']],
+      ['Picture-in-Picture', ['P']],
+      ['Fullscreen', ['F']],
+      ['Pause / Play', ['Space']],
+      ['Pan (PTZ)', ['↑', '↓', '←', '→']],
+      ['Zoom (PTZ)', ['+', '-']],
+    ],
+  },
+  events: {
+    title: 'Events',
+    rows: [
+      ['Download clip', ['D']],
+      ['Previous event', ['\u2190']],
+      ['Next event', ['\u2192']],
+    ],
+  },
+  general: {
+    title: 'General',
+    rows: [
+      ['This help', ['?']],
+      ['Dismiss / Back', ['Esc']],
+    ],
+  },
+};
+
+function buildShortcutModal(sectionKeys) {
+  if (!sectionKeys || !sectionKeys.length) return '';
+  var groups = sectionKeys.map(function(key) {
+    var section = SHORTCUT_SECTIONS[key];
+    if (!section) return '';
+    var rows = section.rows.map(function(row) {
+      var label = row[0];
+      var keyList = row[1];
+      var isCombo = /^(Ctrl|Shift|Alt|Cmd|Meta)$/.test(keyList[0]);
+      var keys = keyList.map(function(k) { return '<kbd>' + k + '</kbd>'; })
+        .join(isCombo ? '<span class="plus">+</span>' : '');
+      return '<div class="shortcut-row"><span>' + label + '</span><span class="shortcut-keys">' + keys + '</span></div>';
+    }).join('');
+    return '<div class="shortcut-group"><h3>' + section.title + '</h3>' + rows + '</div>';
+  }).join('');
+  return '<div class="shortcut-backdrop" id="shortcut-backdrop"></div>' +
+    '<div class="shortcut-modal" id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">' +
+    '<div class="shortcut-modal-header"><h2>Keyboard Shortcuts</h2>' +
+    '<button class="btn btn-icon btn-ghost" data-action-click="closeShortcutModal()" aria-label="Close">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+    '</button></div>' +
+    '<div class="shortcut-modal-body">' + groups + '</div></div>';
+}
+
+function mountShortcutModal() {
+  if (document.getElementById('shortcut-modal')) return;
+  var raw = document.body.dataset.shortcuts;
+  if (!raw) return;
+  var keys = raw.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  var html = buildShortcutModal(keys);
+  if (!html) return;
+  var wrapper = document.createElement('div');
+  wrapper.innerHTML = html;
+  while (wrapper.firstChild) document.body.appendChild(wrapper.firstChild);
+}
+
+mountShortcutModal();
+
 function toggleShortcutModal() {
   var backdrop = el('shortcut-backdrop');
   var modal = el('shortcut-modal');
@@ -2742,50 +2833,6 @@ function closeAccountModal() {
 }
 
 (function() {
-  // Change password form
-  var form = document.getElementById('change-password-form');
-  if (form) {
-    form.addEventListener('submit', function(e) {
-      e.preventDefault();
-      var status = document.getElementById('cp-status');
-      var newPw = document.getElementById('cp-new').value;
-      var confirmPw = document.getElementById('cp-confirm').value;
-
-      if (newPw !== confirmPw) {
-        status.textContent = 'New passwords do not match.';
-        status.style.color = 'var(--danger, #ff7d7d)';
-        return;
-      }
-
-      status.textContent = 'Updating...';
-      status.style.color = 'var(--text-secondary)';
-
-      fetch('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          current_password: document.getElementById('cp-current').value,
-          new_password: newPw
-        })
-      }).then(function(resp) {
-        return resp.json().then(function(body) { return { ok: resp.ok, body: body }; });
-      }).then(function(result) {
-        if (result.ok) {
-          status.textContent = 'Password updated successfully.';
-          status.style.color = 'var(--success, #5dff7d)';
-          form.reset();
-        } else {
-          status.textContent = result.body.error || 'Failed to update password.';
-          status.style.color = 'var(--danger, #ff7d7d)';
-        }
-      }).catch(function() {
-        status.textContent = 'Network error. Please try again.';
-        status.style.color = 'var(--danger, #ff7d7d)';
-      });
-    });
-  }
-
-  // Logout button
   var logoutBtn = document.getElementById('account-logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', function() {
