@@ -76,6 +76,9 @@ type Server struct {
 	sseMu      sync.Mutex
 	sseClients map[chan []byte]struct{}
 
+	// Per-camera detection-frame fan-out for the live overlay.
+	detectionHub *detectionHub
+
 	objectRematchMu      sync.Mutex
 	objectRematchRunning map[int64]bool
 	objectRematchPending map[int64]bool
@@ -102,6 +105,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 		db:                   db,
 		mux:                  http.NewServeMux(),
 		sseClients:           make(map[chan []byte]struct{}),
+		detectionHub:         newDetectionHub(),
 		objectRematchRunning: make(map[int64]bool),
 		objectRematchPending: make(map[int64]bool),
 	}
@@ -235,6 +239,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/cameras/manage/{index}", s.UpdateCameraManage)
 	s.mux.HandleFunc("DELETE /api/cameras/manage/{index}", s.RemoveCameraManage)
 	s.mux.HandleFunc("POST /api/cameras/test-rtsp", s.TestRTSPConnection)
+	s.mux.HandleFunc("GET /api/cameras/{name}/detections", s.StreamCameraDetections)
 
 	// Settings API endpoints
 	s.mux.HandleFunc("GET /api/settings/mqtt", s.GetMQTTSettings)

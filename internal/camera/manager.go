@@ -30,10 +30,11 @@ type Manager struct {
 	faceEvents      chan<- FaceEvent
 	faceCropDir     string
 	motionActivity  chan<- MotionActivity
+	detections      chan<- DetectionFrame
 	mu              sync.RWMutex
 }
 
-func NewManager(configs []config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string, motionActivity chan<- MotionActivity) *Manager {
+func NewManager(configs []config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string, motionActivity chan<- MotionActivity, detections chan<- DetectionFrame) *Manager {
 	m := &Manager{
 		cameras:         make(map[string]*Camera),
 		cancelFuncs:     make(map[string]context.CancelFunc),
@@ -50,11 +51,12 @@ func NewManager(configs []config.CameraConfig, detector *detect.Detector, motion
 		faceEvents:      faceEvents,
 		faceCropDir:     faceCropDir,
 		motionActivity:  motionActivity,
+		detections:      detections,
 	}
 
 	for _, cfg := range configs {
 		if cfg.IsEnabled() {
-			cam := NewCamera(cfg, detector, motion, events, eventEnds, presenceEvents, hub, snapshotPath, snapshotQuality, recordingPath, faceRecognizer, faceEvents, faceCropDir, motionActivity)
+			cam := NewCamera(cfg, detector, motion, events, eventEnds, presenceEvents, hub, snapshotPath, snapshotQuality, recordingPath, faceRecognizer, faceEvents, faceCropDir, motionActivity, detections)
 			m.cameras[cfg.Name] = cam
 			m.order = append(m.order, cfg.Name)
 		}
@@ -126,7 +128,7 @@ func (m *Manager) AddCamera(cfg config.CameraConfig) {
 	}
 	cam := NewCamera(cfg, m.detector, m.motionCfg, m.events, m.eventEnds, m.presenceEvents,
 		m.hub, m.snapshotPath, m.snapshotQuality, m.recordingPath,
-		m.faceRecognizer, m.faceEvents, m.faceCropDir, m.motionActivity)
+		m.faceRecognizer, m.faceEvents, m.faceCropDir, m.motionActivity, m.detections)
 	m.cameras[cfg.Name] = cam
 	m.order = append(m.order, cfg.Name)
 }

@@ -60,6 +60,26 @@ type FaceEvent struct {
 	Results []detect.FaceResult
 }
 
+// DetectionBox is a single tracked object for the live overlay.
+// Coords are normalized (0..1) against the detector frame.
+type DetectionBox struct {
+	Label   string  `json:"label"`
+	Score   float32 `json:"score"`
+	TrackID int     `json:"track_id"`
+	X1      float32 `json:"x1"`
+	Y1      float32 `json:"y1"`
+	X2      float32 `json:"x2"`
+	Y2      float32 `json:"y2"`
+}
+
+// DetectionFrame is a snapshot of currently tracked objects for a camera,
+// emitted once per detector run for use by the live bounding-box overlay.
+type DetectionFrame struct {
+	Camera    string         `json:"camera"`
+	Timestamp time.Time      `json:"ts"`
+	Boxes     []DetectionBox `json:"boxes"`
+}
+
 // Camera manages a single RTSP camera stream.
 type Camera struct {
 	config               config.CameraConfig
@@ -95,6 +115,7 @@ type Camera struct {
 	faceEvents     chan<- FaceEvent
 	faceCropDir    string
 	faceProcessed  map[int]time.Time
+	detections     chan<- DetectionFrame
 	degradedReason string
 }
 
@@ -110,7 +131,7 @@ type CameraStatus struct {
 	Stopped        bool      `json:"stopped"`
 }
 
-func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string, motionActivity chan<- MotionActivity) *Camera {
+func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string, motionActivity chan<- MotionActivity, detections chan<- DetectionFrame) *Camera {
 	if snapshotQuality <= 0 {
 		snapshotQuality = 85
 	}
@@ -139,11 +160,44 @@ func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config
 		faceEvents:           faceEvents,
 		faceCropDir:          faceCropDir,
 		faceProcessed:        make(map[int]time.Time),
+		detections:           detections,
 	}
 	if cam.detectEnabled && !detector.Available() {
 		cam.degradedReason = "object detector unavailable"
 	}
 	return cam
+}
+
+// broadcastDetections sends a snapshot of the current tracked objects onto
+// the detections channel for the live-overlay SSE hub. Non-blocking: drops
+// the frame if the channel is full or nil.
+func (c *Camera) broadcastDetections(tracked []detect.TrackedObject, w, h int) {
+	if c.detections == nil || w <= 0 || h <= 0 {
+		return
+	}
+	boxes := make([]DetectionBox, len(tracked))
+	fw := float32(w)
+	fh := float32(h)
+	for i, obj := range tracked {
+		boxes[i] = DetectionBox{
+			Label:   obj.Label,
+			Score:   obj.Score,
+			TrackID: obj.TrackID,
+			X1:      float32(obj.Box[0]) / fw,
+			Y1:      float32(obj.Box[1]) / fh,
+			X2:      float32(obj.Box[2]) / fw,
+			Y2:      float32(obj.Box[3]) / fh,
+		}
+	}
+	frame := DetectionFrame{
+		Camera:    c.config.Name,
+		Timestamp: time.Now(),
+		Boxes:     boxes,
+	}
+	select {
+	case c.detections <- frame:
+	default:
+	}
 }
 
 // SetZones replaces the camera's zone list and returns the old zones.
@@ -449,6 +503,8 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 
 		detections := c.detector.DetectRGB24(buf, w, h)
 		tracked := c.tracker.Update(detections)
+
+		c.broadcastDetections(tracked, w, h)
 
 		// Collect all current detections for annotation
 		allDetections := make([]detect.Detection, len(tracked))

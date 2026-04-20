@@ -57,6 +57,7 @@ type subsystems struct {
 	presenceEvents  chan camera.PresenceEvent
 	faceEvents      chan camera.FaceEvent
 	motionActivity  chan camera.MotionActivity
+	detections      chan camera.DetectionFrame
 	ptzClients      map[string]*camera.PTZClient
 }
 
@@ -399,8 +400,9 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	sub.presenceEvents = make(chan camera.PresenceEvent, 100)
 	sub.faceEvents = make(chan camera.FaceEvent, 100)
 	sub.motionActivity = make(chan camera.MotionActivity, 100)
+	sub.detections = make(chan camera.DetectionFrame, 64)
 
-	sub.manager = camera.NewManager(cfg.Cameras, sub.detector, cfg.Detect.Motion, sub.events, sub.eventEnds, sub.presenceEvents, sub.hub, cfg.Events.SnapshotPath, cfg.Events.SnapshotQuality, cfg.Recording.Path, sub.faceRecognizer, sub.faceEvents, filepath.Join(cfg.Events.SnapshotPath, "faces"), sub.motionActivity)
+	sub.manager = camera.NewManager(cfg.Cameras, sub.detector, cfg.Detect.Motion, sub.events, sub.eventEnds, sub.presenceEvents, sub.hub, cfg.Events.SnapshotPath, cfg.Events.SnapshotQuality, cfg.Recording.Path, sub.faceRecognizer, sub.faceEvents, filepath.Join(cfg.Events.SnapshotPath, "faces"), sub.motionActivity, sub.detections)
 
 	// Sync zones from config to DB and load them into cameras
 	syncConfigZones(db, cfg.Cameras, sub.manager)
@@ -858,6 +860,9 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if err := db.SaveMotionActivity(ma.CameraName, ma.Bucket, ma.Score); err != nil {
 					slog.Error("failed to save motion activity", "camera", ma.CameraName, "error", err)
 				}
+
+			case df := <-sub.detections:
+				server.PublishDetection(df)
 
 			case fe := <-faceEvents:
 				for _, result := range fe.Results {

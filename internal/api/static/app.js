@@ -173,6 +173,7 @@ var allowedDataActionFunctions = new Set([
   'saveCam',
   'saveCamSettings',
   'testRtspFromInput',
+  'toggleBoxOverlay',
   'toggleCam',
   'toggleCamSettings',
   'zoneCancelDraw',
@@ -2215,6 +2216,10 @@ document.addEventListener('keydown', function(e) {
     case 'A':
       if (el('btn-mute')) toggleMute();
       break;
+    case 'b':
+    case 'B':
+      if (el('det-overlay')) toggleBoxOverlay();
+      break;
     case 'f':
     case 'F':
       if (el('live-viewport')) toggleFullscreen();
@@ -2673,6 +2678,7 @@ var SHORTCUT_SECTIONS = {
       ['Stop stream', ['S']],
       ['Return to live', ['L']],
       ['Toggle audio', ['A']],
+      ['Toggle boxes', ['B']],
       ['Picture-in-Picture', ['P']],
       ['Fullscreen', ['F']],
       ['Pause / Play', ['Space']],
@@ -2869,6 +2875,214 @@ function testRtspFromInput(inputId, resultId) {
     result.textContent = 'Network error';
     result.className = 'rtsp-test-result error';
   });
+}
+
+// ─── Live bounding-box overlay ───
+var BOX_OVERLAY_STORAGE_KEY = 'overlay:boxes';
+var BOX_CLASS_COLORS = {
+  person: '#34d399',
+  car: '#60a5fa',
+  truck: '#60a5fa',
+  bus: '#60a5fa',
+  motorcycle: '#60a5fa',
+  bicycle: '#60a5fa',
+  dog: '#fb923c',
+  cat: '#fb923c',
+  bird: '#fb923c',
+};
+var BOX_DEFAULT_COLOR = '#94a3b8';
+var boxOverlayState = {
+  canvas: null,
+  ctx: null,
+  video: null,
+  enabled: false,
+  source: null,
+  rafHandle: 0,
+  frame: null,
+  cleanup: null,
+};
+
+function initDetectionOverlay(cameraName) {
+  var canvas = document.getElementById('det-overlay');
+  var viewport = document.getElementById('live-viewport');
+  var btn = document.getElementById('btn-boxes');
+  if (!canvas || !viewport) return;
+  boxOverlayState.canvas = canvas;
+  boxOverlayState.ctx = canvas.getContext('2d');
+  boxOverlayState.video = document.getElementById('live-video');
+  boxOverlayState.cameraName = cameraName;
+
+  var stored = null;
+  try { stored = localStorage.getItem(BOX_OVERLAY_STORAGE_KEY); } catch (_) {}
+  var enabled = stored === null ? true : stored === '1';
+  applyBoxOverlayEnabled(enabled);
+
+  var onVisibility = function() {
+    if (document.visibilityState === 'hidden') closeBoxOverlayStream();
+    else if (boxOverlayState.enabled) openBoxOverlayStream();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('pagehide', closeBoxOverlayStream);
+  boxOverlayState.cleanup = function() {
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('pagehide', closeBoxOverlayStream);
+    closeBoxOverlayStream();
+    cancelBoxOverlayFrame();
+  };
+  if (btn) btn.classList.remove('hidden');
+}
+
+function toggleBoxOverlay() {
+  applyBoxOverlayEnabled(!boxOverlayState.enabled);
+  try { localStorage.setItem(BOX_OVERLAY_STORAGE_KEY, boxOverlayState.enabled ? '1' : '0'); } catch (_) {}
+}
+
+function applyBoxOverlayEnabled(enabled) {
+  boxOverlayState.enabled = !!enabled;
+  var canvas = boxOverlayState.canvas;
+  var btn = document.getElementById('btn-boxes');
+  if (canvas) canvas.style.display = enabled ? '' : 'none';
+  if (btn) {
+    btn.classList.toggle('btn-primary', enabled);
+    btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  }
+  if (enabled) {
+    openBoxOverlayStream();
+    scheduleBoxOverlayFrame();
+  } else {
+    closeBoxOverlayStream();
+    cancelBoxOverlayFrame();
+    if (boxOverlayState.ctx && canvas) boxOverlayState.ctx.clearRect(0, 0, canvas.width, canvas.height);
+    boxOverlayState.frame = null;
+  }
+}
+
+function openBoxOverlayStream() {
+  if (!boxOverlayState.enabled || boxOverlayState.source) return;
+  var name = boxOverlayState.cameraName;
+  if (!name) return;
+  try {
+    var src = new EventSource('/api/cameras/' + encodeURIComponent(name) + '/detections');
+    src.onmessage = function(ev) {
+      try {
+        boxOverlayState.frame = JSON.parse(ev.data);
+      } catch (_) {}
+    };
+    src.onerror = function() {
+      // EventSource auto-reconnects; nothing to do.
+    };
+    boxOverlayState.source = src;
+  } catch (_) {}
+}
+
+function closeBoxOverlayStream() {
+  if (boxOverlayState.source) {
+    try { boxOverlayState.source.close(); } catch (_) {}
+    boxOverlayState.source = null;
+  }
+}
+
+function scheduleBoxOverlayFrame() {
+  if (boxOverlayState.rafHandle) return;
+  var loop = function() {
+    boxOverlayState.rafHandle = 0;
+    if (!boxOverlayState.enabled) return;
+    drawBoxOverlay();
+    boxOverlayState.rafHandle = requestAnimationFrame(loop);
+  };
+  boxOverlayState.rafHandle = requestAnimationFrame(loop);
+}
+
+function cancelBoxOverlayFrame() {
+  if (boxOverlayState.rafHandle) {
+    cancelAnimationFrame(boxOverlayState.rafHandle);
+    boxOverlayState.rafHandle = 0;
+  }
+}
+
+function boxOverlayRenderRect() {
+  var video = boxOverlayState.video;
+  var canvas = boxOverlayState.canvas;
+  if (!canvas) return null;
+  var parent = canvas.parentElement;
+  var parentW = parent ? parent.clientWidth : canvas.clientWidth;
+  var parentH = parent ? parent.clientHeight : canvas.clientHeight;
+  if (parentW <= 0 || parentH <= 0) return null;
+  var vw = (video && video.videoWidth) || parentW;
+  var vh = (video && video.videoHeight) || parentH;
+  var scale = Math.min(parentW / vw, parentH / vh);
+  var rw = vw * scale;
+  var rh = vh * scale;
+  return {
+    x: (parentW - rw) / 2,
+    y: (parentH - rh) / 2,
+    w: rw,
+    h: rh,
+    parentW: parentW,
+    parentH: parentH,
+  };
+}
+
+function drawBoxOverlay() {
+  var ctx = boxOverlayState.ctx;
+  var canvas = boxOverlayState.canvas;
+  var frame = boxOverlayState.frame;
+  if (!ctx || !canvas) return;
+  var rect = boxOverlayRenderRect();
+  if (!rect) return;
+
+  var dpr = window.devicePixelRatio || 1;
+  var cssW = rect.parentW;
+  var cssH = rect.parentH;
+  if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  if (!frame || !frame.boxes || !frame.boxes.length) return;
+
+  // Drop frames older than 3s so stale boxes don't linger.
+  if (frame.ts) {
+    var ageMs = Date.now() - new Date(frame.ts).getTime();
+    if (ageMs > 3000) return;
+  }
+
+  ctx.lineWidth = 2;
+  ctx.font = '600 11px system-ui, sans-serif';
+  ctx.textBaseline = 'top';
+
+  for (var i = 0; i < frame.boxes.length; i++) {
+    var b = frame.boxes[i];
+    var color = BOX_CLASS_COLORS[b.label] || BOX_DEFAULT_COLOR;
+    var alpha = b.score < 0.4 ? 0.5 : 1;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    var x = rect.x + b.x1 * rect.w;
+    var y = rect.y + b.y1 * rect.h;
+    var w = (b.x2 - b.x1) * rect.w;
+    var h = (b.y2 - b.y1) * rect.h;
+    ctx.strokeRect(x, y, w, h);
+
+    var label = b.label;
+    if (b.track_id) label += '#' + b.track_id;
+    if (typeof b.score === 'number') label += ' ' + Math.round(b.score * 100) + '%';
+    var paddingX = 4;
+    var paddingY = 2;
+    var metrics = ctx.measureText(label);
+    var labelW = metrics.width + paddingX * 2;
+    var labelH = 16;
+    var labelY = y - labelH;
+    if (labelY < rect.y) labelY = y + 2;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, labelY, labelW, labelH);
+    ctx.fillStyle = '#0a0e14';
+    ctx.fillText(label, x + paddingX, labelY + paddingY);
+  }
+  ctx.globalAlpha = 1;
 }
 
 (function() {

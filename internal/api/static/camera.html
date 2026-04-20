@@ -59,6 +59,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
             Stop
           </button>
+          <button id="btn-boxes" class="btn btn-sm btn-primary hidden" data-action-click="toggleBoxOverlay()" aria-label="Toggle detection boxes" aria-pressed="true" title="Toggle detection boxes (B)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+            Boxes
+          </button>
           <button id="btn-live" class="btn btn-sm btn-live hidden" data-action-click="returnToLive()" aria-label="Return to live view">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
             Return to Live
@@ -71,6 +75,7 @@
           <video id="live-video" autoplay playsinline muted class="hidden"></video>
           <img id="live-mjpeg" class="hidden" alt="MJPEG stream">
           <img id="live-snapshot" alt="Latest snapshot">
+          <canvas id="det-overlay" class="det-overlay" aria-hidden="true"></canvas>
           <div class="stream-connecting hidden" id="stream-connecting" role="status" aria-live="polite">
             <div class="spinner"></div>
             <span id="stream-connecting-label">Connecting...</span>
@@ -480,6 +485,7 @@
 
       initPTZ(name);
       initViewportPause();
+      initDetectionOverlay(name);
 
       if (playbackTime) {
         const ts = new Date(playbackTime);
