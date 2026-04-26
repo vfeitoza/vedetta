@@ -3733,6 +3733,13 @@ kbd {
 
 .camera-section-panel[hidden] { display: none; }
 
+.events-view-all {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.events-view-all .btn svg { margin-left: 0.35rem; }
+
 /* Per-camera settings form: reuse fieldset visual style */
 .form-fieldset {
   border: 1px solid var(--border-subtle);

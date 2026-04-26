@@ -194,6 +194,12 @@
              hx-swap="innerHTML">
           <div class="loading-state">Loading events...</div>
         </div>
+        <div class="events-view-all">
+          <a href="#" id="camera-events-viewall" class="btn btn-sm btn-ghost">
+            View all events
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+        </div>
       </section>
 
       <!-- Zones -->
@@ -588,13 +594,16 @@
           }, 2000);
         }
 
-        // Load events
+        // Load events (embed=1 disables auto-pagination so the per-camera
+        // gallery stays a quick preview; deep history lives on /events.html)
         const eventsEl = document.getElementById('camera-events');
         if (eventsEl) {
-          eventsEl.setAttribute('hx-get', '/partials/events-gallery?camera=' + encodeURIComponent(camName) + '&limit=12');
+          eventsEl.setAttribute('hx-get', '/partials/events-gallery?camera=' + encodeURIComponent(camName) + '&limit=24&embed=1');
           eventsEl.setAttribute('hx-trigger', 'load');
           htmx.process(eventsEl);
         }
+        const viewAll = document.getElementById('camera-events-viewall');
+        if (viewAll) viewAll.href = '/events.html?camera=' + encodeURIComponent(camName);
 
         // Auto-playback if ?t= parameter is present (from recordings page)
         const playbackTime = new URLSearchParams(location.search).get('t');

@@ -140,6 +140,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
 	objectFilter := r.URL.Query().Get("object")
+	embed := r.URL.Query().Get("embed") == "1"
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
@@ -187,8 +188,11 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		slog.Error("template error", "error", err)
 	}
 
-	// If we got a full page of results, append a sentinel for infinite scroll
-	if len(events) == limit {
+	// If we got a full page of results, append a sentinel for infinite scroll.
+	// embed=1 suppresses pagination so the gallery can be hosted inside another
+	// page (e.g. the per-camera detail view) without ballooning into thousands
+	// of cards as the user scrolls.
+	if !embed && len(events) == limit {
 		nextOffset := offset + limit
 		nextURL := fmt.Sprintf("/partials/events-gallery?limit=%d&offset=%d", limit, nextOffset)
 		if cameraFilter != "" {
