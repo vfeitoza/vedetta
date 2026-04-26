@@ -2586,13 +2586,16 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // ─── Grid Snapshot Refresh ───
-// Instead of htmx replacing the entire grid DOM every 2s (causes flash),
-// update only the <img> src attributes with a cache-busting timestamp.
+// Update only the <img> src attributes with a cache-busting timestamp so the
+// full grid DOM is never replaced (avoids flash).  Slow 30s cadence is enough
+// for a static preview — live stream starts on hover.
 let gridSnapshotInterval = null;
 
 function startGridSnapshotRefresh() {
   stopGridSnapshotRefresh();
-  gridSnapshotInterval = setInterval(refreshGridSnapshots, 2000);
+  // Eagerly load snapshots immediately on mount, then refresh every 30s.
+  initGridSnapshotStates();
+  gridSnapshotInterval = setInterval(refreshGridSnapshots, 30000);
 }
 
 function stopGridSnapshotRefresh() {
@@ -2602,11 +2605,48 @@ function stopGridSnapshotRefresh() {
   }
 }
 
+// Set loading state on each tile and load its snapshot, transitioning to
+// a loaded or error state once the fetch completes.
+function initGridSnapshotStates() {
+  var grid = el('camera-grid');
+  if (!grid) return;
+
+  var cards = grid.querySelectorAll('.cam-card');
+  cards.forEach(function(card) {
+    var preview = card.querySelector('.cam-preview');
+    var img = card.querySelector('.cam-preview img');
+    if (!preview || !img) return;
+
+    // Skip cards that have already been initialised (e.g. after a grid reload).
+    if (preview.dataset.snapInit) return;
+    preview.dataset.snapInit = '1';
+
+    var name = img.alt;
+    if (!name) return;
+
+    var snapUrl = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
+
+    preview.classList.add('cam-preview--loading');
+    preview.classList.remove('cam-preview--error');
+
+    var probe = new Image();
+    probe.onload = function() {
+      img.src = snapUrl;
+      preview.classList.remove('cam-preview--loading');
+    };
+    probe.onerror = function() {
+      preview.classList.remove('cam-preview--loading');
+      preview.classList.add('cam-preview--error');
+    };
+    probe.src = snapUrl;
+  });
+}
+
 function refreshGridSnapshots() {
   var grid = el('camera-grid');
   if (!grid || grid.style.display === 'none') return;
 
-  // Fetch live camera status and update badges + snapshots in one pass
+  // Fetch live camera status and update badges + snapshots in one pass.
   fetch('/api/cameras')
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(data) {
@@ -2618,13 +2658,14 @@ function refreshGridSnapshots() {
       var cards = grid.querySelectorAll('.cam-card');
       var t = Date.now();
       cards.forEach(function(card) {
+        var preview = card.querySelector('.cam-preview');
         var img = card.querySelector('.cam-preview img');
         if (!img) return;
         var name = img.alt;
         var cam = statusMap[name];
         if (!cam) return;
 
-        // Update LIVE/OFFLINE badge
+        // Update LIVE/OFFLINE badge.
         var dot = card.querySelector('.cam-live-dot');
         var badge = card.querySelector('.cam-live-badge');
         if (dot && badge) {
@@ -2633,10 +2674,18 @@ function refreshGridSnapshots() {
           if (label) label.textContent = cam.online ? 'LIVE' : 'OFFLINE';
         }
 
-        // Refresh snapshot for online cameras
+        // Refresh snapshot for online cameras; clear error state on success.
         if (cam.online) {
-          var base = img.src.split('?')[0];
-          img.src = base + '?t=' + t;
+          var newUrl = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + t;
+          var probe = new Image();
+          probe.onload = function() {
+            img.src = newUrl;
+            if (preview) preview.classList.remove('cam-preview--error');
+          };
+          probe.onerror = function() {
+            if (preview) preview.classList.add('cam-preview--error');
+          };
+          probe.src = newUrl;
         }
       });
     })
@@ -2655,12 +2704,47 @@ function toggleCamera(name, isStopped) {
     });
 }
 
-// Start refresh after htmx loads the grid initially
+// Start refresh after htmx loads the grid initially.
 document.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'camera-grid') {
     startGridSnapshotRefresh();
   }
 });
+
+/* ─── Dashboard grid (W2.2) ─── */
+
+// Density selector — persists chosen tile size to localStorage and applies it
+// via a data-density attribute on the camera-grid element.
+function setDashboardDensity(density) {
+  var grid = el('camera-grid');
+  if (grid) {
+    if (density === 'default') {
+      grid.removeAttribute('data-density');
+    } else {
+      grid.setAttribute('data-density', density);
+    }
+  }
+
+  // Sync active state on buttons.
+  var btns = document.querySelectorAll('.density-btn');
+  btns.forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.density === density);
+  });
+
+  localStorage.setItem('dashboard:density', density);
+}
+
+function initDashboardDensity() {
+  var saved = localStorage.getItem('dashboard:density') || 'default';
+  setDashboardDensity(saved);
+}
+
+// Apply persisted density as soon as the page is interactive.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDashboardDensity);
+} else {
+  initDashboardDensity();
+}
 
 // ─── Stats Refresh ───
 // Fetch dashboard stats as HTML fragment and diff-update only changed values.
