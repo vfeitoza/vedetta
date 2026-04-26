@@ -1726,3 +1726,118 @@ func TestHandleSegment_NotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
+
+// --- Extensionless redirect and app-shell 404 ---
+
+func TestExtensionlessRedirect_Settings(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("GET /settings: status = %d, want %d", w.Code, http.StatusMovedPermanently)
+	}
+	loc := w.Header().Get("Location")
+	if loc != "/settings.html" {
+		t.Errorf("Location = %q, want %q", loc, "/settings.html")
+	}
+}
+
+func TestExtensionlessRedirect_KnownPages(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	pages := []struct {
+		path    string
+		wantLoc string
+	}{
+		{"/events", "/events.html"},
+		{"/recordings", "/recordings.html"},
+		{"/people", "/people.html"},
+		{"/objects", "/objects.html"},
+		{"/camera", "/camera.html"},
+	}
+
+	for _, tt := range pages {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusMovedPermanently {
+			t.Errorf("GET %s: status = %d, want %d", tt.path, w.Code, http.StatusMovedPermanently)
+			continue
+		}
+		loc := w.Header().Get("Location")
+		if loc != tt.wantLoc {
+			t.Errorf("GET %s: Location = %q, want %q", tt.path, loc, tt.wantLoc)
+		}
+	}
+}
+
+func TestAppShell404_UnknownPath(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /does-not-exist: status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Page not found") {
+		t.Error("404 response body does not contain 'Page not found'")
+	}
+	if !strings.Contains(body, "<nav") {
+		t.Error("404 response body does not contain nav element")
+	}
+}
+
+// --- Version display: -dirty suffix stripped ---
+
+func TestSetVersion_StripsDirtySuffix(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	srv.SetVersion("v0.2.0-4-gf01aca0-dirty")
+	if srv.version != "v0.2.0-4-gf01aca0" {
+		t.Errorf("version = %q, want %q", srv.version, "v0.2.0-4-gf01aca0")
+	}
+}
+
+func TestSetVersion_CleanVersionUnchanged(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	srv.SetVersion("v0.2.0")
+	if srv.version != "v0.2.0" {
+		t.Errorf("version = %q, want %q", srv.version, "v0.2.0")
+	}
+}
+
+func TestSetVersion_DirtyServedFromAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.SetVersion("v1.0.0-3-gabcdef0-dirty")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/system: status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ver, _ := body["version"].(string)
+	if strings.HasSuffix(ver, "-dirty") {
+		t.Errorf("version %q should not end with -dirty", ver)
+	}
+	if ver != "v1.0.0-3-gabcdef0" {
+		t.Errorf("version = %q, want %q", ver, "v1.0.0-3-gabcdef0")
+	}
+}
