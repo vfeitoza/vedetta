@@ -175,7 +175,7 @@ var allowedDataActionFunctions = new Set([
   'testRtspFromInput',
   'toggleBoxOverlay',
   'toggleCam',
-  'toggleCamSettings',
+  'toggleRevealInput',
   'zoneCancelDraw',
   'zoneDelete',
   'zoneFormCancel',

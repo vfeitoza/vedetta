@@ -3759,6 +3759,15 @@ kbd {
 }
 .form-input-row .form-input { flex: 1; min-width: 0; }
 
+/* Visually mask field contents (e.g. RTSP URLs containing credentials).
+   Real value still serializes/copies normally — this is shoulder-surfing
+   defense, not encryption. */
+.input-masked {
+  -webkit-text-security: disc;
+  text-security: disc;
+  letter-spacing: 0.05em;
+}
+
 /* ─── Cross-cutting polish (W2.4) ─── */
 
 /* Health detail popover — shown on click of a degraded .conn-status badge */
