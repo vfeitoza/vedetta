@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -140,6 +141,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
 	objectFilter := r.URL.Query().Get("object")
+	searchTerm := r.URL.Query().Get("q")
 	embed := r.URL.Query().Get("embed") == "1"
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -154,13 +156,19 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, "", objectFilter, limit, offset)
+	filters := storage.EventFilters{
+		Camera: cameraFilter,
+		Label:  labelFilter,
+		Object: objectFilter,
+		Search: searchTerm,
+	}
+	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if total, err := s.db.CountEventsFiltered(cameraFilter, labelFilter, "", objectFilter); err == nil {
+	if total, err := s.db.CountEventsFiltered(filters); err == nil {
 		w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	}
 
@@ -198,14 +206,23 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	// of cards as the user scrolls.
 	if !embed && len(events) == limit {
 		nextOffset := offset + limit
-		nextURL := fmt.Sprintf("/partials/events-gallery?limit=%d&offset=%d", limit, nextOffset)
+		params := url.Values{}
+		params.Set("limit", strconv.Itoa(limit))
+		params.Set("offset", strconv.Itoa(nextOffset))
 		if cameraFilter != "" {
-			nextURL += "&camera=" + cameraFilter
+			params.Set("camera", cameraFilter)
 		}
 		if labelFilter != "" {
-			nextURL += "&label=" + labelFilter
+			params.Set("label", labelFilter)
 		}
-		_, _ = fmt.Fprintf(w, `<div id="load-more-trigger" hx-get="%s" hx-trigger="revealed" hx-swap="outerHTML"></div>`, nextURL)
+		if objectFilter != "" {
+			params.Set("object", objectFilter)
+		}
+		if searchTerm != "" {
+			params.Set("q", searchTerm)
+		}
+		nextURL := "/partials/events-gallery?" + params.Encode()
+		_, _ = fmt.Fprintf(w, `<div id="load-more-trigger" hx-get="%s" hx-trigger="revealed" hx-swap="outerHTML"></div>`, template.HTMLEscapeString(nextURL))
 	}
 }
 

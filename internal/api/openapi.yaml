@@ -2806,10 +2806,13 @@ components:
 
     EventCounts:
       type: object
-      required: [total, by_label, by_camera]
+      required: [total, today, by_label, by_camera]
       properties:
         total:
           type: integer
+        today:
+          type: integer
+          description: Number of events with timestamp on or after today midnight (server local time).
         by_label:
           type: object
           additionalProperties:

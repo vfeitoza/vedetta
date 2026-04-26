@@ -394,40 +394,29 @@ func (d *DB) UpdateEventClipAvailability(eventID string, available bool) error {
 	return err
 }
 
-// QueryEvents returns events matching the given filters.
-func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.Event, error) {
-	return d.QueryEventsFiltered(cameraName, label, "", "", limit, offset)
+// EventFilters narrows event queries. Empty fields are ignored.
+type EventFilters struct {
+	Camera string
+	Label  string
+	Zone   string
+	Object string
+	Search string // free-text LIKE across camera, label, object_name, sub_label
 }
 
-// QueryEventsFiltered returns events matching all given filters including zone.
-func (d *DB) QueryEventsFiltered(cameraName, label, zoneName, objectName string, limit, offset int) ([]camera.Event, error) {
-	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label FROM events WHERE 1=1"
-	args := []any{}
+// QueryEvents returns events matching the given filters.
+func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.Event, error) {
+	return d.QueryEventsFiltered(EventFilters{Camera: cameraName, Label: label}, limit, offset)
+}
 
-	if cameraName != "" {
-		query += " AND camera = ?"
-		args = append(args, cameraName)
-	}
-	if label != "" {
-		query += " AND label = ?"
-		args = append(args, label)
-	}
-	if zoneName != "" {
-		query += " AND zone_name = ?"
-		args = append(args, zoneName)
-	}
-	if objectName != "" {
-		query += " AND (object_name = ? OR sub_label = ?)"
-		args = append(args, objectName, objectName)
-	}
-
-	query += " ORDER BY timestamp DESC"
+// QueryEventsFiltered returns events matching all given filters.
+func (d *DB) QueryEventsFiltered(f EventFilters, limit, offset int) ([]camera.Event, error) {
+	where, args := eventFilterClause(f)
+	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label FROM events" + where + " ORDER BY timestamp DESC"
 
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
 	}
-
 	if offset > 0 {
 		query += " OFFSET ?"
 		args = append(args, offset)
@@ -443,30 +432,38 @@ func (d *DB) QueryEventsFiltered(cameraName, label, zoneName, objectName string,
 }
 
 // CountEventsFiltered returns the total count of events matching the given filters.
-func (d *DB) CountEventsFiltered(cameraName, label, zoneName, objectName string) (int, error) {
-	query := "SELECT COUNT(*) FROM events WHERE 1=1"
-	args := []any{}
-
-	if cameraName != "" {
-		query += " AND camera = ?"
-		args = append(args, cameraName)
-	}
-	if label != "" {
-		query += " AND label = ?"
-		args = append(args, label)
-	}
-	if zoneName != "" {
-		query += " AND zone_name = ?"
-		args = append(args, zoneName)
-	}
-	if objectName != "" {
-		query += " AND (object_name = ? OR sub_label = ?)"
-		args = append(args, objectName, objectName)
-	}
-
+func (d *DB) CountEventsFiltered(f EventFilters) (int, error) {
+	where, args := eventFilterClause(f)
 	var count int
-	err := d.db.QueryRow(query, args...).Scan(&count)
+	err := d.db.QueryRow("SELECT COUNT(*) FROM events"+where, args...).Scan(&count)
 	return count, err
+}
+
+func eventFilterClause(f EventFilters) (string, []any) {
+	clauses := []string{"1=1"}
+	args := []any{}
+	if f.Camera != "" {
+		clauses = append(clauses, "camera = ?")
+		args = append(args, f.Camera)
+	}
+	if f.Label != "" {
+		clauses = append(clauses, "label = ?")
+		args = append(args, f.Label)
+	}
+	if f.Zone != "" {
+		clauses = append(clauses, "zone_name = ?")
+		args = append(args, f.Zone)
+	}
+	if f.Object != "" {
+		clauses = append(clauses, "(object_name = ? OR sub_label = ?)")
+		args = append(args, f.Object, f.Object)
+	}
+	if q := strings.TrimSpace(f.Search); q != "" {
+		like := "%" + q + "%"
+		clauses = append(clauses, "(camera LIKE ? OR label LIKE ? OR IFNULL(object_name,'') LIKE ? OR IFNULL(sub_label,'') LIKE ?)")
+		args = append(args, like, like, like, like)
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
 // CountEventsByLabel returns the count of events grouped by label.

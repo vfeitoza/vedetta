@@ -41,7 +41,7 @@ func (s *Server) ListPeople(w http.ResponseWriter, _ *http.Request) {
 		faces, _ := s.db.ListFacesByPerson(p.ID, 0)
 		var appearanceCount int
 		if p.Name != "" {
-			events, _ := s.db.QueryEventsFiltered("", "", "", p.Name, 0, 0)
+			events, _ := s.db.QueryEventsFiltered(storage.EventFilters{Object: p.Name}, 0, 0)
 			appearanceCount = len(events)
 		}
 		// Pick highest-confidence face for thumbnail
@@ -245,7 +245,7 @@ func (s *Server) ListPersonEvents(w http.ResponseWriter, r *http.Request, id int
 		})
 		return
 	}
-	events, err := s.db.QueryEventsFiltered("", "", "", person.Name, 20, 0)
+	events, err := s.db.QueryEventsFiltered(storage.EventFilters{Object: person.Name}, 20, 0)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

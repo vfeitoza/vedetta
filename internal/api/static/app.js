@@ -167,6 +167,8 @@ var allowedDataActionFunctions = new Set([
   'openThumbnailPicker',
   'closeThumbnailPicker',
   'setThumbnail',
+  'toggleEventsLegend',
+  'clearAllEventFilters',
   'togglePause',
   'togglePersonFaces',
   'togglePiP',
@@ -3603,6 +3605,7 @@ function reloadEventsWithSearch() {
 
   var labelChip = document.querySelector('.chip[data-filter="label"].active');
   var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
+  var objectChip = document.querySelector('.chip[data-filter="object"].active');
   var searchInput = el('event-search');
 
   var url = '/partials/events-gallery?limit=50';
@@ -3612,6 +3615,9 @@ function reloadEventsWithSearch() {
   if (cameraChip && cameraChip.dataset.value) {
     url += '&camera=' + encodeURIComponent(cameraChip.dataset.value);
   }
+  if (objectChip && objectChip.dataset.value) {
+    url += '&object=' + encodeURIComponent(objectChip.dataset.value);
+  }
   if (searchInput && searchInput.value.trim()) {
     url += '&q=' + encodeURIComponent(searchInput.value.trim());
   }
@@ -3620,6 +3626,7 @@ function reloadEventsWithSearch() {
   eventsOffset = 0;
   eventsExhausted = false;
 
+  gallery.setAttribute('hx-get', url);
   htmx.ajax('GET', url, { target: '#events-gallery', swap: 'innerHTML' });
 }
 

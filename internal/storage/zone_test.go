@@ -281,7 +281,7 @@ func TestQueryEventsFiltered_ByZone(t *testing.T) {
 	ev3 := makeEvent("e3", "cam1", "person", 0.7, mustParseTime("2026-03-20T12:02:00Z"))
 	mustSaveEvent(t, db, ev3)
 
-	events, err := db.QueryEventsFiltered("", "", "doorbell", "", 0, 0)
+	events, err := db.QueryEventsFiltered(EventFilters{Zone: "doorbell"}, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

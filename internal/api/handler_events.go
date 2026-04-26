@@ -48,7 +48,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListE
 		sinceTime = *params.Since
 	}
 
-	events, err := s.db.QueryEventsFiltered(cameraFilter, labelFilter, zoneFilter, objectFilter, limit, offset)
+	filters := storage.EventFilters{
+		Camera: cameraFilter,
+		Label:  labelFilter,
+		Zone:   zoneFilter,
+		Object: objectFilter,
+	}
+	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -69,7 +75,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListE
 		events = []camera.Event{}
 	}
 
-	total, _ := s.db.CountEventsFiltered(cameraFilter, labelFilter, zoneFilter, objectFilter)
+	total, _ := s.db.CountEventsFiltered(filters)
 	hasMore := offset+len(events) < total
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -221,11 +227,13 @@ func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string
 
 func (s *Server) GetEventCounts(w http.ResponseWriter, _ *http.Request) {
 	total, _ := s.db.CountEvents()
+	today, _ := s.db.CountEventsToday()
 	byLabel, _ := s.db.CountEventsByLabel()
 	byCamera, _ := s.db.CountEventsByCamera()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total":     total,
+		"today":     today,
 		"by_label":  byLabel,
 		"by_camera": byCamera,
 	})

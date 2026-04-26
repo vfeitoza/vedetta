@@ -37,55 +37,45 @@
 
   <main class="page">
     <div class="page-header">
-      <h1>Events</h1>
-    </div>
-
-    <!-- Search -->
-    <div class="search-wrap">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="event-search" class="search-input" placeholder="Search events..." aria-label="Search events">
-    </div>
-
-    <!-- Label Filter Chips -->
-    <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event filters">
-      <button class="chip active" data-filter="label" data-value="" data-action-click="toggleChip(this, 'label')">All</button>
-      <button class="chip" data-filter="label" data-value="person" data-action-click="toggleChip(this, 'label')">
-        <span class="chip-dot person"></span>Person
-      </button>
-      <button class="chip" data-filter="label" data-value="car" data-action-click="toggleChip(this, 'label')">
-        <span class="chip-dot car"></span>Car
-      </button>
-      <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')">
-        <span class="chip-dot dog"></span>Dog
-      </button>
-      <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')">
-        <span class="chip-dot cat"></span>Cat
+      <div>
+        <h1>Events</h1>
+        <p class="events-summary" id="events-summary">Loading…</p>
+      </div>
+      <button class="btn btn-sm btn-ghost" data-action-click="toggleEventsLegend()" aria-controls="events-legend" aria-expanded="false" id="events-legend-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        What do these badges mean?
       </button>
     </div>
 
-    <!-- Camera Filter Chips -->
-    <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Camera filters">
-      <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')">All Cameras</button>
+    <div class="events-legend" id="events-legend" hidden aria-label="Badge legend">
+      <span class="events-legend-item"><span class="events-legend-dot label"></span>Label (person, car…)</span>
+      <span class="events-legend-item"><span class="events-legend-dot duration"></span>Duration</span>
+      <span class="events-legend-item"><span class="events-legend-dot score"></span>Confidence %</span>
+      <span class="events-legend-item"><span class="events-legend-dot identity"></span>Identity (name when recognised)</span>
     </div>
 
-    <!-- Object Filter Chips (populated dynamically) -->
-    <div class="chip-bar" id="object-chips" role="toolbar" aria-label="Object filters" style="display:none">
-    </div>
-
-    <!-- Badge Legend -->
-    <div class="events-legend" aria-label="Badge legend">
-      <span class="events-legend-item">
-        <span class="events-legend-dot label"></span>Label (person, car…)
-      </span>
-      <span class="events-legend-item">
-        <span class="events-legend-dot duration"></span>Duration
-      </span>
-      <span class="events-legend-item">
-        <span class="events-legend-dot score"></span>Confidence %
-      </span>
-      <span class="events-legend-item">
-        <span class="events-legend-dot identity"></span>Identity (name when recognised)
-      </span>
+    <div class="events-toolbar">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="event-search" class="search-input" placeholder="Search by camera, label, name…" aria-label="Search events">
+      </div>
+      <div class="events-filter-row">
+        <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event labels">
+          <button class="chip active" data-filter="label" data-value="" data-action-click="toggleChip(this, 'label')">All</button>
+          <button class="chip" data-filter="label" data-value="person" data-action-click="toggleChip(this, 'label')"><span class="chip-dot person"></span>Person</button>
+          <button class="chip" data-filter="label" data-value="car" data-action-click="toggleChip(this, 'label')"><span class="chip-dot car"></span>Car</button>
+          <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')"><span class="chip-dot dog"></span>Dog</button>
+          <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')"><span class="chip-dot cat"></span>Cat</button>
+        </div>
+        <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Cameras">
+          <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')">All Cameras</button>
+        </div>
+        <div class="chip-bar" id="object-chips" role="toolbar" aria-label="Tracked objects" style="display:none"></div>
+        <button class="btn btn-sm btn-ghost events-clear-filters" id="events-clear-filters" data-action-click="clearAllEventFilters()" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Clear filters
+        </button>
+      </div>
     </div>
 
     <!-- Event Gallery -->
@@ -120,6 +110,79 @@
     initEventSearch();
     initInfiniteScroll();
 
+    var eventsTotalAll = 0;
+    var eventsTodayCount = 0;
+
+    function toggleEventsLegend() {
+      var el = document.getElementById('events-legend');
+      var btn = document.getElementById('events-legend-btn');
+      var open = el.hasAttribute('hidden');
+      if (open) { el.removeAttribute('hidden'); btn.setAttribute('aria-expanded', 'true'); }
+      else { el.setAttribute('hidden', ''); btn.setAttribute('aria-expanded', 'false'); }
+    }
+
+    function eventsHasActiveFilter() {
+      var labelChip = document.querySelector('.chip[data-filter="label"].active');
+      var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
+      var objectChip = document.querySelector('.chip[data-filter="object"].active');
+      var search = (document.getElementById('event-search') || {}).value || '';
+      return !!(
+        (labelChip && labelChip.dataset.value) ||
+        (cameraChip && cameraChip.dataset.value) ||
+        (objectChip && objectChip.dataset.value) ||
+        search.trim()
+      );
+    }
+
+    function updateEventsSummary(visibleTotal) {
+      var summary = document.getElementById('events-summary');
+      if (!summary) return;
+      var clearBtn = document.getElementById('events-clear-filters');
+      var hasFilter = eventsHasActiveFilter();
+      if (clearBtn) clearBtn.hidden = !hasFilter;
+
+      if (hasFilter) {
+        var n = isFinite(visibleTotal) ? visibleTotal : 0;
+        summary.textContent = n.toLocaleString() + ' of ' + eventsTotalAll.toLocaleString() + ' events match';
+      } else {
+        var parts = [eventsTotalAll.toLocaleString() + ' event' + (eventsTotalAll === 1 ? '' : 's') + ' recorded'];
+        if (eventsTodayCount > 0) parts.push(eventsTodayCount.toLocaleString() + ' today');
+        summary.textContent = parts.join(' · ');
+      }
+    }
+
+    function clearAllEventFilters() {
+      document.querySelectorAll('.chip[data-filter="label"]').forEach(function(c) {
+        c.classList.toggle('active', !c.dataset.value);
+      });
+      document.querySelectorAll('.chip[data-filter="camera"]').forEach(function(c) {
+        c.classList.toggle('active', !c.dataset.value);
+      });
+      document.querySelectorAll('.chip[data-filter="object"]').forEach(function(c) {
+        c.classList.toggle('active', !c.dataset.value);
+      });
+      var search = document.getElementById('event-search');
+      if (search) search.value = '';
+      if (typeof reloadEvents === 'function') reloadEvents();
+      updateEventsSummary(eventsTotalAll);
+    }
+
+    document.getElementById('events-gallery').addEventListener('htmx:afterSwap', function(e) {
+      var xhr = e.detail && e.detail.xhr;
+      var total = xhr ? parseInt(xhr.getResponseHeader('X-Total-Count') || '', 10) : NaN;
+      if (!isFinite(total)) total = e.target.querySelectorAll('.event-card').length;
+      updateEventsSummary(total);
+
+      if (total === 0 && eventsHasActiveFilter()) {
+        e.target.innerHTML = ''
+          + '<div class="empty-state" style="grid-column:1/-1">'
+          + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+          + '<p>No events match the current filters.</p>'
+          + '<button class="btn btn-sm btn-primary" data-action-click="clearAllEventFilters()">Clear filters</button>'
+          + '</div>';
+      }
+    });
+
     // Refresh the gallery when a new event arrives via SSE, but only when
     // the user is at the top of the list and no filters are applied, to avoid
     // disturbing their scroll position mid-browse.
@@ -134,69 +197,54 @@
       }
     });
 
-    // Populate camera chips from API and fetch event counts
+    // Populate camera and object chips, and fetch top-of-page summary counts.
     Promise.all([
-      fetch('/api/cameras').then(r => r.json()),
-      fetch('/api/events/counts').then(r => r.json()),
-      fetch('/api/objects').then(r => r.json()).then(d => d.items || d || [])
-    ]).then(function([camData, counts, objects]) {
+      fetch('/api/cameras').then(function(r) { return r.json(); }),
+      fetch('/api/events/counts').then(function(r) { return r.json(); }),
+      fetch('/api/objects').then(function(r) { return r.json(); }).then(function(d) { return d.items || d || []; })
+    ]).then(function(results) {
+      var camData = results[0];
+      var counts = results[1] || {};
+      var objects = results[2];
+
       var byLabel = counts.by_label || {};
       var byCamera = counts.by_camera || {};
-      var total = counts.total || 0;
+      eventsTotalAll = counts.total || 0;
+      eventsTodayCount = counts.today || 0;
+      updateEventsSummary(eventsTotalAll);
 
-	      // Update label chip counts
-	      var allChip = document.querySelector('.chip[data-filter="label"][data-value=""]');
-	      if (allChip && total > 0) {
-	        allChip.textContent = 'All ';
-	        var totalCount = document.createElement('span');
-	        totalCount.className = 'count';
-	        totalCount.textContent = total;
-	        allChip.appendChild(totalCount);
-	      }
-	      document.querySelectorAll('.chip[data-filter="label"]').forEach(function(chip) {
-	        var val = chip.dataset.value;
-	        if (val && byLabel[val]) {
-	          var dot = chip.querySelector('.chip-dot');
-	          var label = val.charAt(0).toUpperCase() + val.slice(1);
-	          chip.textContent = '';
-	          if (dot) chip.appendChild(dot.cloneNode(true));
-	          chip.appendChild(document.createTextNode(label + ' '));
-	          var count = document.createElement('span');
-	          count.className = 'count';
-	          count.textContent = byLabel[val];
-	          chip.appendChild(count);
-	        }
-	      });
+      // Append per-label counts inline so users can see distribution at a glance.
+      document.querySelectorAll('.chip[data-filter="label"]').forEach(function(chip) {
+        var val = chip.dataset.value;
+        if (val && byLabel[val]) {
+          var count = document.createElement('span');
+          count.className = 'count';
+          count.textContent = byLabel[val].toLocaleString();
+          chip.appendChild(document.createTextNode(' '));
+          chip.appendChild(count);
+        }
+      });
 
-      // Create camera chips with counts
+      // Camera chips
       var bar = document.getElementById('camera-chips');
-	      var allCamChip = document.querySelector('.chip[data-filter="camera"][data-value=""]');
-	      if (allCamChip && total > 0) {
-	        allCamChip.textContent = 'All Cameras ';
-	        var allCamCount = document.createElement('span');
-	        allCamCount.className = 'count';
-	        allCamCount.textContent = total;
-	        allCamChip.appendChild(allCamCount);
-	      }
-	      ((camData.items || []).map(function(c) { return c.name; })).forEach(function(name) {
-	        var btn = document.createElement('button');
-	        btn.className = 'chip';
-	        btn.dataset.filter = 'camera';
-	        btn.dataset.value = name;
-	        var displayName = name.replace(/_/g, ' ');
-	        btn.textContent = displayName;
-	        if (byCamera[name]) {
-	          btn.appendChild(document.createTextNode(' '));
-	          var camCount = document.createElement('span');
-	          camCount.className = 'count';
-	          camCount.textContent = byCamera[name];
-	          btn.appendChild(camCount);
-	        }
-	        btn.onclick = function() { toggleChip(this, 'camera'); };
-	        bar.appendChild(btn);
-	      });
+      (camData.items || []).map(function(c) { return c.name; }).forEach(function(name) {
+        var btn = document.createElement('button');
+        btn.className = 'chip';
+        btn.dataset.filter = 'camera';
+        btn.dataset.value = name;
+        btn.textContent = name.replace(/_/g, ' ');
+        if (byCamera[name]) {
+          var count = document.createElement('span');
+          count.className = 'count';
+          count.textContent = byCamera[name].toLocaleString();
+          btn.appendChild(document.createTextNode(' '));
+          btn.appendChild(count);
+        }
+        btn.onclick = function() { toggleChip(this, 'camera'); };
+        bar.appendChild(btn);
+      });
 
-      // Object filter chips
+      // Object chips (only render section if any tracked objects exist)
       if (objects && objects.length > 0) {
         var objBar = document.getElementById('object-chips');
         objBar.style.display = '';
@@ -204,18 +252,18 @@
         allObjBtn.className = 'chip active';
         allObjBtn.dataset.filter = 'object';
         allObjBtn.dataset.value = '';
-        allObjBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="margin-right:3px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>All Objects';
+        allObjBtn.textContent = 'Any tracked';
         allObjBtn.onclick = function() { toggleChip(this, 'object'); };
         objBar.appendChild(allObjBtn);
-	        objects.forEach(function(obj) {
-	          var btn = document.createElement('button');
-	          btn.className = 'chip';
-	          btn.dataset.filter = 'object';
-	          btn.dataset.value = obj.name;
-	          btn.textContent = obj.name;
-	          btn.onclick = function() { toggleChip(this, 'object'); };
-	          objBar.appendChild(btn);
-	        });
+        objects.forEach(function(obj) {
+          var btn = document.createElement('button');
+          btn.className = 'chip';
+          btn.dataset.filter = 'object';
+          btn.dataset.value = obj.name;
+          btn.textContent = obj.name;
+          btn.onclick = function() { toggleChip(this, 'object'); };
+          objBar.appendChild(btn);
+        });
       }
     });
   </script>
