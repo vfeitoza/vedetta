@@ -3847,6 +3847,264 @@ kbd {
   line-height: 1.55;
 }
 
+/* ─── Tracked Objects page ─── */
+.objects-summary {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin: 0.125rem 0 0;
+}
+
+.objects-help {
+  background: var(--surface-2, var(--surface-1));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.objects-help[hidden] { display: none; }
+.objects-help p { margin: 0; }
+.objects-help p + p { margin-top: 0.5rem; }
+
+.objects-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.objects-toolbar .search-wrap { flex: 0 1 320px; min-width: 200px; margin-bottom: 0; }
+.objects-toolbar .chip-bar { margin-bottom: 0; }
+
+.objects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .objects-grid { grid-template-columns: 1fr; }
+}
+
+.object-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--dur-fast);
+}
+.object-card:hover { border-color: var(--border-strong); }
+
+.object-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.object-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  background: var(--surface-3) center / cover no-repeat;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+}
+
+.object-info { flex: 1; min-width: 0; }
+
+.object-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  flex-wrap: wrap;
+}
+
+.object-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  text-transform: capitalize;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.object-card-body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.object-section-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.375rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.object-section-title .muted {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.object-thresh-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+.object-thresh-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--cyan);
+}
+.object-thresh-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  min-width: 2.75em;
+  text-align: right;
+}
+.object-thresh-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-top: 0.25rem;
+}
+
+.object-refs {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+.object-ref {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3) center / cover no-repeat;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: transform var(--dur-fast), border-color var(--dur-fast);
+}
+.object-ref:hover { transform: scale(1.05); border-color: var(--cyan); }
+.object-ref-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1;
+  display: none;
+  cursor: pointer;
+  padding: 0;
+}
+.object-ref:hover .object-ref-delete { display: block; }
+.object-ref-delete:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+.object-sightings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 0.375rem;
+}
+.object-sighting {
+  position: relative;
+  display: block;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-3);
+  aspect-ratio: 4 / 3;
+  text-decoration: none;
+  border: 1px solid var(--border-subtle);
+  transition: transform var(--dur-fast), border-color var(--dur-fast);
+}
+.object-sighting:hover { transform: scale(1.04); border-color: var(--cyan); }
+.object-sighting-thumb {
+  position: absolute;
+  inset: 0;
+  background: center / cover no-repeat;
+}
+.object-sighting-sim {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  line-height: 1;
+}
+.object-sighting-sim.high { color: #fff; background: rgba(46, 125, 50, 0.85); }
+.object-sighting-sim.mid  { color: #1a1a1a; background: rgba(255, 171, 0, 0.85); }
+.object-sighting-sim.low  { color: #fff; background: rgba(198, 40, 40, 0.85); }
+.object-sighting-dismiss {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: none;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  padding: 0;
+}
+.object-sighting:hover .object-sighting-dismiss { display: block; }
+.object-sighting-dismiss:hover { background: var(--danger); }
+
+.object-card-footer {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: var(--text-xs);
+}
+.object-card-footer .link-cyan {
+  color: var(--cyan);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.object-card-footer .link-cyan:hover { text-decoration: underline; }
+.object-card-footer .muted {
+  color: var(--text-tertiary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.object-empty-section {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 /* ─── Dashboard density selector (W2.2) ─── */
 .density-selector {
   display: flex;
