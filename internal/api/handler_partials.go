@@ -530,16 +530,16 @@ const systemPartialTemplate = `<div class="sys-card">
   </div>
   <div class="sys-card-body">
     <div class="sys-row"><span class="key">OpenH264</span><span class="val">{{if eq .OpenH264UI.BadgeTone "success"}}<span class="green">{{.OpenH264UI.Badge}}</span>{{else if eq .OpenH264UI.BadgeTone "error"}}<span class="red">{{.OpenH264UI.Badge}}</span>{{else}}{{.OpenH264UI.Badge}}{{end}}</span></div>
-    <div style="margin-top: 0.35rem; line-height: 1.45">
+    <div class="sys-note">
       <div>{{.OpenH264UI.Headline}}</div>
-      {{if .OpenH264UI.Detail}}<div style="color: var(--muted); margin-top: 0.25rem">{{.OpenH264UI.Detail}}</div>{{end}}
+      {{if .OpenH264UI.Detail}}<div class="sys-note-detail">{{.OpenH264UI.Detail}}</div>{{end}}
     </div>
     {{if .OpenH264SourceLabel}}<div class="sys-row"><span class="key">Source</span><span class="val">{{.OpenH264SourceLabel}}</span></div>{{end}}
     {{if .OpenH264.Version}}<div class="sys-row"><span class="key">Version</span><span class="val">{{.OpenH264.Version}}</span></div>{{end}}
-    {{if .OpenH264.Path}}<div class="sys-row"><span class="key">Path</span><span class="val" style="word-break: break-all">{{.OpenH264.Path}}</span></div>{{end}}
-    {{if .OpenH264UI.ShowDiagnostics}}<details style="margin-top: 0.75rem"><summary style="cursor: pointer; color: var(--muted)">Technical details</summary><div style="margin-top: 0.5rem; color: var(--muted); line-height: 1.4; word-break: break-word">{{.OpenH264UI.Diagnostic}}</div></details>{{end}}
+    {{if .OpenH264.Path}}<div class="sys-row"><span class="key">Path</span><span class="val sys-path">{{.OpenH264.Path}}</span></div>{{end}}
+    {{if .OpenH264UI.ShowDiagnostics}}<div class="sys-card-section"><details style="width:100%"><summary style="cursor:pointer;color:var(--text-secondary)">Technical details</summary><div class="sys-note-detail" style="word-break:break-word">{{.OpenH264UI.Diagnostic}}</div></details></div>{{end}}
     {{if .OpenH264UI.ShowInstall}}
-    <div style="margin-top: 0.75rem">
+    <div class="sys-card-section">
       {{if .OpenH264.Installing}}
       <button class="btn btn-sm" disabled>Installing…</button>
       {{else}}

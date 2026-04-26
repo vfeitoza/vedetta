@@ -145,34 +145,37 @@
       <a href="#notifications-card">Notifications</a>
     </nav>
 
-    <!-- System health cards — populated by /partials/system -->
-    <div class="system-grid"
-         id="system-grid"
-         hx-get="/partials/system"
-         hx-trigger="load, every 10s"
-         hx-swap="innerHTML"
-         style="margin-bottom:1rem">
-      <div class="sys-card">
-        <div class="sys-card-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          System Info
+    <section class="settings-section">
+      <h2 class="settings-section-title">System Health</h2>
+      <div class="system-grid"
+           id="system-grid"
+           hx-get="/partials/system"
+           hx-trigger="load, every 10s"
+           hx-swap="innerHTML">
+        <div class="sys-card">
+          <div class="sys-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            System Info
+          </div>
+          <div class="sys-card-body">
+            <div class="loading-state">Loading...</div>
+          </div>
         </div>
-        <div class="sys-card-body">
-          <div class="loading-state">Loading...</div>
+        <div class="sys-card">
+          <div class="sys-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            Storage
+          </div>
+          <div class="sys-card-body">
+            <div class="loading-state">Loading...</div>
+          </div>
         </div>
       </div>
-      <div class="sys-card">
-        <div class="sys-card-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-          Storage
-        </div>
-        <div class="sys-card-body">
-          <div class="loading-state">Loading...</div>
-        </div>
-      </div>
-    </div>
+    </section>
 
-    <div class="system-grid">
+    <section class="settings-section">
+      <h2 class="settings-section-title">Configuration</h2>
+      <div class="system-grid">
 
       <div class="sys-card" id="mqtt-card">
         <div class="sys-card-header">
@@ -234,13 +237,13 @@
         <div class="sys-card-body" id="updates-body">
           <div class="sys-row"><span class="key">Current Version</span><span class="val" id="update-current">—</span></div>
           <div class="sys-row"><span class="key">Latest Version</span><span class="val" id="update-latest">—</span></div>
-          <div id="update-actions" style="margin-top:1rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+          <div class="sys-card-section" id="update-actions">
             <button type="button" class="btn btn-secondary btn-small" id="update-check-btn">Check Now</button>
-            <span id="update-status" style="font-size:0.92rem;color:var(--muted)"></span>
+            <span id="update-status" class="status-text"></span>
           </div>
-          <div id="update-available" style="display:none;margin-top:1rem;padding:0.75rem;border-radius:8px;background:rgba(93,215,255,0.08);border:1px solid rgba(93,215,255,0.2)">
+          <div id="update-available" class="sys-card-banner" style="display:none">
             <span id="update-available-text"></span>
-            <div style="margin-top:0.5rem;display:flex;gap:0.75rem">
+            <div class="actions">
               <a id="update-release-link" href="#" target="_blank" class="btn btn-secondary btn-small">View Release</a>
               <button type="button" class="btn btn-secondary btn-small" id="update-dismiss-btn">Dismiss</button>
             </div>
@@ -388,7 +391,8 @@
         </div>
       </div>
 
-    </div>
+      </div>
+    </section>
   </main>
 
   <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
