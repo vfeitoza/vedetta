@@ -94,6 +94,20 @@
     </div>
   </div>
 
+  <!-- Thumbnail Picker Modal -->
+  <div class="shortcut-backdrop" id="thumb-picker-backdrop"></div>
+  <div class="shortcut-modal thumb-picker-modal" id="thumb-picker-modal" role="dialog" aria-modal="true" aria-label="Choose thumbnail">
+    <div class="shortcut-modal-header">
+      <h2>Choose thumbnail</h2>
+      <button class="btn btn-icon btn-ghost" data-action-click="closeThumbnailPicker()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="thumb-picker-body" id="thumb-picker-body">
+      <p class="thumb-picker-empty">Loading…</p>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
   <script>
     var objectsData = [];
@@ -212,8 +226,12 @@
         html += ''
           + '<article class="object-card" id="object-' + obj.id + '" data-name="' + escapeAttr(obj.name) + '" data-label="' + escapeAttr(obj.label) + '">'
           +   '<header class="object-card-header">'
-          +     '<div class="object-thumb" id="thumb-' + obj.id + '" style="background:' + initialsColor(obj.name) + '" aria-hidden="true">'
+          +     '<div class="object-thumb" id="thumb-' + obj.id + '" style="background:' + initialsColor(obj.name) + '">'
           +       '<img alt="" src="/api/objects/' + obj.id + '/crop" data-initials="' + escapeAttr(initials(obj.name)) + '">'
+          +       '<button class="object-thumb-edit" data-action-click="openThumbnailPicker(' + obj.id + ', ' + jsStringArg(obj.name) + ')" '
+          +         'aria-label="Change thumbnail" title="Change thumbnail">'
+          +         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>'
+          +       '</button>'
           +     '</div>'
           +     '<div class="object-info">'
           +       '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
@@ -380,6 +398,111 @@
       });
     }
 
+    function openThumbnailPicker(objectId, objectName) {
+      var body = document.getElementById('thumb-picker-body');
+      body.innerHTML = '<p class="thumb-picker-empty">Loading candidates…</p>';
+      document.getElementById('thumb-picker-backdrop').classList.add('open');
+      document.getElementById('thumb-picker-modal').classList.add('open');
+
+      Promise.all([
+        fetch('/api/objects/' + objectId + '/references').then(function(r) { return r.json(); }),
+        fetch('/api/objects/' + objectId + '/sightings?limit=24').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        var refs = (results[0] && results[0].items) || [];
+        var sightings = (results[1] && results[1].items) || [];
+        var html = '';
+        if (refs.length) {
+          html += '<h3 class="thumb-picker-section">References</h3>'
+            + '<div class="thumb-picker-grid">';
+          refs.forEach(function(ref) {
+            html += '<button class="thumb-picker-item" '
+              + 'data-action-click="setThumbnail(' + objectId + ', null, ' + ref.id + ')" '
+              + 'title="Reference">'
+              + '<img alt="" src="/api/objects/' + objectId + '/crop?ref=' + ref.id + '">'
+              + '<span class="thumb-picker-badge">ref</span>'
+              + '</button>';
+          });
+          html += '</div>';
+        }
+        if (sightings.length) {
+          html += '<h3 class="thumb-picker-section">Recent sightings</h3>'
+            + '<div class="thumb-picker-grid">';
+          sightings.forEach(function(s) {
+            var simPct = Math.round(s.similarity * 100);
+            html += '<button class="thumb-picker-item" '
+              + 'data-action-click="setThumbnail(' + objectId + ', ' + jsStringArg(s.event_id) + ', null)" '
+              + 'title="' + escapeAttr(s.camera + ' · ' + simPct + '% match') + '">'
+              + '<img alt="" src="/api/events/' + encodeURIComponent(s.event_id) + '/snapshot">'
+              + '<span class="thumb-picker-badge">' + simPct + '%</span>'
+              + '</button>';
+          });
+          html += '</div>';
+        }
+        if (!refs.length && !sightings.length) {
+          html = '<p class="thumb-picker-empty">No images available for ' + escapeHtml(objectName) + ' yet. Track this object on a new event to add a thumbnail.</p>';
+        }
+        body.innerHTML = html;
+      }).catch(function() {
+        body.innerHTML = '<p class="thumb-picker-empty">Failed to load candidates.</p>';
+      });
+    }
+
+    function closeThumbnailPicker() {
+      document.getElementById('thumb-picker-backdrop').classList.remove('open');
+      document.getElementById('thumb-picker-modal').classList.remove('open');
+    }
+
+    function setThumbnail(objectId, eventId, referenceId) {
+      var body = {};
+      if (eventId) body.event_id = eventId;
+      if (referenceId) body.reference_id = referenceId;
+      fetch('/api/objects/' + objectId + '/thumbnail', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      }).then(function(r) {
+        if (!r.ok) throw new Error('Failed');
+        return r.json();
+      }).then(function() {
+        closeThumbnailPicker();
+        refreshObjectThumbnail(objectId);
+        if (typeof toast === 'function') toast('Thumbnail updated');
+      }).catch(function() {
+        if (typeof toast === 'function') toast('Failed to set thumbnail', 'error');
+      });
+    }
+
+    function refreshObjectThumbnail(objectId) {
+      var thumb = document.getElementById('thumb-' + objectId);
+      if (!thumb) return;
+      // Bust cache by appending a timestamp; also restore the <img> if it
+      // was previously replaced with initials.
+      var initialsText = '';
+      var existing = thumb.querySelector('img');
+      if (existing) initialsText = existing.dataset.initials || '';
+      thumb.innerHTML = '';
+      var img = document.createElement('img');
+      img.alt = '';
+      img.dataset.initials = initialsText;
+      img.src = '/api/objects/' + objectId + '/crop?t=' + Date.now();
+      img.addEventListener('error', function() {
+        thumb.textContent = img.dataset.initials || '?';
+      });
+      thumb.appendChild(img);
+      var btn = document.createElement('button');
+      btn.className = 'object-thumb-edit';
+      btn.setAttribute('data-action-click', 'openThumbnailPicker(' + objectId + ', ' + jsStringArg(getObjectName(objectId)) + ')');
+      btn.setAttribute('aria-label', 'Change thumbnail');
+      btn.title = 'Change thumbnail';
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+      thumb.appendChild(btn);
+    }
+
+    function getObjectName(id) {
+      var o = objectsData.find(function(x) { return x.id === id; });
+      return o ? o.name : '';
+    }
+
     function deleteObject(id, name) {
       document.getElementById('confirm-title').textContent = 'Delete Object';
       document.getElementById('confirm-message').textContent = 'Delete "' + name + '" and all its sightings?';
@@ -466,6 +589,7 @@
     function jsStringArg(s) { return escapeAttr(JSON.stringify(String(s == null ? '' : s))); }
 
     document.getElementById('confirm-backdrop').addEventListener('click', closeConfirmModal);
+    document.getElementById('thumb-picker-backdrop').addEventListener('click', closeThumbnailPicker);
     loadObjects();
   </script>
 </body>

@@ -1904,6 +1904,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/objects/{id}/thumbnail:
+    post:
+      operationId: setObjectThumbnail
+      summary: Set the avatar/thumbnail of a known object from an event or reference
+      tags: [objects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetObjectThumbnailRequest"
+      responses:
+        "200":
+          description: Thumbnail updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetObjectThumbnailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Object, event, or reference not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /api/objects/references/{id}:
     delete:
       operationId: deleteObjectReference
@@ -2219,6 +2257,28 @@ components:
         id:
           type: integer
           format: int64
+        object_id:
+          type: integer
+          format: int64
+        crop_path:
+          type: string
+
+    SetObjectThumbnailRequest:
+      type: object
+      description: Provide exactly one of event_id or reference_id.
+      properties:
+        event_id:
+          type: string
+          description: Event ID — server re-cuts the bounding box from the event snapshot.
+        reference_id:
+          type: integer
+          format: int64
+          description: Reference ID — copies that reference's crop as the thumbnail.
+
+    SetObjectThumbnailResponse:
+      type: object
+      required: [object_id, crop_path]
+      properties:
         object_id:
           type: integer
           format: int64

@@ -380,6 +380,83 @@ func (s *Server) AddObjectReference(w http.ResponseWriter, r *http.Request, id i
 	})
 }
 
+// SetObjectThumbnail replaces the avatar of a known object using either an
+// event snapshot (re-cuts the bbox) or an existing reference (copies its crop).
+func (s *Server) SetObjectThumbnail(w http.ResponseWriter, r *http.Request, id int64) {
+	var req SetObjectThumbnailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	hasEvent := req.EventId != nil && *req.EventId != ""
+	hasRef := req.ReferenceId != nil
+	if hasEvent == hasRef {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provide exactly one of event_id or reference_id"})
+		return
+	}
+
+	obj, err := s.db.GetKnownObject(id)
+	if err != nil || obj == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "object not found"})
+		return
+	}
+
+	var newPath string
+	if hasRef {
+		refs, err := s.db.ListObjectReferences(id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		var match *storage.ObjectReference
+		for i := range refs {
+			if refs[i].ID == *req.ReferenceId {
+				match = &refs[i]
+				break
+			}
+		}
+		if match == nil || match.CropPath == "" || !fileExists(match.CropPath) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "reference crop not found"})
+			return
+		}
+		newPath = match.CropPath
+	} else {
+		if s.objectEmbedder == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
+			return
+		}
+		event, err := s.db.GetEventByID(*req.EventId)
+		if err != nil || event == nil || !event.SnapshotAvailable || event.SnapshotPath == "" {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "event snapshot not found"})
+			return
+		}
+		if !fileExists(event.SnapshotPath) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "event snapshot not on disk"})
+			return
+		}
+		img, err := loadSnapshotImage(event.SnapshotPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load snapshot"})
+			return
+		}
+		cropDir := filepath.Join(s.snapshotPath, "objects")
+		newPath = s.objectEmbedder.SaveCrop(img, event.Box, cropDir, id)
+		if newPath == "" {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save crop"})
+			return
+		}
+	}
+
+	if err := s.db.UpdateKnownObjectCrop(id, newPath); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, SetObjectThumbnailResponse{
+		ObjectId: id,
+		CropPath: newPath,
+	})
+}
+
 func (s *Server) DeleteObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeleteObjectReference(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
