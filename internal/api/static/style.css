@@ -3286,3 +3286,45 @@ kbd {
     height: 36px;
   }
 }
+
+/* ─── Settings jump nav ─── */
+.settings-jump {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1.25rem;
+  background: var(--base);
+  border-bottom: 1px solid var(--border-subtle);
+  margin: -1.25rem -1.25rem 1rem -1.25rem;
+}
+
+.settings-jump a {
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.settings-jump a:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.sys-card {
+  scroll-margin-top: 3.5rem;
+}
+
+@media (max-width: 768px) {
+  .settings-jump {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.5rem 1rem;
+    margin: -1.25rem -1.25rem 1rem -1.25rem;
+  }
+}
