@@ -519,6 +519,74 @@ input, select { font-family: inherit; }
   opacity: 0.75;
 }
 
+/* Snapshot loading state — shown while the initial JPEG is in flight */
+.cam-preview--loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-1);
+  opacity: 0.85;
+}
+
+.cam-preview--loading::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cam-spin 0.7s linear infinite;
+  z-index: 1;
+}
+
+@keyframes cam-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cam-preview--loading img {
+  opacity: 0.15;
+}
+
+/* Snapshot error state — shown when the snapshot fetch fails */
+.cam-preview--error img {
+  opacity: 0;
+}
+
+.cam-preview--error::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--surface-1);
+}
+
+.cam-preview--error::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  background: var(--text-tertiary);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'%3E%3Cpath d='M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'/%3E%3Ccircle cx='12' cy='13' r='4'/%3E%3C/svg%3E");
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'%3E%3Cpath d='M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'/%3E%3Ccircle cx='12' cy='13' r='4'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  z-index: 1;
+  opacity: 0.4;
+}
+
 /* FPS overlay */
 .cam-fps {
   position: absolute;
