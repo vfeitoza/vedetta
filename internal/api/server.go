@@ -278,12 +278,14 @@ func (s *Server) registerRoutes() {
 	// consults the mime package lazily on first request.
 	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 
-	// Serve static files at root
+	// Serve static files at root, with extensionless-path redirects and an
+	// app-shell 404 for unknown paths.
 	staticSub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		slog.Error("failed to create static sub filesystem", "error", err)
 	} else {
-		s.mux.Handle("GET /", http.FileServer(http.FS(staticSub)))
+		fileServer := http.FileServer(http.FS(staticSub))
+		s.mux.Handle("GET /", staticFileHandler(staticSub, fileServer))
 	}
 }
 
@@ -323,7 +325,10 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) SetVersion(v string) {
-	s.version = v
+	// Strip the -dirty suffix from version strings produced by `git describe
+	// --dirty`. The full string (with -dirty) is useful for local diagnostics
+	// but should not be shown to end users in the settings panel.
+	s.version = strings.TrimSuffix(v, "-dirty")
 }
 
 func (s *Server) SetUpdateChecker(checker *update.Checker) {
@@ -476,6 +481,99 @@ func (s *Server) cameraStatuses() []camera.CameraStatus {
 	}
 	return statuses
 }
+
+// staticFileHandler wraps a standard file server with two behaviours:
+//  1. Extensionless paths that have a corresponding .html file are
+//     301-redirected to the .html URL (e.g. /settings → /settings.html).
+//  2. Paths that don't match any file in the embedded FS are answered with a
+//     styled app-shell "Page not found" response instead of the bare Go 404.
+func staticFileHandler(fsys fs.FS, fileServer http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Redirect extensionless paths to their .html counterpart when it exists.
+		if path != "/" && !strings.Contains(strings.TrimPrefix(path, "/"), ".") {
+			htmlPath := strings.TrimPrefix(path, "/") + ".html"
+			if _, err := fs.Stat(fsys, htmlPath); err == nil {
+				http.Redirect(w, r, path+".html", http.StatusMovedPermanently)
+				return
+			}
+		}
+
+		// Intercept 404s from the file server. We buffer the response so that
+		// we can substitute our app-shell page before anything is flushed to
+		// the client.
+		rr := &bufferedResponseWriter{code: http.StatusOK, header: make(http.Header)}
+		fileServer.ServeHTTP(rr, r)
+		if rr.code == http.StatusNotFound {
+			// Discard the "404 page not found" plain-text body and replace it
+			// with a styled app-shell page.
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(appShell404HTML))
+			return
+		}
+		// Flush the buffered response to the real writer.
+		for k, vals := range rr.header {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(rr.code)
+		_, _ = w.Write(rr.body)
+	})
+}
+
+// bufferedResponseWriter captures the entire response (status + body) so the
+// caller can inspect it before deciding whether to pass it through or replace it.
+type bufferedResponseWriter struct {
+	header http.Header
+	body   []byte
+	code   int
+}
+
+func (b *bufferedResponseWriter) Header() http.Header  { return b.header }
+func (b *bufferedResponseWriter) WriteHeader(code int) { b.code = code }
+func (b *bufferedResponseWriter) Write(p []byte) (int, error) {
+	b.body = append(b.body, p...)
+	return len(p), nil
+}
+
+// appShell404HTML is an app-shell page returned for unknown paths so that the
+// user sees the Vedetta navigation rather than the bare Go default 404.
+const appShell404HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Page not found - Vedetta</title>
+  <link rel="stylesheet" href="/style.css">
+  <meta name="theme-color" content="#0a0e14">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+</head>
+<body>
+  <nav class="topnav" role="navigation" aria-label="Main">
+    <a href="/" class="topnav-brand" aria-label="Vedetta home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>vedetta</span>
+    </a>
+    <div class="topnav-links">
+      <a href="/">Dashboard</a>
+      <a href="/events.html">Events</a>
+      <a href="/recordings.html">Recordings</a>
+      <a href="/settings.html">Settings</a>
+    </div>
+  </nav>
+  <main class="main-content" style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - var(--nav-h,52px))">
+    <div class="card" style="text-align:center;padding:2.5rem 3rem;max-width:420px">
+      <div style="font-size:3rem;margin-bottom:1rem">404</div>
+      <h1 style="font-size:var(--text-lg,1.25rem);margin-bottom:.5rem">Page not found</h1>
+      <p style="color:var(--text-secondary,#8b95a5);margin-bottom:1.5rem">The page you requested does not exist.</p>
+      <a href="/" class="btn btn-primary">Go to Dashboard</a>
+    </div>
+  </main>
+</body>
+</html>`
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
