@@ -3200,3 +3200,80 @@ kbd {
 .rtsp-test-result.pending { color: var(--muted); }
 .rtsp-test-result.success { color: var(--success, #5dff7d); }
 .rtsp-test-result.error { color: var(--danger, #ff7d7d); }
+
+/* ─── Touch-target overrides for coarse pointers ─── */
+/* Ensures all interactive elements meet the 44×44 px iOS/WCAG minimum on
+   touch devices. All rules are scoped to (pointer: coarse) so desktop
+   dimensions are unchanged. */
+@media (pointer: coarse) {
+  /* Video-control bar buttons (were 32×32) */
+  .vc-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  /* LIVE button in the video-control bar (was ~21px tall) */
+  .vc-live-btn {
+    min-height: 2.75rem;
+    padding: 0 0.75rem;
+  }
+
+  /* Theme toggle and other generic icon-only buttons (were 28×28) */
+  .btn-icon {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  /* Event filter chips (were ~27px tall) */
+  .chip {
+    min-height: 2.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  /* Text inputs and search box (were 30–33px tall) */
+  .form-input,
+  .search-input {
+    min-height: 2.75rem;
+  }
+
+  /* Standard and small buttons (were 26–30px tall) */
+  .btn,
+  .btn-sm,
+  .btn-small {
+    min-height: 2.75rem;
+  }
+}
+
+/* ─── Landscape camera viewport on narrow touch devices ─── */
+/* When a phone is rotated to landscape the video should fill the available
+   height rather than staying in a constrained column with the timeline
+   pushed far below. We keep the vc-bar accessible by not hiding it. */
+@media (orientation: landscape) and (max-width: 900px) {
+  /* Remove the 60vh cap and aspect-ratio constraint so the video fills
+     the viewport height. The page header/breadcrumb shrink via padding
+     reductions, and we let the camera layout stack tightly. */
+  .live-viewport {
+    max-height: calc(100dvh - var(--nav-h) - 3rem);
+    aspect-ratio: unset;
+    height: calc(100dvh - var(--nav-h) - 3rem);
+  }
+
+  /* Tighten the surrounding layout to give video maximum vertical space */
+  .camera-layout {
+    gap: 0.5rem;
+  }
+
+  .page-header {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Collapse the timeline container to its minimum chrome in landscape */
+  .timeline-container {
+    padding: 0.375rem 0.5rem;
+  }
+
+  .timeline-track {
+    height: 36px;
+  }
+}
