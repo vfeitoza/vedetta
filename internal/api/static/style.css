@@ -3200,3 +3200,130 @@ kbd {
 .rtsp-test-result.pending { color: var(--muted); }
 .rtsp-test-result.success { color: var(--success, #5dff7d); }
 .rtsp-test-result.error { color: var(--danger, #ff7d7d); }
+
+/* ─── Live view UX (W2.1) ─── */
+
+/* Snapshot fallback shown behind connecting / offline overlays */
+.live-snapshot-fallback {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Offline overlay — shown when the watchdog fires with no stream data */
+.live-offline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.72);
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.live-offline svg { opacity: 0.6; }
+
+.live-offline-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin: 0;
+}
+
+.live-offline-sub {
+  font-size: var(--text-sm);
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.live-offline .btn-retry {
+  margin-top: 0.25rem;
+  padding: 0.375rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+
+.live-offline .btn-retry:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Camera-not-found panel — replaces viewport when slug is unknown */
+.cam-not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--fg);
+}
+
+.cam-not-found svg {
+  opacity: 0.35;
+}
+
+.cam-not-found h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.cam-not-found p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.cam-not-found code {
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 0.1em 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.cam-not-found-links {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 0.25rem;
+}
+
+/* Boxes toggle button inside .vc-bar */
+.vc-btn-boxes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.vc-btn-boxes:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.vc-btn-boxes.active {
+  color: var(--cyan, #67e8f9);
+}
