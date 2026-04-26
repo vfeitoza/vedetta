@@ -2551,6 +2551,41 @@ document.addEventListener('htmx:afterSwap', function(e) {
   }
 });
 
+/* ─── Dashboard grid (W2.2) ─── */
+
+// Density selector — persists chosen tile size to localStorage and applies it
+// via a data-density attribute on the camera-grid element.
+function setDashboardDensity(density) {
+  var grid = el('camera-grid');
+  if (grid) {
+    if (density === 'default') {
+      grid.removeAttribute('data-density');
+    } else {
+      grid.setAttribute('data-density', density);
+    }
+  }
+
+  // Sync active state on buttons.
+  var btns = document.querySelectorAll('.density-btn');
+  btns.forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.density === density);
+  });
+
+  localStorage.setItem('dashboard:density', density);
+}
+
+function initDashboardDensity() {
+  var saved = localStorage.getItem('dashboard:density') || 'default';
+  setDashboardDensity(saved);
+}
+
+// Apply persisted density as soon as the page is interactive.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDashboardDensity);
+} else {
+  initDashboardDensity();
+}
+
 // ─── Stats Refresh ───
 // Fetch dashboard stats as HTML fragment and diff-update only changed values.
 let statsInterval = null;

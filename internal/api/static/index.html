@@ -88,6 +88,17 @@
     <div class="page-header" style="display:flex;align-items:center;gap:0.75rem">
       <h1>Cameras</h1>
       <button class="btn btn-secondary btn-sm" style="margin-left:auto" data-action-click="openAddCameraModal()">Add Camera</button>
+      <div class="density-selector" title="Tile density">
+        <button class="density-btn" data-density="compact" data-action-click="setDashboardDensity('compact')" title="Compact tiles">
+          <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="7.5" y="1" width="5" height="5" rx="1"/><rect x="1" y="7.5" width="5" height="5" rx="1"/><rect x="7.5" y="7.5" width="5" height="5" rx="1"/></svg>
+        </button>
+        <button class="density-btn active" data-density="default" data-action-click="setDashboardDensity('default')" title="Default tiles">
+          <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><rect x="1" y="1" width="6.5" height="6.5" rx="1"/><rect x="8.5" y="1" width="6.5" height="6.5" rx="1"/><rect x="1" y="8.5" width="6.5" height="6.5" rx="1"/><rect x="8.5" y="8.5" width="6.5" height="6.5" rx="1"/></svg>
+        </button>
+        <button class="density-btn" data-density="large" data-action-click="setDashboardDensity('large')" title="Large tiles">
+          <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><rect x="1" y="1" width="14" height="6.5" rx="1"/><rect x="1" y="8.5" width="14" height="6.5" rx="1"/></svg>
+        </button>
+      </div>
       <div class="view-toggle">
         <button class="btn btn-sm active" id="btn-grid-view" data-action-click="setView('grid')">Grid</button>
         <button class="btn btn-sm" id="btn-birdseye-view" data-action-click="setView('birdseye')">Birdseye</button>
