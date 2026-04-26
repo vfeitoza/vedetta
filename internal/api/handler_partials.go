@@ -172,10 +172,10 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`<div class="event-thumb">` +
 			`{{if .SnapshotAvailable}}<img src="/api/events/{{.ID}}/snapshot" alt="{{.Label}}" loading="lazy">` +
 			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
-			`<span class="event-label-badge {{.Label}}">{{.Label}}</span>` +
-			`<span class="event-score-badge">{{scorePercent .Score}}</span>` +
-			`{{with eventDuration .}}<span class="event-duration-badge">{{.}}</span>{{end}}` +
-			`{{if .SubLabel}}<span class="event-object-badge">{{.SubLabel}}</span>{{end}}` +
+			`<span class="event-label-badge {{.Label}}" title="Detected: {{.Label}}">{{.Label}}</span>` +
+			`<span class="event-score-badge" title="Detection confidence: {{scorePercent .Score}}">{{scorePercent .Score}}</span>` +
+			`{{with eventDuration .}}<span class="event-duration-badge" title="Event duration: {{.}}">{{.}}</span>{{end}}` +
+			`{{if .SubLabel}}<span class="event-object-badge" title="Identified: {{.SubLabel}}">{{.SubLabel}}</span>{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
 			`<span class="event-camera-name">{{.CameraName}}</span>` +
