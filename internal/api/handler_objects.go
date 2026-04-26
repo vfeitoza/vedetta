@@ -240,7 +240,54 @@ func (s *Server) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64,
 		}
 	}
 
+	// Last resort: regenerate from the most recent sighting's event snapshot.
+	// Walk newest-first; the first event whose snapshot is on disk wins.
+	if s.objectEmbedder != nil {
+		if newPath := s.regenerateObjectCrop(id); newPath != "" {
+			http.ServeFile(w, r, newPath)
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "crop not found"})
+}
+
+// regenerateObjectCrop re-cuts a crop for the given object from a recent
+// sighting's event snapshot, persists the new path, and returns it. Returns
+// "" if no sighting has a usable snapshot on disk.
+func (s *Server) regenerateObjectCrop(id int64) string {
+	sightings, err := s.db.ListObjectSightings(id, 20)
+	if err != nil || len(sightings) == 0 {
+		return ""
+	}
+	cropDir := filepath.Join(s.snapshotPath, "objects")
+	for _, sg := range sightings {
+		if sg.EventID == "" {
+			continue
+		}
+		event, err := s.db.GetEventByID(sg.EventID)
+		if err != nil || event == nil || !event.SnapshotAvailable || event.SnapshotPath == "" {
+			continue
+		}
+		if !fileExists(event.SnapshotPath) {
+			continue
+		}
+		img, err := loadSnapshotImage(event.SnapshotPath)
+		if err != nil {
+			continue
+		}
+		newPath := s.objectEmbedder.SaveCrop(img, event.Box, cropDir, id)
+		if newPath == "" {
+			continue
+		}
+		if err := s.db.UpdateKnownObjectCrop(id, newPath); err != nil {
+			slog.Warn("regenerateObjectCrop: persist crop_path", "object_id", id, "error", err)
+		}
+		slog.Info("regenerateObjectCrop: healed missing crop",
+			"object_id", id, "event_id", sg.EventID, "path", newPath)
+		return newPath
+	}
+	return ""
 }
 
 func fileExists(path string) bool {
