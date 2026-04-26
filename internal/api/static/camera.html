@@ -457,18 +457,14 @@
 
       // Verify the camera exists before starting the live view. A 404 means the
       // slug is unknown — replace the viewport with a not-found panel and skip
-      // starting the stream entirely.
+      // starting the stream entirely. Any other non-OK status is treated as a
+      // transient error and we proceed optimistically.
       fetch('/api/cameras/' + encodeURIComponent(name))
         .then(function(r) {
           if (r.status === 404) {
             showCameraNotFound(name);
-            return null;
+            return; // stop the chain
           }
-          return r.ok ? r.json() : null;
-        })
-        .then(function(data) {
-          if (!data) return; // not-found branch already handled
-
           initCameraPage(name);
         })
         .catch(function() {
