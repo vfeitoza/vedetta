@@ -169,6 +169,8 @@ var allowedDataActionFunctions = new Set([
   'setThumbnail',
   'toggleEventsLegend',
   'clearAllEventFilters',
+  'togglePeopleHelp',
+  'filterPeople',
   'togglePause',
   'togglePersonFaces',
   'togglePiP',

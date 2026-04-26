@@ -2945,6 +2945,122 @@ kbd {
   .people-grid { grid-template-columns: 1fr; }
 }
 
+/* People page header / toolbar / sectioning */
+.people-summary {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin: 0.125rem 0 0;
+}
+
+.people-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.people-status {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.people-help {
+  background: var(--surface-2, var(--surface-1));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.people-help[hidden] { display: none; }
+.people-help p { margin: 0; }
+.people-help p + p { margin-top: 0.5rem; }
+.people-help strong { color: var(--text-primary); }
+
+.people-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.people-toolbar .search-wrap {
+  flex: 0 1 320px;
+  min-width: 200px;
+  margin-bottom: 0;
+}
+
+.people-section { margin-top: 1.5rem; }
+.people-section:first-of-type { margin-top: 0; }
+
+.people-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.625rem;
+}
+.people-section-header h2 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+.people-section-count {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.people-section-empty {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  padding: 0.5rem 0 0.25rem;
+}
+
+.face-thumb-tile {
+  width: 70px;
+  height: 90px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3) center / cover no-repeat;
+  border: 1px solid var(--border-subtle);
+}
+
+.unidentified-grid,
+.appearance-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.appearance-thumb {
+  width: 70px;
+  height: 70px;
+  border-radius: var(--radius-sm);
+  background: var(--surface) center / cover no-repeat;
+  border: 1px solid var(--border-subtle);
+  display: block;
+}
+
+.person-faces-heading {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0.5rem 0 0.25rem;
+}
+.person-faces-heading:first-child { margin-top: 0; }
+
+.badge-empty {
+  font-size: var(--text-xs);
+  padding: 0.0625rem 0.375rem;
+  background: transparent;
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 /* ─── Identify Chips ─── */
 .identify-chip {
   display: flex;
