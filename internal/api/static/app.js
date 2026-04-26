@@ -414,20 +414,92 @@ document.body.addEventListener('htmx:afterRequest', function(event) {
 });
 
 // ─── MSE over WebSocket ───
+
+// Watchdog timer: fires if no MSE data arrives within the timeout.
+var mseOfflineTimer = null;
+var MSE_OFFLINE_TIMEOUT_MS = 10000;
+
+function clearMSEOfflineTimer() {
+  if (mseOfflineTimer) {
+    clearTimeout(mseOfflineTimer);
+    mseOfflineTimer = null;
+  }
+}
+
+function showLiveOffline(name) {
+  hideStreamConnecting();
+  // Keep snapshot fallback visible but dimmed behind the offline overlay.
+  var viewport = el('live-viewport');
+  if (viewport) viewport.classList.add('live-snapshot-fallback');
+
+  var offlineEl = el('live-offline');
+  if (!offlineEl) return;
+
+  // Populate the "last seen" sub-line if the camera detail includes last_frame.
+  var sub = el('live-offline-sub');
+  if (sub) {
+    fetch('/api/cameras/' + encodeURIComponent(name))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data && data.last_frame) {
+          sub.textContent = 'Last seen: ' + formatTimeAgo(data.last_frame);
+        } else {
+          sub.textContent = 'Stream unavailable';
+        }
+      })
+      .catch(function() { sub.textContent = 'Stream unavailable'; });
+  }
+
+  offlineEl.classList.remove('hidden');
+}
+
+function hideLiveOffline() {
+  var offlineEl = el('live-offline');
+  if (offlineEl) offlineEl.classList.add('hidden');
+  var viewport = el('live-viewport');
+  if (viewport) viewport.classList.remove('live-snapshot-fallback');
+}
+
+function retryStream() {
+  hideLiveOffline();
+  startMSE();
+}
+
 function startMSE() {
   var name = getCameraName();
   if (!name) return;
   stopStream();
+  hideLiveOffline();
   showStreamConnecting('MSE');
+
+  // Show the latest snapshot as a background image behind the connecting overlay
+  // so the user sees something meaningful rather than a black void.
+  var viewport = el('live-viewport');
+  if (viewport) {
+    viewport.style.backgroundImage = 'url(/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now() + ')';
+    viewport.classList.add('live-snapshot-fallback');
+  }
 
   if (typeof MediaSource === 'undefined') {
     console.warn('MSE not supported, falling back to WebRTC');
+    if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
     startWebRTC();
     return;
   }
 
   var video = el('live-video');
   if (!video) return;
+
+  // Start offline watchdog: if no codec message arrives within the timeout,
+  // the camera is likely offline or the stream endpoint is unavailable.
+  clearMSEOfflineTimer();
+  mseOfflineTimer = setTimeout(function() {
+    if (currentStream === null) {
+      // No stream established yet — show offline state.
+      cleanupMSE();
+      showLiveOffline(name);
+    }
+  }, MSE_OFFLINE_TIMEOUT_MS);
 
   var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   var wsURL = protocol + '//' + location.host + '/api/cameras/' + encodeURIComponent(name) + '/mse/ws';
@@ -444,6 +516,8 @@ function startMSE() {
     // First message is text: codec MIME type string
     if (!initReceived && typeof event.data === 'string') {
       initReceived = true;
+      // Codec message received — camera is online; cancel the offline watchdog.
+      clearMSEOfflineTimer();
       var codecStr = event.data;
       console.log('MSE codec:', codecStr);
 
@@ -451,6 +525,7 @@ function startMSE() {
       if (!MediaSource.isTypeSupported(codecStr)) {
         console.warn('MSE codec not supported: ' + codecStr + ', falling back to WebRTC');
         cleanupMSE();
+        if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
         startWebRTC();
         return;
       }
@@ -491,12 +566,15 @@ function startMSE() {
         } catch (err) {
           console.error('MSE sourceopen error:', err);
           cleanupMSE();
+          if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
           startWebRTC();
         }
       });
 
       currentStream = 'mse';
       mseReconnectAttempts = 0;
+      // Remove snapshot fallback — live video is now playing.
+      if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
       hideStreamConnecting();
       updateStreamButtons();
       updateMuteButton(codecStr.indexOf('mp4a') !== -1);
@@ -553,6 +631,7 @@ function startMSE() {
 }
 
 function cleanupMSE() {
+  clearMSEOfflineTimer();
   if (mseWebSocket) {
     mseWebSocket.onclose = null;
     mseWebSocket.close();
@@ -861,7 +940,15 @@ function stopStream() {
   }
 
   hideStreamConnecting();
+  hideLiveOffline();
   cleanupMSE();
+
+  // Clear snapshot fallback styling set during MSE startup.
+  var viewport = el('live-viewport');
+  if (viewport) {
+    viewport.style.backgroundImage = '';
+    viewport.classList.remove('live-snapshot-fallback');
+  }
 
   if (peerConnection) {
     peerConnection.close();
@@ -2920,7 +3007,6 @@ var SHORTCUT_SECTIONS = {
       ['Stop stream', ['S']],
       ['Return to live', ['L']],
       ['Toggle audio', ['A']],
-      ['Toggle boxes', ['B']],
       ['Picture-in-Picture', ['P']],
       ['Fullscreen', ['F']],
       ['Bounding-box overlay', ['B']],

@@ -80,6 +80,12 @@
             <div class="spinner"></div>
             <span id="stream-connecting-label">Connecting...</span>
           </div>
+          <div class="live-offline hidden" id="live-offline" role="status" aria-live="polite">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+            <p class="live-offline-title">Camera offline</p>
+            <p class="live-offline-sub" id="live-offline-sub"></p>
+            <button class="btn-retry" data-action-click="retryStream()">Retry</button>
+          </div>
           <div class="stream-stats" id="stream-stats"></div>
           <div class="video-pause-indicator hidden" id="video-pause-indicator">
             <svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -451,50 +457,95 @@
       document.getElementById('cam-breadcrumb').textContent = name;
       document.title = name + ' - Vedetta';
 
-      // Snapshot refresh
-      const snap = document.getElementById('live-snapshot');
-      snap.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot';
-      setInterval(function() {
-        if (!snap.classList.contains('hidden')) {
-          snap.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
-        }
-      }, 2000);
+      // Verify the camera exists before starting the live view. A 404 means the
+      // slug is unknown — replace the viewport with a not-found panel and skip
+      // starting the stream entirely. Any other non-OK status is treated as a
+      // transient error and we proceed optimistically.
+      fetch('/api/cameras/' + encodeURIComponent(name))
+        .then(function(r) {
+          if (r.status === 404) {
+            showCameraNotFound(name);
+            return; // stop the chain
+          }
+          initCameraPage(name);
+        })
+        .catch(function() {
+          // Network error — proceed optimistically so users on flaky connections
+          // still get the live view attempt.
+          initCameraPage(name);
+        });
 
-      // Load events
-      const eventsEl = document.getElementById('camera-events');
-      eventsEl.setAttribute('hx-get', '/partials/events-gallery?camera=' + encodeURIComponent(name) + '&limit=12');
-      eventsEl.setAttribute('hx-trigger', 'load');
-      htmx.process(eventsEl);
+      function showCameraNotFound(camName) {
+        document.title = 'Camera not found · Vedetta';
+        document.getElementById('camera-title').textContent = 'Camera not found';
+        document.getElementById('cam-breadcrumb').textContent = camName;
 
-      // Auto-playback if ?t= parameter is present (from recordings page)
-      const playbackTime = new URLSearchParams(location.search).get('t');
-      if (playbackTime) {
-        const ts = new Date(playbackTime);
-        if (!isNaN(ts.getTime())) {
-          // Set timeline date BEFORE initTimeline so it fetches the right day
-          timelineDate = new Date(ts);
-          timelineDate.setHours(0, 0, 0, 0);
-        }
+        var layout = document.querySelector('.camera-layout');
+        if (!layout) return;
+        layout.innerHTML =
+          '<div class="cam-not-found">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">' +
+              '<path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>' +
+            '</svg>' +
+            '<h2>Camera not found</h2>' +
+            '<p>No camera with the name <code>' + camName.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code> exists.</p>' +
+            '<div class="cam-not-found-links">' +
+              '<a href="/" class="btn btn-sm btn-primary">← Back to cameras</a>' +
+              '<a href="/settings.html" class="btn btn-sm">View setup</a>' +
+            '</div>' +
+          '</div>';
       }
 
-      // Timeline date (uses timelineDate set above, or defaults to today)
-      initTimeline();
-
-      // Zones
-      initZones();
-
-      initPTZ(name);
-      initViewportPause();
-      initDetectionOverlay(name);
-
-      if (playbackTime) {
-        const ts = new Date(playbackTime);
-        if (!isNaN(ts.getTime())) {
-          setTimeout(function() { startPlayback(ts); }, 500);
+      function initCameraPage(camName) {
+        // Snapshot refresh
+        const snap = document.getElementById('live-snapshot');
+        if (snap) {
+          snap.src = '/api/cameras/' + encodeURIComponent(camName) + '/snapshot';
+          setInterval(function() {
+            if (!snap.classList.contains('hidden')) {
+              snap.src = '/api/cameras/' + encodeURIComponent(camName) + '/snapshot?t=' + Date.now();
+            }
+          }, 2000);
         }
-      } else {
-        // Auto-start live stream (MSE with WebRTC fallback)
-        startMSE();
+
+        // Load events
+        const eventsEl = document.getElementById('camera-events');
+        if (eventsEl) {
+          eventsEl.setAttribute('hx-get', '/partials/events-gallery?camera=' + encodeURIComponent(camName) + '&limit=12');
+          eventsEl.setAttribute('hx-trigger', 'load');
+          htmx.process(eventsEl);
+        }
+
+        // Auto-playback if ?t= parameter is present (from recordings page)
+        const playbackTime = new URLSearchParams(location.search).get('t');
+        if (playbackTime) {
+          const ts = new Date(playbackTime);
+          if (!isNaN(ts.getTime())) {
+            // Set timeline date BEFORE initTimeline so it fetches the right day
+            timelineDate = new Date(ts);
+            timelineDate.setHours(0, 0, 0, 0);
+          }
+        }
+
+        // Timeline date (uses timelineDate set above, or defaults to today)
+        initTimeline();
+
+        // Zones
+        initZones();
+
+        initPTZ(camName);
+        initViewportPause();
+        initDetectionOverlay(camName);
+
+        if (playbackTime) {
+          const ts = new Date(playbackTime);
+          if (!isNaN(ts.getTime())) {
+            setTimeout(function() { startPlayback(ts); }, 500);
+          }
+        } else {
+          // Auto-start live stream (MSE with WebRTC fallback)
+          startMSE();
+        }
       }
     })();
   </script>
