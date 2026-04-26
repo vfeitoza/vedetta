@@ -209,7 +209,7 @@ func (s *Server) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64,
 		}
 		refID := *params.Ref
 		for _, ref := range refs {
-			if ref.ID == refID && ref.CropPath != "" {
+			if ref.ID == refID && ref.CropPath != "" && fileExists(ref.CropPath) {
 				http.ServeFile(w, r, ref.CropPath)
 				return
 			}
@@ -219,11 +219,33 @@ func (s *Server) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64,
 	}
 
 	obj, err := s.db.GetKnownObject(id)
-	if err != nil || obj == nil || obj.CropPath == "" {
+	if err != nil || obj == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crop not found"})
 		return
 	}
-	http.ServeFile(w, r, obj.CropPath)
+	if obj.CropPath != "" && fileExists(obj.CropPath) {
+		http.ServeFile(w, r, obj.CropPath)
+		return
+	}
+
+	// Canonical crop file is missing — fall back to the first reference whose
+	// crop is still on disk. This keeps thumbnails working when the snapshots
+	// volume has been pruned but the database still has the old absolute path.
+	if refs, refErr := s.db.ListObjectReferences(id); refErr == nil {
+		for _, ref := range refs {
+			if ref.CropPath != "" && fileExists(ref.CropPath) {
+				http.ServeFile(w, r, ref.CropPath)
+				return
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "crop not found"})
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func (s *Server) ListObjectReferences(w http.ResponseWriter, r *http.Request, id int64) {

@@ -205,7 +205,6 @@
 
       var html = '';
       objectsData.forEach(function(obj) {
-        var thumbStyle = obj.crop_path ? ('background-image:url(/api/objects/' + obj.id + '/crop)') : '';
         var threshold = (obj.match_threshold != null ? obj.match_threshold : 0.65);
         var threshPct = Math.round(threshold * 100);
         var labelGroup = obj.label || '';
@@ -213,7 +212,9 @@
         html += ''
           + '<article class="object-card" id="object-' + obj.id + '" data-name="' + escapeAttr(obj.name) + '" data-label="' + escapeAttr(obj.label) + '">'
           +   '<header class="object-card-header">'
-          +     '<div class="object-thumb" style="' + thumbStyle + '" aria-hidden="true"></div>'
+          +     '<div class="object-thumb" id="thumb-' + obj.id + '" style="background:' + initialsColor(obj.name) + '" aria-hidden="true">'
+          +       '<img alt="" src="/api/objects/' + obj.id + '/crop" data-initials="' + escapeAttr(initials(obj.name)) + '">'
+          +     '</div>'
           +     '<div class="object-info">'
           +       '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
           +         'data-action-change="renameObject(' + obj.id + ', this.value)" data-action-focus="this.select()" '
@@ -272,12 +273,39 @@
       });
       grid.innerHTML = html;
 
+      // Replace thumbnail <img> with an initials avatar when the source 404s.
+      // CSP blocks inline onerror handlers, so wire it up here.
+      grid.querySelectorAll('.object-thumb img').forEach(function(img) {
+        img.addEventListener('error', function() {
+          var wrap = img.parentElement;
+          if (!wrap) return;
+          wrap.textContent = img.dataset.initials || '?';
+        });
+      });
+
       objectsData.forEach(function(obj) {
         loadReferences(obj.id);
         loadSightings(obj.id);
       });
 
       filterObjects();
+    }
+
+    function initials(name) {
+      var s = String(name || '').trim();
+      if (!s) return '?';
+      var parts = s.split(/\s+/);
+      if (parts.length === 1) return parts[0].slice(0, 2);
+      return (parts[0][0] || '') + (parts[parts.length - 1][0] || '');
+    }
+
+    function initialsColor(name) {
+      // Deterministic hue from name so each object gets a stable badge color.
+      var s = String(name || '');
+      var h = 0;
+      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      var hue = h % 360;
+      return 'hsl(' + hue + ', 45%, 38%)';
     }
 
     function onThresholdInput(id, val) {
