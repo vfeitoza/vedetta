@@ -171,8 +171,33 @@
         </div>
       </div>
 
+      <!-- Section tabs -->
+      <nav class="camera-tabs" aria-label="Camera sections" role="tablist">
+        <a href="#events" class="camera-tab active" data-section="events" role="tab" aria-selected="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+          Events <span class="tab-count" id="cam-events-count" hidden>0</span>
+        </a>
+        <a href="#zones" class="camera-tab" data-section="zones" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+          Zones
+        </a>
+        <a href="#settings" class="camera-tab" data-section="settings" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </a>
+      </nav>
+
+      <!-- Recent Events -->
+      <section class="camera-section-panel" data-section="events" role="tabpanel" aria-labelledby="events">
+        <div class="event-gallery"
+             id="camera-events"
+             hx-swap="innerHTML">
+          <div class="loading-state">Loading events...</div>
+        </div>
+      </section>
+
       <!-- Zones -->
-      <section class="zone-section" id="zone-section">
+      <section class="camera-section-panel zone-section" data-section="zones" id="zone-section" role="tabpanel" hidden>
         <div class="zone-section-header">
           <h2 class="zone-section-title">Zones</h2>
           <div class="zone-section-actions">
@@ -223,98 +248,98 @@
         <div id="zone-list" class="zone-list"></div>
       </section>
 
-      <!-- Recent Events -->
-      <section>
-        <div class="page-header">
-          <h1 style="font-size: var(--text-md)">Recent Events</h1>
-        </div>
-        <div class="event-gallery"
-             id="camera-events"
-             hx-swap="innerHTML">
-          <div class="loading-state">Loading events...</div>
-        </div>
-      </section>
-
       <!-- Camera Settings -->
-      <section style="margin-top:1.5rem">
-        <div class="sys-card" id="cam-settings-card">
-          <div class="sys-card-header" style="cursor:pointer" data-action-click="toggleCamSettings()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            Camera Settings
-            <svg id="cam-settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="margin-left:auto;transition:transform 0.2s"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-          <div class="sys-card-body" id="cam-settings-body" style="display:none">
-            <div id="cam-settings-restart" style="display:none;padding:0.75rem 1rem;margin-bottom:1rem;border-radius:var(--radius-sm);background:var(--amber-dim);border:1px solid var(--amber);color:var(--amber);font-size:var(--text-sm)">
-              Camera configuration has changed. Restart Vedetta for changes to take effect.
-            </div>
-            <form id="cam-settings-form">
-              <div style="margin-bottom:0.75rem">
-                <label for="cam-set-name" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Name</label>
-                <input type="text" id="cam-set-name" class="form-input">
-              </div>
-              <div style="margin-bottom:0.75rem">
-                <label for="cam-set-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
-                <div style="display:flex;gap:0.5rem">
-                  <input type="text" id="cam-set-url" placeholder="rtsp://..." class="form-input" style="flex:1">
-                  <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('cam-set-url','cam-set-url-result')">Test</button>
-                </div>
-                <div id="cam-set-url-result" class="rtsp-test-result" aria-live="polite"></div>
-              </div>
-              <div style="margin-bottom:0.75rem">
-                <label for="cam-set-recurl" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Record URL</label>
-                <div style="display:flex;gap:0.5rem">
-                  <input type="text" id="cam-set-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input" style="flex:1">
-                  <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('cam-set-recurl','cam-set-recurl-result')">Test</button>
-                </div>
-                <div id="cam-set-recurl-result" class="rtsp-test-result" aria-live="polite"></div>
-              </div>
-              <div style="margin-bottom:0.75rem">
-                <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
-                  <input type="checkbox" id="cam-set-enabled" style="width:18px;height:18px;accent-color:var(--accent)">
-                  <span>Enabled</span>
-                </label>
-              </div>
-              <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Detection Stream</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;margin-bottom:0.75rem">
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">W</label>
-                  <input type="number" id="cam-set-dw" class="form-input-sm">
-                </div>
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">H</label>
-                  <input type="number" id="cam-set-dh" class="form-input-sm">
-                </div>
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">FPS</label>
-                  <input type="number" id="cam-set-df" class="form-input-sm">
-                </div>
-                <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem">
-                  <input type="checkbox" id="cam-set-det-enabled" style="accent-color:var(--accent)">On
-                </label>
-              </div>
-              <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Record Stream</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:1rem">
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">W</label>
-                  <input type="number" id="cam-set-rw" class="form-input-sm">
-                </div>
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">H</label>
-                  <input type="number" id="cam-set-rh" class="form-input-sm">
-                </div>
-                <div>
-                  <label style="font-size:0.8rem;color:var(--muted)">FPS</label>
-                  <input type="number" id="cam-set-rf" class="form-input-sm">
-                </div>
-              </div>
-              <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
-                <button type="button" class="btn btn-primary btn-sm" data-action-click="saveCamSettings()">Save</button>
-                <button type="button" class="btn btn-sm" style="background:rgba(255,125,125,0.15);color:var(--danger);border:1px solid rgba(255,125,125,0.3)" data-action-click="deleteCamSettings()">Remove Camera</button>
-              </div>
-              <div id="cam-settings-status" style="min-height:1.3rem;margin-top:0.5rem;font-size:0.92rem;color:var(--muted)"></div>
-            </form>
-          </div>
+      <section class="camera-section-panel settings-panel" data-section="settings" id="cam-settings-card" role="tabpanel" hidden>
+        <div class="settings-panel-header">
+          <h2>Camera settings</h2>
+          <p>Connection details, capture parameters, and per-stream tuning. Changes require a Vedetta restart.</p>
         </div>
+        <div id="cam-settings-restart" class="form-banner banner-warn" hidden>
+          Camera configuration has changed. Restart Vedetta for changes to take effect.
+        </div>
+        <form id="cam-settings-form" class="settings-form" autocomplete="off">
+          <div class="form-field">
+            <label for="cam-set-name">Name</label>
+            <input type="text" id="cam-set-name" class="form-input">
+            <p class="form-help">Slug used in URLs, MQTT topics, and recording paths.</p>
+          </div>
+
+          <div class="form-field">
+            <label for="cam-set-url">RTSP URL</label>
+            <div class="form-input-row">
+              <input type="text" id="cam-set-url" placeholder="rtsp://user:pass@host/stream" class="form-input">
+              <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('cam-set-url','cam-set-url-result')">Test</button>
+            </div>
+            <div id="cam-set-url-result" class="rtsp-test-result" aria-live="polite"></div>
+          </div>
+
+          <div class="form-field">
+            <label for="cam-set-recurl">Record URL <span class="form-meta">optional</span></label>
+            <div class="form-input-row">
+              <input type="text" id="cam-set-recurl" placeholder="Falls back to RTSP URL if empty" class="form-input">
+              <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('cam-set-recurl','cam-set-recurl-result')">Test</button>
+            </div>
+            <div id="cam-set-recurl-result" class="rtsp-test-result" aria-live="polite"></div>
+          </div>
+
+          <div class="form-field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="cam-set-enabled">
+              <span>Enabled</span>
+            </label>
+            <p class="form-help">Disable to keep the camera in config without connecting.</p>
+          </div>
+
+          <div class="form-row">
+            <fieldset class="form-fieldset">
+              <legend>Detection stream</legend>
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="cam-set-det-enabled">
+                  <span>Run object detection</span>
+                </label>
+              </div>
+              <div class="form-row">
+                <div class="form-field">
+                  <label for="cam-set-dw">Width</label>
+                  <input type="number" id="cam-set-dw" class="form-input" min="0">
+                </div>
+                <div class="form-field">
+                  <label for="cam-set-dh">Height</label>
+                  <input type="number" id="cam-set-dh" class="form-input" min="0">
+                </div>
+                <div class="form-field">
+                  <label for="cam-set-df">FPS</label>
+                  <input type="number" id="cam-set-df" class="form-input" min="0">
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="form-fieldset">
+              <legend>Record stream</legend>
+              <div class="form-row">
+                <div class="form-field">
+                  <label for="cam-set-rw">Width</label>
+                  <input type="number" id="cam-set-rw" class="form-input" min="0">
+                </div>
+                <div class="form-field">
+                  <label for="cam-set-rh">Height</label>
+                  <input type="number" id="cam-set-rh" class="form-input" min="0">
+                </div>
+                <div class="form-field">
+                  <label for="cam-set-rf">FPS</label>
+                  <input type="number" id="cam-set-rf" class="form-input" min="0">
+                </div>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-sm btn-danger" data-action-click="deleteCamSettings()">Remove camera</button>
+            <div class="form-status" id="cam-settings-status" aria-live="polite"></div>
+            <button type="button" class="btn btn-primary" data-action-click="saveCamSettings()">Save changes</button>
+          </div>
+        </form>
       </section>
     </div>
   </main>
@@ -337,15 +362,7 @@
   <script>
     // ─── Camera Settings (per-camera config form) ───
     var camSettingsIndex = -1;
-
-    function toggleCamSettings() {
-      var body = document.getElementById('cam-settings-body');
-      var chevron = document.getElementById('cam-settings-chevron');
-      var open = body.style.display === 'none';
-      body.style.display = open ? 'block' : 'none';
-      chevron.style.transform = open ? 'rotate(180deg)' : '';
-      if (open && camSettingsIndex === -1) loadCamSettings();
-    }
+    var camSettingsLoaded = false;
 
     function loadCamSettings() {
       var name = new URLSearchParams(location.search).get('name');
@@ -360,6 +377,7 @@
           return;
         }
         camSettingsIndex = match.index;
+        camSettingsLoaded = true;
         document.getElementById('cam-set-name').value = match.name || '';
         document.getElementById('cam-set-url').value = match.url || '';
         document.getElementById('cam-set-recurl').value = match.record_url || '';
@@ -374,7 +392,7 @@
         document.getElementById('cam-set-rh').value = rec.height || 1080;
         document.getElementById('cam-set-rf').value = rec.fps || 15;
         if (data.restart_required) {
-          document.getElementById('cam-settings-restart').style.display = 'block';
+          document.getElementById('cam-settings-restart').hidden = false;
         }
       }).catch(function() {
         document.getElementById('cam-settings-status').textContent = 'Failed to load camera config';
@@ -418,7 +436,7 @@
         } else {
           status.textContent = 'Saved';
           status.style.color = 'var(--success)';
-          document.getElementById('cam-settings-restart').style.display = 'block';
+          document.getElementById('cam-settings-restart').hidden = false;
         }
       }).catch(function() {
         status.textContent = 'Save failed';
@@ -448,6 +466,47 @@
         { confirmLabel: 'Remove', destructive: true }
       );
     }
+
+    // ─── Section tab routing (Events / Zones / Settings) ───
+    (function() {
+      var tabs = document.querySelectorAll('.camera-tab');
+      var panels = document.querySelectorAll('.camera-section-panel');
+      var validSections = Array.prototype.map.call(tabs, function(t) { return t.dataset.section; });
+
+      function showSection(section) {
+        if (validSections.indexOf(section) === -1) section = 'events';
+        tabs.forEach(function(t) {
+          var active = t.dataset.section === section;
+          t.classList.toggle('active', active);
+          t.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        panels.forEach(function(p) { p.hidden = p.dataset.section !== section; });
+        if (section === 'settings' && !camSettingsLoaded) loadCamSettings();
+      }
+
+      function fromHash() {
+        var hash = (location.hash || '').replace('#', '');
+        showSection(hash || 'events');
+      }
+
+      window.addEventListener('hashchange', fromHash);
+      fromHash();
+    })();
+
+    // ─── Events count pill (updates after htmx swap) ───
+    document.body.addEventListener('htmx:afterSwap', function(e) {
+      if (e.target && e.target.id === 'camera-events') {
+        var pill = document.getElementById('cam-events-count');
+        if (!pill) return;
+        var count = e.target.querySelectorAll('.event-card, [data-event-id]').length;
+        if (count > 0) {
+          pill.textContent = String(count);
+          pill.hidden = false;
+        } else {
+          pill.hidden = true;
+        }
+      }
+    });
 
     (function() {
       const name = new URLSearchParams(location.search).get('name');
