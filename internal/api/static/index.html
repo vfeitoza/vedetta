@@ -89,8 +89,8 @@
       <h1>Cameras</h1>
       <button class="btn btn-secondary btn-sm" style="margin-left:auto" data-action-click="openAddCameraModal()">Add Camera</button>
       <div class="view-toggle">
-        <button class="btn btn-sm active" id="btn-grid-view" data-action-click="setView('grid')">Grid</button>
-        <button class="btn btn-sm" id="btn-birdseye-view" data-action-click="setView('birdseye')">Birdseye</button>
+        <button class="btn btn-sm active" id="btn-grid-view" data-action-click="setView('grid')" title="Grid view">Grid</button>
+        <button class="btn btn-sm" id="btn-birdseye-view" data-action-click="setView('birdseye')" title="Birdseye view — mosaic of all cameras" aria-label="Birdseye view (mosaic of all cameras)">Birdseye</button>
       </div>
     </div>
 
@@ -151,7 +151,9 @@
         <div id="account-auth-method" style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:0.25rem"></div>
       </div>
       <div id="account-actions" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:0.5rem">
-        <a href="/settings.html#password-card" class="btn btn-ghost" style="width:100%;font-size:var(--text-sm);text-decoration:none;text-align:center">Change Password</a>
+        <div id="change-password-section">
+          <a href="/settings.html#password-card" class="btn btn-ghost" style="width:100%;font-size:var(--text-sm);text-decoration:none;text-align:center">Change Password</a>
+        </div>
         <button id="account-logout-btn" class="btn btn-ghost" style="width:100%;color:var(--text-secondary);font-size:var(--text-sm)">Sign Out</button>
       </div>
     </div>
@@ -171,6 +173,7 @@
         <div style="margin-bottom:0.75rem">
           <label for="addcam-name" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Name</label>
           <input type="text" id="addcam-name" class="form-input">
+          <div id="addcam-name-error" class="rtsp-test-result" aria-live="polite"></div>
         </div>
         <div style="margin-bottom:0.75rem">
           <label for="addcam-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
@@ -230,6 +233,20 @@
     function closeAddCameraModal() {
       document.getElementById('add-camera-backdrop').classList.remove('open');
       document.getElementById('add-camera-modal').classList.remove('open');
+      if (typeof clearAddCamErrors === 'function') clearAddCamErrors();
+      var status = document.getElementById('add-camera-status');
+      if (status) { status.textContent = ''; status.style.color = ''; }
+      _addCameraPending = false;
+    }
+    function setAddCamFieldError(fieldId, errorId, msg) {
+      var field = document.getElementById(fieldId);
+      var err = document.getElementById(errorId);
+      if (err) { err.textContent = msg; err.className = 'rtsp-test-result' + (msg ? ' error' : ''); }
+      if (field) { field.style.borderColor = msg ? 'var(--danger)' : ''; }
+    }
+    function clearAddCamErrors() {
+      setAddCamFieldError('addcam-name', 'addcam-name-error', '');
+      setAddCamFieldError('addcam-url', 'addcam-url-result', '');
     }
     var _addCameraPending = false;
     function addNewCamera() {
@@ -238,8 +255,9 @@
       var status = $('add-camera-status');
       var name = $('addcam-name').value.trim();
       var url = $('addcam-url').value.trim();
-      if (!name) { status.textContent = 'Name is required'; status.style.color = 'var(--danger)'; $('addcam-name').focus(); return; }
-      if (!url) { status.textContent = 'URL is required'; status.style.color = 'var(--danger)'; $('addcam-url').focus(); return; }
+      clearAddCamErrors();
+      if (!name) { setAddCamFieldError('addcam-name', 'addcam-name-error', 'Name is required'); $('addcam-name').focus(); return; }
+      if (!url) { setAddCamFieldError('addcam-url', 'addcam-url-result', 'URL is required'); $('addcam-url').focus(); return; }
       _addCameraPending = true;
       status.textContent = 'Adding...';
       status.style.color = 'var(--muted)';

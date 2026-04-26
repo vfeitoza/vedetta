@@ -2239,10 +2239,14 @@ document.addEventListener('keydown', function(e) {
       break;
     }
     case 'Escape':
-      if (el('account-modal') && el('account-modal').classList.contains('open')) {
+      if (el('add-camera-modal') && el('add-camera-modal').classList.contains('open')) {
+        if (typeof closeAddCameraModal === 'function') closeAddCameraModal();
+      } else if (el('account-modal') && el('account-modal').classList.contains('open')) {
         closeAccountModal();
       } else if (el('shortcut-modal') && el('shortcut-modal').classList.contains('open')) {
         closeShortcutModal();
+      } else if (document.querySelector('[role="dialog"].open') && el('confirm-modal') && el('confirm-modal').classList.contains('open')) {
+        if (typeof closeConfirmModal === 'function') closeConfirmModal();
       } else if (document.fullscreenElement) {
         document.exitFullscreen();
       } else if (playbackMode) {
@@ -2262,6 +2266,20 @@ document.addEventListener('keydown', function(e) {
       break;
     case '4':
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/settings.html'; }
+      break;
+    case '5':
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/people.html'; }
+      break;
+    case '6':
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); location.href = '/objects.html'; }
+      break;
+    case 'b':
+    case 'B':
+      if (el('live-viewport')) {
+        var boxesEnabled = localStorage.getItem('overlay:boxes') !== 'false';
+        localStorage.setItem('overlay:boxes', boxesEnabled ? 'false' : 'true');
+        toast('Bounding boxes ' + (boxesEnabled ? 'off' : 'on'));
+      }
       break;
   }
 });
@@ -2315,11 +2333,126 @@ function setConnStatus(status, detail) {
     label.textContent = 'Connected';
   } else if (status === 'degraded') {
     dot.className = 'conn-dot warn';
-    label.textContent = detail || 'Degraded';
+    label.textContent = 'Degraded';
   } else {
     dot.className = 'conn-dot error';
     label.textContent = 'Reconnecting...';
   }
+
+  // Make the badge a button when degraded so users can inspect the cause
+  var badge = document.querySelector('.conn-status');
+  if (!badge) return;
+  if (status === 'degraded') {
+    badge.setAttribute('role', 'button');
+    badge.setAttribute('title', (detail || 'Degraded') + ' — click for details');
+    badge.dataset.connDegraded = '1';
+  } else {
+    badge.removeAttribute('role');
+    badge.setAttribute('title', 'System health');
+    badge.dataset.connDegraded = '';
+  }
+}
+
+// ─── Health detail popover ───
+(function() {
+  document.addEventListener('click', function(e) {
+    var badge = e.target && e.target.closest && e.target.closest('.conn-status');
+    if (badge && badge.dataset.connDegraded === '1') {
+      e.preventDefault();
+      showHealthDetailPopover(badge);
+    }
+  });
+})();
+
+function buildHealthIssueList(data) {
+  if (!data) return ['No health data available.'];
+  var issues = [];
+  var checks = data.checks || {};
+  var storage = checks.storage || {};
+  if (checks.mqtt === 'disconnected') issues.push('MQTT is disconnected.');
+  if (storage.disk_low) issues.push('Disk space critically low (' + (storage.disk_available || 'unknown') + ' free).');
+  if (storage.recording_paused) issues.push('Recording has been paused because the disk is full.');
+  if (storage.projection) {
+    var proj = storage.projection;
+    if (proj.status === 'insufficient' || proj.status === 'critical') {
+      if (typeof proj.headroom_bytes === 'number' && proj.headroom_bytes < 0) {
+        issues.push('Storage projection negative — the configured retention exceeds available disk by ' + formatBytes(Math.abs(proj.headroom_bytes)) + '. Recordings will be evicted early.');
+      } else {
+        issues.push('Storage projection shows the disk will fill soon (status: ' + proj.status + ').');
+      }
+    } else if (proj.status === 'warning') {
+      if (typeof proj.days_until_full === 'number') {
+        issues.push('Storage usage high — disk projected to fill in ~' + Math.round(proj.days_until_full) + ' day(s) at current rate.');
+      } else {
+        issues.push('Storage usage high — projected steady-state uses 85-95% of disk.');
+      }
+    }
+  }
+  if (checks.database === 'error') issues.push('Database is in error state. Check logs.');
+  if (checks.detection && checks.detection.state === 'disabled') {
+    issues.push('Object detection disabled: ' + (checks.detection.reason || 'codec not available') + '.');
+  }
+  return issues.length ? issues : ['System is degraded but no specific cause was identified.'];
+}
+
+function showHealthDetailPopover(anchor) {
+  // Close any existing popover
+  var existing = document.getElementById('health-detail-popover');
+  if (existing) { existing.remove(); return; }
+
+  var pop = document.createElement('div');
+  pop.id = 'health-detail-popover';
+  pop.className = 'health-detail-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Health details');
+
+  var issues = buildHealthIssueList(_lastHealthData);
+
+  var html = '<div class="health-detail-header">'
+    + '<span>System health</span>'
+    + '<button class="btn btn-icon btn-ghost health-detail-close" aria-label="Close" style="margin-left:auto">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+    + '</button></div>'
+    + '<ul class="health-detail-issues">';
+  issues.forEach(function(iss) {
+    html += '<li>' + iss.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</li>';
+  });
+  html += '</ul>'
+    + '<div class="health-detail-actions">'
+    + '<a href="/settings.html#storage-card" class="btn btn-sm btn-ghost" style="text-decoration:none">View storage settings</a>'
+    + '<button class="btn btn-sm btn-ghost health-detail-refresh">Refresh</button>'
+    + '</div>';
+  pop.innerHTML = html;
+  document.body.appendChild(pop);
+
+  // Position below the anchor
+  var rect = anchor.getBoundingClientRect();
+  pop.style.top = (rect.bottom + 6 + window.scrollY) + 'px';
+  pop.style.right = (window.innerWidth - rect.right) + 'px';
+
+  pop.querySelector('.health-detail-close').addEventListener('click', function() { pop.remove(); });
+  pop.querySelector('.health-detail-refresh').addEventListener('click', function() {
+    pop.remove();
+    fetch('/api/health').then(function(r) { return r.json(); }).then(function(data) {
+      _lastHealthData = data;
+      if (data.status !== 'degraded') {
+        setConnStatus('ok');
+        toast('All systems operational');
+      } else {
+        showHealthDetailPopover(anchor);
+      }
+    }).catch(function() { toast('Health check failed', 'error'); });
+  });
+
+  // Close on outside click
+  setTimeout(function() {
+    document.addEventListener('click', function dismissPop(e) {
+      if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) {
+        pop.remove();
+        document.removeEventListener('click', dismissPop);
+      }
+    });
+  }, 50);
 }
 
 function showHtmxFallback(target) {
@@ -2365,17 +2498,39 @@ document.addEventListener('htmx:afterRequest', function(e) {
 });
 
 // ─── Health Check: detect degraded services ───
+var _lastHealthData = null;
+
 (function pollHealth() {
   function check() {
     fetch('/api/health')
       .then(function(r) { return r.json(); })
       .then(function(data) {
+        _lastHealthData = data;
         if (data.status === 'degraded') {
           var issues = [];
-          if (data.checks && data.checks.mqtt === 'disconnected') issues.push('MQTT disconnected');
-          if (data.checks && data.checks.storage && data.checks.storage.disk_low) issues.push('Disk low');
-          if (data.checks && data.checks.database === 'error') issues.push('DB error');
-          setConnStatus('degraded', issues.join(', ') || 'Degraded');
+          var checks = data.checks || {};
+          var storage = checks.storage || {};
+          if (checks.mqtt === 'disconnected') issues.push('MQTT disconnected');
+          if (storage.disk_low) issues.push('Disk space critically low');
+          if (storage.recording_paused) issues.push('Recording paused — disk full');
+          if (storage.projection) {
+            var proj = storage.projection;
+            if (proj.status === 'insufficient' || proj.status === 'critical') {
+              if (proj.headroom_bytes < 0) {
+                issues.push('Storage projection negative — recordings will be evicted soon');
+              } else {
+                issues.push('Storage projected to fill soon (' + proj.status + ')');
+              }
+            } else if (proj.status === 'warning') {
+              issues.push('Storage usage high (' + proj.status + ')');
+            }
+          }
+          if (checks.database === 'error') issues.push('Database error');
+          if (checks.detection && checks.detection.state === 'disabled') issues.push('Detection disabled: ' + (checks.detection.reason || 'codec unavailable'));
+          setConnStatus('degraded', issues.length === 1 ? issues[0] : 'Degraded (' + issues.length + ' issues)');
+        } else {
+          // Only reset to ok if not already in error state from HTMX failures
+          // setConnStatus('ok') is handled by the htmx afterRequest handler
         }
       })
       .catch(function() {});
@@ -2652,6 +2807,8 @@ var SHORTCUT_SECTIONS = {
       ['Events', ['Ctrl', '2']],
       ['Recordings', ['Ctrl', '3']],
       ['Settings', ['Ctrl', '4']],
+      ['People', ['Ctrl', '5']],
+      ['Objects', ['Ctrl', '6']],
     ],
   },
   camera: {
@@ -2663,6 +2820,7 @@ var SHORTCUT_SECTIONS = {
       ['Return to live', ['L']],
       ['Picture-in-Picture', ['P']],
       ['Fullscreen', ['F']],
+      ['Bounding-box overlay', ['B']],
     ],
   },
   cameraExt: {
@@ -2675,6 +2833,7 @@ var SHORTCUT_SECTIONS = {
       ['Toggle audio', ['A']],
       ['Picture-in-Picture', ['P']],
       ['Fullscreen', ['F']],
+      ['Bounding-box overlay', ['B']],
       ['Pause / Play', ['Space']],
       ['Pan (PTZ)', ['↑', '↓', '←', '→']],
       ['Zoom (PTZ)', ['+', '-']],
@@ -2807,9 +2966,11 @@ function openAccountModal() {
       cpSection.style.display = data.kind === 'proxy' ? 'none' : '';
     }
 
+    // Sign Out is always visible — for SSO users it clears the local session;
+    // they will be redirected through SSO again on the next protected request.
     var logoutBtn = el('account-logout-btn');
     if (logoutBtn) {
-      logoutBtn.style.display = data.kind === 'proxy' ? 'none' : '';
+      logoutBtn.style.display = '';
     }
   });
 
