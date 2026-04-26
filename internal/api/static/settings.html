@@ -11,6 +11,102 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Vedetta">
+  <style>
+    #notifications-card .push-banner {
+      padding: 0.6rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      margin-bottom: 0.75rem;
+      background: rgba(4, 12, 18, 0.7);
+      border: 1px solid rgba(159, 180, 198, 0.18);
+      color: var(--muted);
+    }
+    #notifications-card .push-banner.banner-ok {
+      border-color: rgba(58, 210, 120, 0.4);
+      color: var(--text);
+    }
+    #notifications-card .push-banner.banner-warn {
+      border-color: rgba(255, 168, 77, 0.5);
+      color: #ffd29a;
+    }
+    #notifications-card .push-banner.banner-info {
+      border-color: rgba(93, 215, 255, 0.35);
+      color: #cfeaff;
+    }
+    #notifications-card .push-form-row {
+      margin-bottom: 0.75rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+    #notifications-card .push-form-row label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+    #notifications-card .push-form-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--accent);
+    }
+    #notifications-card .push-prefs-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    #notifications-card .push-prefs-row {
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      background: rgba(4, 12, 18, 0.45);
+      border: 1px solid rgba(159, 180, 198, 0.12);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem 0.85rem;
+      font-size: 0.88rem;
+    }
+    #notifications-card .push-prefs-row strong {
+      color: var(--text);
+      margin-right: 0.35rem;
+    }
+    #notifications-card .push-prefs-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    #notifications-card .push-devices-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    #notifications-card .push-devices-list li {
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      background: rgba(4, 12, 18, 0.45);
+      border: 1px solid rgba(159, 180, 198, 0.12);
+      font-size: 0.88rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    #notifications-card .push-devices-list li .device-label {
+      flex: 1;
+      word-break: break-word;
+    }
+    #notifications-card h3 {
+      margin: 0.9rem 0 0.45rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+  </style>
 </head>
 <body data-shortcuts="nav,general">
 
@@ -39,6 +135,15 @@
     <div class="page-header">
       <h1>Settings</h1>
     </div>
+
+    <nav class="settings-jump" aria-label="Settings sections">
+      <a href="#mqtt-card">MQTT</a>
+      <a href="#updates-card">Updates</a>
+      <a href="#recording-card">Recording</a>
+      <a href="#detect-card">Detection</a>
+      <a href="#password-card">Password</a>
+      <a href="#notifications-card">Notifications</a>
+    </nav>
 
     <!-- System health cards — populated by /partials/system -->
     <div class="system-grid"
@@ -254,102 +359,6 @@
           Notifications
         </div>
         <div class="sys-card-body">
-          <style>
-            #notifications-card .push-banner {
-              padding: 0.6rem 0.8rem;
-              border-radius: 8px;
-              font-size: 0.92rem;
-              margin-bottom: 0.75rem;
-              background: rgba(4, 12, 18, 0.7);
-              border: 1px solid rgba(159, 180, 198, 0.18);
-              color: var(--muted);
-            }
-            #notifications-card .push-banner.banner-ok {
-              border-color: rgba(58, 210, 120, 0.4);
-              color: var(--text);
-            }
-            #notifications-card .push-banner.banner-warn {
-              border-color: rgba(255, 168, 77, 0.5);
-              color: #ffd29a;
-            }
-            #notifications-card .push-banner.banner-info {
-              border-color: rgba(93, 215, 255, 0.35);
-              color: #cfeaff;
-            }
-            #notifications-card .push-form-row {
-              margin-bottom: 0.75rem;
-              font-size: 0.92rem;
-              color: var(--muted);
-            }
-            #notifications-card .push-form-row label {
-              display: flex;
-              align-items: center;
-              gap: 0.5rem;
-              cursor: pointer;
-            }
-            #notifications-card .push-form-row input[type="range"] {
-              flex: 1;
-              accent-color: var(--accent);
-            }
-            #notifications-card .push-prefs-grid {
-              display: flex;
-              flex-direction: column;
-              gap: 0.75rem;
-              margin-bottom: 0.75rem;
-            }
-            #notifications-card .push-prefs-row {
-              padding: 0.5rem 0.65rem;
-              border-radius: 8px;
-              background: rgba(4, 12, 18, 0.45);
-              border: 1px solid rgba(159, 180, 198, 0.12);
-              display: flex;
-              flex-wrap: wrap;
-              align-items: center;
-              gap: 0.55rem 0.85rem;
-              font-size: 0.88rem;
-            }
-            #notifications-card .push-prefs-row strong {
-              color: var(--text);
-              margin-right: 0.35rem;
-            }
-            #notifications-card .push-prefs-row label {
-              display: inline-flex;
-              align-items: center;
-              gap: 0.3rem;
-              color: var(--muted);
-              cursor: pointer;
-            }
-            #notifications-card .push-devices-list {
-              list-style: none;
-              margin: 0;
-              padding: 0;
-              display: flex;
-              flex-direction: column;
-              gap: 0.5rem;
-            }
-            #notifications-card .push-devices-list li {
-              padding: 0.55rem 0.7rem;
-              border-radius: 8px;
-              background: rgba(4, 12, 18, 0.45);
-              border: 1px solid rgba(159, 180, 198, 0.12);
-              font-size: 0.88rem;
-              color: var(--muted);
-              display: flex;
-              align-items: center;
-              gap: 0.75rem;
-            }
-            #notifications-card .push-devices-list li .device-label {
-              flex: 1;
-              word-break: break-word;
-            }
-            #notifications-card h3 {
-              margin: 0.9rem 0 0.45rem;
-              font-size: 0.92rem;
-              color: var(--muted);
-              text-transform: uppercase;
-              letter-spacing: 0.06em;
-            }
-          </style>
           <div id="push-state-banner" class="push-banner">Loading…</div>
 
           <div id="push-enable-row" hidden>
