@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Vedetta Login</title>
+  <meta name="theme-color" content="#0a0e14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -99,7 +102,7 @@
     <p>Sign in to open the control room. Session access is browser-based; API clients should use scoped bearer tokens after login.</p>
     <form id="login-form">
       <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" autofocus required>
+      <input id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" autofocus required>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
       <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;cursor:pointer;font-size:0.92rem;color:var(--muted)">
