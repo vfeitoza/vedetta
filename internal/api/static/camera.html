@@ -521,17 +521,22 @@
     })();
 
     // ─── Events count pill (updates after htmx swap) ───
+    // Reads X-Total-Count from the partial response so the badge reflects
+    // the true number of events for this camera, not just the rendered preview.
     document.body.addEventListener('htmx:afterSwap', function(e) {
-      if (e.target && e.target.id === 'camera-events') {
-        var pill = document.getElementById('cam-events-count');
-        if (!pill) return;
-        var count = e.target.querySelectorAll('.event-card, [data-event-id]').length;
-        if (count > 0) {
-          pill.textContent = String(count);
-          pill.hidden = false;
-        } else {
-          pill.hidden = true;
-        }
+      if (!e.target || e.target.id !== 'camera-events') return;
+      var pill = document.getElementById('cam-events-count');
+      if (!pill) return;
+      var xhr = e.detail && e.detail.xhr;
+      var total = xhr ? parseInt(xhr.getResponseHeader('X-Total-Count') || '', 10) : NaN;
+      if (!isFinite(total)) {
+        total = e.target.querySelectorAll('.event-card, [data-event-id]').length;
+      }
+      if (total > 0) {
+        pill.textContent = String(total);
+        pill.hidden = false;
+      } else {
+        pill.hidden = true;
       }
     });
 

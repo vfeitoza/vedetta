@@ -160,6 +160,10 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if total, err := s.db.CountEventsFiltered(cameraFilter, labelFilter, "", objectFilter); err == nil {
+		w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	}
+
 	w.Header().Set("Content-Type", "text/html")
 
 	if offset == 0 && len(events) == 0 {
