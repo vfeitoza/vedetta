@@ -40,6 +40,10 @@
       <h1>Tracked Objects</h1>
     </div>
 
+    <div class="objects-explainer">
+      <p>Tracked objects let Vedetta recognize specific things — like your car or a delivery van — across all your cameras. When the system sees a known object again, it links the sighting back to its identity. Add tracked objects from any event by clicking <strong>Track as new</strong>, then refine matches below. Adjust the match threshold per object if you are getting false positives or missed sightings.</p>
+    </div>
+
     <div id="objects-grid" class="system-grid">
       <div class="loading-state">Loading...</div>
     </div>
@@ -114,13 +118,13 @@
           +   '</div>'
           +   '<button class="btn btn-icon btn-ghost" style="color:var(--danger);flex-shrink:0" '
           +     'data-action-click="deleteObject(' + obj.id + ', ' + jsStringArg(obj.name) + ')" '
-          +     'aria-label="Delete object">'
+          +     'aria-label="Delete tracked object" title="Delete tracked object">'
           +     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
           +   '</button>'
           + '</div>'
           + '<div class="sys-card-body" style="padding:0.75rem 1rem">'
           +   '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">'
-          +     '<label style="font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">Match threshold</label>'
+          +     '<label style="font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap" title="Higher = stricter matching. Lower = more matches but more false positives. 0.65 is a reasonable default.">Match threshold</label>'
           +     '<input type="range" min="0.3" max="0.95" step="0.05" value="' + threshold + '" '
           +       'style="flex:1;accent-color:var(--accent)" '
           +       'data-action-input="document.getElementById(\'thresh-val-' + obj.id + '\').textContent=this.value" '
