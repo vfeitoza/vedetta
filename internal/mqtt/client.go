@@ -64,11 +64,10 @@ func New(cfg config.MQTTConfig) (*Client, error) {
 	})
 
 	client := pahomqtt.NewClient(opts)
+	c.client = client
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		return nil, fmt.Errorf("mqtt connect: %w", token.Error())
 	}
-
-	c.client = client
 
 	slog.Info("connected to MQTT", "host", cfg.Host, "port", cfg.Port)
 
