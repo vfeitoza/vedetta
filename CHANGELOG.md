@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+
+## [0.2.1](https://github.com/rvben/vedetta/compare/v0.2.0...v0.2.1) - 2026-05-02
+
+### Added
+
+- **web**: pick a tracked-object thumbnail from sightings or references ([e3d7892](https://github.com/rvben/vedetta/commit/e3d7892a7f0b91d811ca1c5ae6b96115490227bd))
+- **web**: redesigned tracked objects page ([1d0064a](https://github.com/rvben/vedetta/commit/1d0064a8fdbb7c495461660514dcf4b565c3f013))
+- **web**: mask RTSP credentials in camera settings with reveal toggle ([a78eec4](https://github.com/rvben/vedetta/commit/a78eec4a4c1d9df2b627aec087b47d792849d9e4))
+- **web**: camera page live view UX improvements ([b473ff6](https://github.com/rvben/vedetta/commit/b473ff62ff3c7b5729bb1480f25320fc904a942f))
+- **web**: add tile-density selector to dashboard ([c2c3f11](https://github.com/rvben/vedetta/commit/c2c3f1120c972c3c2fafb6669c3cedec461bc994))
+- **web**: auto-fill camera grid layout ([f309a25](https://github.com/rvben/vedetta/commit/f309a25cefb75a4552f82b1bf6e39cc5e11b8f09))
+- **web**: cross-cutting UX improvements (W2.4) ([ad60c86](https://github.com/rvben/vedetta/commit/ad60c86344d96beb5749f1db537c3693a4f78032))
+- **web**: fix event-card badge legibility and add badge legend ([17991ee](https://github.com/rvben/vedetta/commit/17991eeec5d548512ca33abe01f7de09f9278cc0))
+- **web**: replace cryptic identity codes with readable labels on event tiles ([b5d5256](https://github.com/rvben/vedetta/commit/b5d525677086d40c1675b891487f9a8481018448))
+- **web**: eager-load camera snapshots on dashboard tiles ([953baf7](https://github.com/rvben/vedetta/commit/953baf78675b02869e9d1fe029a3b0d3b23ddb53))
+- **web**: enrich PWA manifest with id, description, screenshots ([8a787c5](https://github.com/rvben/vedetta/commit/8a787c5aab66ac9d69dbb0916b54afd6a093bae8))
+- **web**: add PWA chrome to login page ([6769c44](https://github.com/rvben/vedetta/commit/6769c4458364d78298e70704b3b81f60ef6be085))
+- **api**: redirect extensionless paths and serve app-shell 404 ([6a32fb5](https://github.com/rvben/vedetta/commit/6a32fb575177c7df219024457bef28d0edb08d74))
+- **web**: add sticky jump nav to settings page ([1dd214c](https://github.com/rvben/vedetta/commit/1dd214c7ccbc9459bb77427168e8ff54e62c1782))
+- **web**: bump mobile touch targets and landscape camera layout ([9242bc1](https://github.com/rvben/vedetta/commit/9242bc1a7efa07c2df5bc30c11860d48b8823151))
+- **web**: live bounding-box overlay on camera view ([b4d5b2e](https://github.com/rvben/vedetta/commit/b4d5b2e183a93cd1eec087a10beda59f859dd188))
+- **web**: RTSP test-connection button in camera forms ([f01aca0](https://github.com/rvben/vedetta/commit/f01aca0295ec9563660bb6f10892b0eb2175794d))
+- **web**: UI/UX pass across dashboard, streaming, mobile, and PWA ([3138f9e](https://github.com/rvben/vedetta/commit/3138f9e76cebc1e2c17e19cdcb916d62cb2d78d4))
+
+### Fixed
+
+- **mqtt**: assign client before connect to avoid OnConnect race ([de52000](https://github.com/rvben/vedetta/commit/de520008c7b7b19486b11a1e5987e462499a89e7))
+- **web**: auto-regenerate missing tracked-object crops from recent sightings ([55848ca](https://github.com/rvben/vedetta/commit/55848caea423012d7924085b716f064148d77530))
+- **web**: tracked-object thumbnails fall back when crop file missing ([b0fa986](https://github.com/rvben/vedetta/commit/b0fa986a54dbbf0ae4264c6c44ac0c9923ea3e15))
+- **web**: camera events badge shows true total via X-Total-Count ([695f469](https://github.com/rvben/vedetta/commit/695f4695422f1bb8fb27169bfbcede6d70753264))
+- **web**: cap camera-page events at 24 with View all link ([114254e](https://github.com/rvben/vedetta/commit/114254ea6bfc1baf825f482717d3a6ae59190647))
+- **web**: proceed optimistically on non-404 camera validation errors ([fbbfbaa](https://github.com/rvben/vedetta/commit/fbbfbaa3cfdb6e8ebeab196524626232c83be428))
+- **web**: prevent event clip player from collapsing before metadata loads ([9f8855f](https://github.com/rvben/vedetta/commit/9f8855f52917e7973d712b81a97ef61c8e051e53))
+- **web**: move notifications card styles out of body innerHTML ([8fe4456](https://github.com/rvben/vedetta/commit/8fe44562c891afc693597d308d629872dcf1d3e1))
+
 ## [0.2.0](https://github.com/rvben/vedetta/compare/v0.1.0...v0.2.0) - 2026-04-19
 
 ### Added
