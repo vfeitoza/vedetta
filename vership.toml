@@ -6,4 +6,5 @@ unconventional = "exclude"
 
 [[version_files]]
 glob = "pypi/pyproject.toml"
-field = "version"
+search = 'version = "{prev}"'
+replace = 'version = "{version}"'
