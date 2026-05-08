@@ -57,6 +57,7 @@ func (s *Server) GetCamera(w http.ResponseWriter, r *http.Request, name string) 
 		"ptz":             hasPTZ,
 		"zone_count":      len(zones),
 		"recording":       s.recorder != nil,
+		"source_fps":      st.SourceFPS,
 	})
 }
 

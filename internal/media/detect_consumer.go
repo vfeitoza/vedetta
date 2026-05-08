@@ -42,18 +42,24 @@ type DetectConsumer struct {
 	idrCount   uint64
 	haveSync   bool
 	available  bool
+
+	// fpsWindow holds the timestamps of the most recent access units for
+	// rolling FPS computation. Trimmed to the last fpsWindowDur on read.
+	fpsWindow    []time.Time
+	fpsWindowDur time.Duration
 }
 
 // NewDetectConsumer creates a consumer that decodes H264 for detection.
 // Detection is disabled if the track cannot be decoded locally.
 func NewDetectConsumer(camera string, width, height, fps int, track *rtsp.TrackInfo) *DetectConsumer {
 	dc := &DetectConsumer{
-		width:      width,
-		height:     height,
-		camera:     camera,
-		frameCh:    make(chan RawFrame, 2),
-		frameDelay: time.Second / time.Duration(max(fps, 1)),
-		lastLog:    time.Now(),
+		width:        width,
+		height:       height,
+		camera:       camera,
+		frameCh:      make(chan RawFrame, 2),
+		frameDelay:   time.Second / time.Duration(max(fps, 1)),
+		lastLog:      time.Now(),
+		fpsWindowDur: 5 * time.Second,
 	}
 
 	if track == nil || track.Codec != "H264" {
@@ -93,6 +99,22 @@ func (dc *DetectConsumer) Available() bool {
 	return dc.available
 }
 
+// SourceFPS returns the rolling-window frame rate (decoded access units per
+// second) over the last fpsWindowDur. Returns 0 when the window is empty.
+func (dc *DetectConsumer) SourceFPS() float64 {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	n := len(dc.fpsWindow)
+	if n < 2 {
+		return 0
+	}
+	span := dc.fpsWindow[n-1].Sub(dc.fpsWindow[0]).Seconds()
+	if span <= 0 {
+		return 0
+	}
+	return float64(n-1) / span
+}
+
 // Frames returns the channel of decoded frames.
 func (dc *DetectConsumer) Frames() <-chan RawFrame {
 	return dc.frameCh
@@ -122,8 +144,14 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		return
 	}
 
+	now := time.Now()
 	dc.mu.Lock()
 	dc.auCount++
+	cutoff := now.Add(-dc.fpsWindowDur)
+	dc.fpsWindow = append(dc.fpsWindow, now)
+	for len(dc.fpsWindow) > 0 && dc.fpsWindow[0].Before(cutoff) {
+		dc.fpsWindow = dc.fpsWindow[1:]
+	}
 	dc.mu.Unlock()
 
 	// Periodic status log — fires whether or not frames are being decoded

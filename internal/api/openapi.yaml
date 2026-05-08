@@ -2556,6 +2556,10 @@ components:
           type: integer
         recording:
           type: boolean
+        source_fps:
+          type: number
+          format: float
+          description: Rolling-window source frame rate measured at the detect consumer (frames per second).
 
     Zone:
       type: object

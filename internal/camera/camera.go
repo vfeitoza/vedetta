@@ -96,6 +96,7 @@ type Camera struct {
 	eventSnapQuality     int
 	latestSnapshotPath   string
 	snapConsumer         *media.SnapshotConsumer
+	detectConsumer       *media.DetectConsumer // set while the detect goroutine is running
 	detectEnabled        bool
 	motionMinRegionScore float64
 	motionActivity       chan<- MotionActivity
@@ -132,6 +133,7 @@ type CameraStatus struct {
 	DegradedReason string    `json:"degraded_reason,omitempty"`
 	PTZ            bool      `json:"ptz"`
 	Stopped        bool      `json:"stopped"`
+	SourceFPS      float64   `json:"source_fps"`
 }
 
 func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config.MotionConfig, events chan<- Event, eventEnds chan<- EventEnd, presenceEvents chan<- PresenceEvent, hub *rtsp.Hub, snapshotPath string, snapshotQuality int, recordingPath string, faceRecognizer *detect.FaceRecognizer, faceEvents chan<- FaceEvent, faceCropDir string, motionActivity chan<- MotionActivity, detections chan<- DetectionFrame) *Camera {
@@ -402,6 +404,14 @@ func (c *Camera) readFrames(ctx context.Context) {
 		return
 	}
 	source.AddConsumer(consumer)
+	c.mu.Lock()
+	c.detectConsumer = consumer
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.detectConsumer = nil
+		c.mu.Unlock()
+	}()
 	defer source.RemoveConsumer(consumer)
 	defer consumer.Close()
 
@@ -802,6 +812,10 @@ func (c *Camera) Status() CameraStatus {
 			online = src.Connected()
 		}
 	}
+	var fps float64
+	if c.detectConsumer != nil {
+		fps = c.detectConsumer.SourceFPS()
+	}
 	return CameraStatus{
 		Name:           c.config.Name,
 		Online:         online,
@@ -809,6 +823,7 @@ func (c *Camera) Status() CameraStatus {
 		LastFrame:      c.lastFrameTime,
 		Degraded:       c.degradedReason != "",
 		DegradedReason: c.degradedReason,
+		SourceFPS:      fps,
 	}
 }
 
