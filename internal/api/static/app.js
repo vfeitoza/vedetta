@@ -616,13 +616,22 @@ function startMSE() {
         }
       }
 
-      // Auto-seek to live edge to minimize latency
-      // Skip when paused or catching up from a pause (let user watch buffered content)
+      // Auto-seek to live edge to minimize latency. Rate-limited and
+      // conservative: snapping per-segment overshoots bufferedEnd on bursty
+      // delivery, causing currentTime > bufferedEnd → underrun → stall.
+      // Only seek when we're meaningfully behind, target a 1s headroom from
+      // the live edge, and at most once per second.
       var suppressAutoSeek = userPaused || (resumedFromPause > 0 && Date.now() - resumedFromPause < 30000);
-      if (!suppressAutoSeek && video.buffered.length > 0) {
+      var nowMs = Date.now();
+      if (!suppressAutoSeek && video.buffered.length > 0 &&
+          nowMs - lastLiveSeekMs > 1000) {
         var liveEdge = video.buffered.end(video.buffered.length - 1);
-        if (liveEdge - video.currentTime > 2) {
-          video.currentTime = liveEdge - 0.5;
+        if (liveEdge - video.currentTime > 4) {
+          var target = liveEdge - 1.0;
+          if (target > video.currentTime) {
+            video.currentTime = target;
+            lastLiveSeekMs = nowMs;
+          }
         }
       }
     }
@@ -817,6 +826,7 @@ function startMJPEG() {
 var userPaused = false;
 var pausedAtTime = 0;
 var resumedFromPause = 0; // timestamp when user resumed, suppresses auto-seek
+var lastLiveSeekMs = 0; // rate-limit auto-seek to live edge (avoid bursty appendBuffer overshoot)
 
 function togglePause() {
   var video = el('live-video');
@@ -1275,14 +1285,14 @@ function initTimeline() {
     var name = getCameraName();
     if (!name) return;
 
-    var ts = timelineDate.getFullYear() + '-' +
-      String(timelineDate.getMonth() + 1).padStart(2, '0') + '-' +
-      String(timelineDate.getDate()).padStart(2, '0') + 'T' +
-      String(h).padStart(2, '0') + ':' +
-      String(m).padStart(2, '0') + ':' +
-      String(s).padStart(2, '0') + 'Z';
-
-    var url = '/api/cameras/' + encodeURIComponent(name) + '/thumbnail?t=' + encodeURIComponent(ts);
+    // The timeline is rendered in the browser's local timezone (mergedBlocks
+    // are derived from segment start_time via getHours()), so h/m/s are local.
+    // Build a Date with setHours and serialize via toISOString() to send true
+    // UTC to the server. Concatenating local fields with a "Z" suffix would
+    // misrepresent the time by the local UTC offset.
+    var d = new Date(timelineDate);
+    d.setHours(h, m, s, 0);
+    var url = '/api/cameras/' + encodeURIComponent(name) + '/thumbnail?t=' + encodeURIComponent(d.toISOString());
     if (url === lastThumbUrl) return;
     lastThumbUrl = url;
 
@@ -2194,13 +2204,11 @@ function renderRecordingsSummary(data, date) {
       var h = Math.floor(totalSec / 3600);
       var m = Math.floor((totalSec % 3600) / 60);
       var s = Math.floor(totalSec % 60);
-      var ts = date.getFullYear() + '-' +
-        String(date.getMonth() + 1).padStart(2, '0') + '-' +
-        String(date.getDate()).padStart(2, '0') + 'T' +
-        String(h).padStart(2, '0') + ':' +
-        String(m).padStart(2, '0') + ':' +
-        String(s).padStart(2, '0') + 'Z';
-      location.href = '/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(ts);
+      // h/m/s are local hour/minute/second on the timeline. Build a Date and
+      // serialize via toISOString() so the link carries true UTC.
+      var d = new Date(date);
+      d.setHours(h, m, s, 0);
+      location.href = '/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(d.toISOString());
     });
 
     // Hover cursor

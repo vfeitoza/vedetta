@@ -83,6 +83,14 @@ const (
 	mseWriteTimeout   = 5 * time.Second
 	msePingInterval   = 30 * time.Second
 	mseReadTimeout    = 60 * time.Second
+
+	// Per-frame fMP4 fragments choke browser appendBuffer and bunch up on
+	// remote viewers (TLS/HTTP-2/Cloudflare buffering produces bursty
+	// delivery → bufferedEnd jumps → underruns). Batch ~250ms of samples
+	// per fragment instead. At 25fps that's ~6 frames/fragment → 4 ws
+	// messages/sec for video instead of 25.
+	videoBatchTicks = 90000 / 4 // 250ms at 90kHz
+	audioBatchMs    = 250
 )
 
 // mseClient represents a single WebSocket viewer.
@@ -168,9 +176,25 @@ type mseConsumer struct {
 	videoDTS uint64
 	audioDTS uint64
 
-	lastVideoRTP  uint32
 	hasFirstVideo bool
 	videoReady    bool
+
+	// Video batching. The duration of sample N can only be known when
+	// sample N+1 arrives (duration = PTS[N+1] - PTS[N]), so the most
+	// recent sample is held "in flight" until the next packet arrives.
+	// Once finalized, samples accumulate in pendingVideo until ~250ms
+	// worth has been collected, then they're emitted as a single
+	// fMP4 fragment.
+	pendingVideo     []*fmp4.Sample
+	pendingVideoTicks uint32
+	inFlightVideo    *fmp4.Sample
+	inFlightVideoPTS uint32
+	hasInFlightVideo bool
+
+	// Audio batching. AAC samples have a fixed 1024-sample duration so
+	// no in-flight handling is needed.
+	pendingAudio     []*fmp4.Sample
+	pendingAudioTicks uint32
 }
 
 func newMSEConsumer(video, audio *rtsp.TrackInfo) *mseConsumer {
@@ -340,6 +364,11 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 			mc.audioDTS = 0
 			mc.seqNum = 0
 			mc.hasFirstVideo = false
+			mc.pendingVideo = nil
+			mc.pendingVideoTicks = 0
+			mc.hasInFlightVideo = false
+			mc.pendingAudio = nil
+			mc.pendingAudioTicks = 0
 		}
 
 		// Push init segment to all connected clients so late-joiners
@@ -353,28 +382,46 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		return
 	}
 
-	// Wait for a keyframe before sending media segments
+	// Wait for a keyframe before sending media segments.
 	if !mc.hasFirstVideo {
 		if !h264.IsRandomAccess(au) {
 			return
 		}
-		mc.lastVideoRTP = pkt.Timestamp
 		mc.hasFirstVideo = true
 	}
 
-	var sampleDuration uint32
-	rtpDelta := pkt.Timestamp - mc.lastVideoRTP
-	if rtpDelta > 0 && rtpDelta < 90000*2 {
-		sampleDuration = rtpDelta
-	} else {
-		sampleDuration = 90000 / 30
+	newSample := &fmp4.Sample{}
+	if err := newSample.FillH264(0, au); err != nil {
+		return
 	}
-	mc.lastVideoRTP = pkt.Timestamp
 
-	sample := &fmp4.Sample{
-		Duration: sampleDuration,
+	// Finalize the previous in-flight sample's duration as the gap to the
+	// current packet. This is the correct MP4 semantic: sample N's duration
+	// is PTS[N+1] - PTS[N], not PTS[N] - PTS[N-1] (the prior implementation
+	// was off by one frame, accumulating drift over time).
+	if mc.hasInFlightVideo {
+		delta := pkt.Timestamp - mc.inFlightVideoPTS
+		if delta == 0 || delta > 90000*2 {
+			delta = 90000 / 30
+		}
+		mc.inFlightVideo.Duration = delta
+		mc.pendingVideo = append(mc.pendingVideo, mc.inFlightVideo)
+		mc.pendingVideoTicks += delta
 	}
-	if err := sample.FillH264(0, au); err != nil {
+
+	mc.inFlightVideo = newSample
+	mc.inFlightVideoPTS = pkt.Timestamp
+	mc.hasInFlightVideo = true
+
+	if mc.pendingVideoTicks >= videoBatchTicks {
+		mc.flushVideoLocked()
+	}
+}
+
+// flushVideoLocked emits all finalized pending video samples as a single fMP4
+// fragment. Caller must hold mc.mu. Safe to call when there are no samples.
+func (mc *mseConsumer) flushVideoLocked() {
+	if len(mc.pendingVideo) == 0 {
 		return
 	}
 
@@ -384,7 +431,7 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 			{
 				ID:       1,
 				BaseTime: mc.videoDTS,
-				Samples:  []*fmp4.Sample{sample},
+				Samples:  mc.pendingVideo,
 			},
 		},
 	}
@@ -395,9 +442,16 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	}
 
 	mc.seqNum++
-	mc.videoDTS += uint64(sampleDuration)
+	mc.videoDTS += uint64(mc.pendingVideoTicks)
 
-	data := buf.Bytes()
+	// Each fragment must own its byte slice — buf is stack-allocated and
+	// will be reused/recycled, but client.send() consumes asynchronously.
+	data := make([]byte, len(buf.Bytes()))
+	copy(data, buf.Bytes())
+
+	mc.pendingVideo = nil
+	mc.pendingVideoTicks = 0
+
 	for _, c := range mc.clients {
 		c.send(data)
 	}
@@ -420,35 +474,57 @@ func (mc *mseConsumer) OnAudioRTP(pkt *rtp.Packet) {
 		return
 	}
 
+	// 250ms in audio-track ticks. AAC frames are 1024 PCM samples each, so
+	// at 44.1kHz a single frame is ~23ms — batching ~11 frames per fragment.
+	audioBatchTicks := uint32(uint64(mc.audioTimeScale) * audioBatchMs / 1000)
+
 	for _, au := range aus {
-		sample := &fmp4.Sample{
+		mc.pendingAudio = append(mc.pendingAudio, &fmp4.Sample{
 			Duration: 1024,
 			Payload:  au,
-		}
+		})
+		mc.pendingAudioTicks += 1024
 
-		part := fmp4.Part{
-			SequenceNumber: mc.seqNum,
-			Tracks: []*fmp4.PartTrack{
-				{
-					ID:       2,
-					BaseTime: mc.audioDTS,
-					Samples:  []*fmp4.Sample{sample},
-				},
+		if mc.pendingAudioTicks >= audioBatchTicks {
+			mc.flushAudioLocked()
+		}
+	}
+}
+
+// flushAudioLocked emits all pending audio samples as a single fMP4 fragment.
+// Caller must hold mc.mu. Safe to call when there are no samples.
+func (mc *mseConsumer) flushAudioLocked() {
+	if len(mc.pendingAudio) == 0 {
+		return
+	}
+
+	part := fmp4.Part{
+		SequenceNumber: mc.seqNum,
+		Tracks: []*fmp4.PartTrack{
+			{
+				ID:       2,
+				BaseTime: mc.audioDTS,
+				Samples:  mc.pendingAudio,
 			},
-		}
+		},
+	}
 
-		var buf seekableBuffer
-		if err := part.Marshal(&buf); err != nil {
-			continue
-		}
+	var buf seekableBuffer
+	if err := part.Marshal(&buf); err != nil {
+		return
+	}
 
-		mc.seqNum++
-		mc.audioDTS += 1024
+	mc.seqNum++
+	mc.audioDTS += uint64(mc.pendingAudioTicks)
 
-		data := buf.Bytes()
-		for _, c := range mc.clients {
-			c.send(data)
-		}
+	data := make([]byte, len(buf.Bytes()))
+	copy(data, buf.Bytes())
+
+	mc.pendingAudio = nil
+	mc.pendingAudioTicks = 0
+
+	for _, c := range mc.clients {
+		c.send(data)
 	}
 }
 
