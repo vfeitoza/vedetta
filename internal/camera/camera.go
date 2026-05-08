@@ -496,228 +496,242 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 			break
 		}
 	}
+	var detections []detect.Detection
 	if qualifiedMotion {
 		c.mu.Lock()
 		c.lastMotion = time.Now()
 		c.mu.Unlock()
+		detections = c.detector.DetectRGB24(buf, w, h)
+	}
 
-		detections := c.detector.DetectRGB24(buf, w, h)
-		tracked := c.tracker.Update(detections)
+	// Run the tracking pipeline every frame (with detections=nil during quiet
+	// periods) so unmatched tracks keep aging and eventually decay. Otherwise
+	// stale tracks linger indefinitely; IoU matching reassigns their TrackIDs
+	// to fresh detections, the c.confirmedTracks lookup hits the prior
+	// eventID, and event emission is silently suppressed.
+	c.runTrackingPipeline(detections, buf, w, h)
+}
 
-		c.broadcastDetections(tracked, w, h)
+// runTrackingPipeline drives per-frame tracking work: tracker update, detection
+// broadcast, snapshot capture for new tracks, zone/presence updates, event
+// start/end emission, and face recognition. Must be called every frame (with
+// detections=nil during quiet periods) so tracks decay correctly.
+func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, w, h int) {
+	tracked := c.tracker.Update(detections)
 
-		// Collect all current detections for annotation
-		allDetections := make([]detect.Detection, len(tracked))
-		for i, obj := range tracked {
-			allDetections[i] = detect.Detection{
-				Label: obj.Label,
-				Score: obj.Score,
-				Box:   obj.Box,
-			}
+	c.broadcastDetections(tracked, w, h)
+
+	// Collect all current detections for annotation
+	allDetections := make([]detect.Detection, len(tracked))
+	for i, obj := range tracked {
+		allDetections[i] = detect.Detection{
+			Label: obj.Label,
+			Score: obj.Score,
+			Box:   obj.Box,
 		}
+	}
 
-		// Generate one annotated frame with ALL bounding boxes (reused for all new events).
-		// Prefer the full-resolution main stream frame; fall back to the detection frame.
-		var cleanFrame *image.RGBA     // clean snapshot for disk (embeddings, crops)
-		var annotatedFrame *image.RGBA // annotated snapshot for display (MQTT)
-		if c.eventSnapDir != "" {
-			hasNewTrack := false
-			for _, obj := range tracked {
-				if _, active := c.confirmedTracks[obj.TrackID]; !active {
-					hasNewTrack = true
-					break
-				}
-			}
-			if hasNewTrack {
-				var fullRes *image.RGBA
-				if sc := c.snapConsumer; sc != nil {
-					fullRes = sc.LastFrame()
-				}
-				if fullRes != nil {
-					// Clean copy for disk storage (no annotations)
-					cleanFrame = image.NewRGBA(fullRes.Bounds())
-					copy(cleanFrame.Pix, fullRes.Pix)
-					// Annotated copy for display
-					annotatedFrame = image.NewRGBA(fullRes.Bounds())
-					copy(annotatedFrame.Pix, fullRes.Pix)
-					// Scale detection boxes from detect resolution to full resolution
-					frameW := annotatedFrame.Bounds().Dx()
-					frameH := annotatedFrame.Bounds().Dy()
-					scaled := make([]detect.Detection, len(allDetections))
-					for i, d := range allDetections {
-						scaled[i] = detect.Detection{
-							Label: d.Label,
-							Score: d.Score,
-							Box: [4]int{
-								d.Box[0] * frameW / w,
-								d.Box[1] * frameH / h,
-								d.Box[2] * frameW / w,
-								d.Box[3] * frameH / h,
-							},
-						}
-					}
-					snapshot.DrawDetectionsInPlace(annotatedFrame, scaled)
-				} else {
-					// No full-res frame available, use detection frame
-					cleanFrame = rawToRGBA(buf, w, h)
-					annotatedFrame = image.NewRGBA(cleanFrame.Bounds())
-					copy(annotatedFrame.Pix, cleanFrame.Pix)
-					snapshot.DrawDetectionsInPlace(annotatedFrame, allDetections)
-				}
-			}
-		}
-
-		// Zone matching: tag each tracked object with matching zones and update presence
-		c.mu.RLock()
-		zones := c.zones
-		c.mu.RUnlock()
-
-		zoneMatches := make(map[PresenceKey]bool)
-		trackZones := make(map[int][]Zone) // trackID → matched zones
-		if len(zones) > 0 {
-			for _, obj := range tracked {
-				matched := MatchZones(zones, obj.Box, obj.Label, w, h)
-				trackZones[obj.TrackID] = matched
-				for _, z := range matched {
-					if z.TrackPresence {
-						zoneMatches[PresenceKey{ZoneID: z.ID, Label: obj.Label}] = true
-					}
-				}
-			}
-
-			// Update presence state machine
-			zoneNameMap := make(map[int]string, len(zones))
-			for _, z := range zones {
-				zoneNameMap[z.ID] = z.Name
-			}
-			presenceEvts := c.presenceTracker.Update(zoneMatches, zoneNameMap)
-			for _, pe := range presenceEvts {
-				select {
-				case c.presenceEvents <- pe:
-				default:
-					slog.Warn("presence event channel full, dropping", "zone", pe.ZoneName, "label", pe.Label, "type", pe.Type)
-				}
-			}
-		}
-
-		// Emit events for newly confirmed tracks
+	// Generate one annotated frame with ALL bounding boxes (reused for all new events).
+	// Prefer the full-resolution main stream frame; fall back to the detection frame.
+	var cleanFrame *image.RGBA     // clean snapshot for disk (embeddings, crops)
+	var annotatedFrame *image.RGBA // annotated snapshot for display (MQTT)
+	if c.eventSnapDir != "" {
+		hasNewTrack := false
 		for _, obj := range tracked {
 			if _, active := c.confirmedTracks[obj.TrackID]; !active {
-				// If zones are configured, only emit events for objects in at least one zone
-				if len(zones) > 0 && len(trackZones[obj.TrackID]) == 0 {
-					continue
-				}
-
-				eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
-				c.confirmedTracks[obj.TrackID] = eventID
-
-				// Pick the first matched zone name for the event
-				var zoneName string
-				if matched := trackZones[obj.TrackID]; len(matched) > 0 {
-					zoneName = matched[0].Name
-				}
-
-				box := obj.Box
-				ev := Event{
-					ID:                eventID,
-					CameraName:        c.config.Name,
-					Label:             obj.Label,
-					Score:             obj.Score,
-					Box:               box,
-					Timestamp:         time.Now(),
-					ZoneName:          zoneName,
-					SnapshotAvailable: false,
-					ClipAvailable:     false,
-				}
-
-				if cleanFrame != nil {
-					snapFile, err := safepath.Join(c.eventSnapDir, c.config.Name, safepath.FileComponent(eventID)+".jpg")
-					if err != nil {
-						slog.Error("invalid event snapshot path", "camera", c.config.Name, "event", eventID, "error", err)
-					} else {
-						ev.SnapshotPath = snapFile
-						ev.SnapshotImage = cleanFrame      // clean frame for disk (embeddings, crops)
-						ev.AnnotatedImage = annotatedFrame // annotated for MQTT display
-						// Scale box to snapshot resolution if different from detect resolution
-						snapW := cleanFrame.Bounds().Dx()
-						snapH := cleanFrame.Bounds().Dy()
-						if snapW != w || snapH != h {
-							ev.Box = [4]int{
-								box[0] * snapW / w,
-								box[1] * snapH / h,
-								box[2] * snapW / w,
-								box[3] * snapH / h,
-							}
-						}
-					}
-				}
-
-				c.events <- ev
+				hasNewTrack = true
+				break
 			}
 		}
-
-		// Face recognition for person detections in face_recognition zones.
-		// Runs after event IDs are assigned so every saved face can point at a real event row.
-		if c.faceRecognizer != nil {
-			now := time.Now()
-			var rgbaFrame *image.RGBA
-			for _, obj := range tracked {
-				if obj.Label != "person" {
-					continue
-				}
-				if lastRun, ok := c.faceProcessed[obj.TrackID]; ok && now.Sub(lastRun) < 5*time.Second {
-					continue
-				}
-				inFaceZone := false
-				if matched := trackZones[obj.TrackID]; len(matched) > 0 {
-					for _, z := range matched {
-						if z.FaceRecognition {
-							inFaceZone = true
-							break
-						}
-					}
-				}
-				if !inFaceZone {
-					continue
-				}
-				eventID, ok := c.confirmedTracks[obj.TrackID]
-				if !ok {
-					continue
-				}
-				if rgbaFrame == nil {
-					rgbaFrame = rawToRGBA(buf, w, h)
-				}
-				results := c.faceRecognizer.DetectAndEmbed(rgbaFrame, obj.Box, c.faceCropDir)
-				c.faceProcessed[obj.TrackID] = now
-				if len(results) > 0 {
-					select {
-					case c.faceEvents <- FaceEvent{
-						Camera:  c.config.Name,
-						EventID: eventID,
-						Results: results,
-					}:
-					default:
-						slog.Warn("face event channel full, dropping", "camera", c.config.Name)
-					}
-				}
+		if hasNewTrack {
+			var fullRes *image.RGBA
+			if sc := c.snapConsumer; sc != nil {
+				fullRes = sc.LastFrame()
 			}
-			for id, t := range c.faceProcessed {
-				if now.Sub(t) > 2*time.Minute {
-					delete(c.faceProcessed, id)
+			if fullRes != nil {
+				// Clean copy for disk storage (no annotations)
+				cleanFrame = image.NewRGBA(fullRes.Bounds())
+				copy(cleanFrame.Pix, fullRes.Pix)
+				// Annotated copy for display
+				annotatedFrame = image.NewRGBA(fullRes.Bounds())
+				copy(annotatedFrame.Pix, fullRes.Pix)
+				// Scale detection boxes from detect resolution to full resolution
+				frameW := annotatedFrame.Bounds().Dx()
+				frameH := annotatedFrame.Bounds().Dy()
+				scaled := make([]detect.Detection, len(allDetections))
+				for i, d := range allDetections {
+					scaled[i] = detect.Detection{
+						Label: d.Label,
+						Score: d.Score,
+						Box: [4]int{
+							d.Box[0] * frameW / w,
+							d.Box[1] * frameH / h,
+							d.Box[2] * frameW / w,
+							d.Box[3] * frameH / h,
+						},
+					}
+				}
+				snapshot.DrawDetectionsInPlace(annotatedFrame, scaled)
+			} else {
+				// No full-res frame available, use detection frame
+				cleanFrame = rawToRGBA(buf, w, h)
+				annotatedFrame = image.NewRGBA(cleanFrame.Bounds())
+				copy(annotatedFrame.Pix, cleanFrame.Pix)
+				snapshot.DrawDetectionsInPlace(annotatedFrame, allDetections)
+			}
+		}
+	}
+
+	// Zone matching: tag each tracked object with matching zones and update presence
+	c.mu.RLock()
+	zones := c.zones
+	c.mu.RUnlock()
+
+	zoneMatches := make(map[PresenceKey]bool)
+	trackZones := make(map[int][]Zone) // trackID → matched zones
+	if len(zones) > 0 {
+		for _, obj := range tracked {
+			matched := MatchZones(zones, obj.Box, obj.Label, w, h)
+			trackZones[obj.TrackID] = matched
+			for _, z := range matched {
+				if z.TrackPresence {
+					zoneMatches[PresenceKey{ZoneID: z.ID, Label: obj.Label}] = true
 				}
 			}
 		}
 
-		// Notify when tracked objects leave the frame
-		for _, obj := range c.tracker.DeletedTracks() {
-			if eventID, ok := c.confirmedTracks[obj.TrackID]; ok {
-				c.eventEnds <- EventEnd{
-					EventID:    eventID,
-					CameraName: c.config.Name,
-					EndTime:    time.Now(),
-				}
-				delete(c.confirmedTracks, obj.TrackID)
+		// Update presence state machine
+		zoneNameMap := make(map[int]string, len(zones))
+		for _, z := range zones {
+			zoneNameMap[z.ID] = z.Name
+		}
+		presenceEvts := c.presenceTracker.Update(zoneMatches, zoneNameMap)
+		for _, pe := range presenceEvts {
+			select {
+			case c.presenceEvents <- pe:
+			default:
+				slog.Warn("presence event channel full, dropping", "zone", pe.ZoneName, "label", pe.Label, "type", pe.Type)
 			}
+		}
+	}
+
+	// Emit events for newly confirmed tracks
+	for _, obj := range tracked {
+		if _, active := c.confirmedTracks[obj.TrackID]; !active {
+			// If zones are configured, only emit events for objects in at least one zone
+			if len(zones) > 0 && len(trackZones[obj.TrackID]) == 0 {
+				continue
+			}
+
+			eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
+			c.confirmedTracks[obj.TrackID] = eventID
+
+			// Pick the first matched zone name for the event
+			var zoneName string
+			if matched := trackZones[obj.TrackID]; len(matched) > 0 {
+				zoneName = matched[0].Name
+			}
+
+			box := obj.Box
+			ev := Event{
+				ID:                eventID,
+				CameraName:        c.config.Name,
+				Label:             obj.Label,
+				Score:             obj.Score,
+				Box:               box,
+				Timestamp:         time.Now(),
+				ZoneName:          zoneName,
+				SnapshotAvailable: false,
+				ClipAvailable:     false,
+			}
+
+			if cleanFrame != nil {
+				snapFile, err := safepath.Join(c.eventSnapDir, c.config.Name, safepath.FileComponent(eventID)+".jpg")
+				if err != nil {
+					slog.Error("invalid event snapshot path", "camera", c.config.Name, "event", eventID, "error", err)
+				} else {
+					ev.SnapshotPath = snapFile
+					ev.SnapshotImage = cleanFrame      // clean frame for disk (embeddings, crops)
+					ev.AnnotatedImage = annotatedFrame // annotated for MQTT display
+					// Scale box to snapshot resolution if different from detect resolution
+					snapW := cleanFrame.Bounds().Dx()
+					snapH := cleanFrame.Bounds().Dy()
+					if snapW != w || snapH != h {
+						ev.Box = [4]int{
+							box[0] * snapW / w,
+							box[1] * snapH / h,
+							box[2] * snapW / w,
+							box[3] * snapH / h,
+						}
+					}
+				}
+			}
+
+			c.events <- ev
+		}
+	}
+
+	// Face recognition for person detections in face_recognition zones.
+	// Runs after event IDs are assigned so every saved face can point at a real event row.
+	if c.faceRecognizer != nil {
+		now := time.Now()
+		var rgbaFrame *image.RGBA
+		for _, obj := range tracked {
+			if obj.Label != "person" {
+				continue
+			}
+			if lastRun, ok := c.faceProcessed[obj.TrackID]; ok && now.Sub(lastRun) < 5*time.Second {
+				continue
+			}
+			inFaceZone := false
+			if matched := trackZones[obj.TrackID]; len(matched) > 0 {
+				for _, z := range matched {
+					if z.FaceRecognition {
+						inFaceZone = true
+						break
+					}
+				}
+			}
+			if !inFaceZone {
+				continue
+			}
+			eventID, ok := c.confirmedTracks[obj.TrackID]
+			if !ok {
+				continue
+			}
+			if rgbaFrame == nil {
+				rgbaFrame = rawToRGBA(buf, w, h)
+			}
+			results := c.faceRecognizer.DetectAndEmbed(rgbaFrame, obj.Box, c.faceCropDir)
+			c.faceProcessed[obj.TrackID] = now
+			if len(results) > 0 {
+				select {
+				case c.faceEvents <- FaceEvent{
+					Camera:  c.config.Name,
+					EventID: eventID,
+					Results: results,
+				}:
+				default:
+					slog.Warn("face event channel full, dropping", "camera", c.config.Name)
+				}
+			}
+		}
+		for id, t := range c.faceProcessed {
+			if now.Sub(t) > 2*time.Minute {
+				delete(c.faceProcessed, id)
+			}
+		}
+	}
+
+	// Notify when tracked objects leave the frame
+	for _, obj := range c.tracker.DeletedTracks() {
+		if eventID, ok := c.confirmedTracks[obj.TrackID]; ok {
+			c.eventEnds <- EventEnd{
+				EventID:    eventID,
+				CameraName: c.config.Name,
+				EndTime:    time.Now(),
+			}
+			delete(c.confirmedTracks, obj.TrackID)
 		}
 	}
 }

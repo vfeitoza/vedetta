@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
@@ -187,5 +188,253 @@ func TestProcessFrame_PreservesDetectorDegradedState(t *testing.T) {
 
 	if st := cam.Status(); !st.Degraded || st.DegradedReason != "object detector unavailable" {
 		t.Fatalf("status after frame = %+v, want degraded object detector unavailable", st)
+	}
+}
+
+// TestRunTrackingPipeline_TrackDecaysAcrossQuietPeriods is the regression test
+// for the "no events" production bug.
+//
+// Symptom: after hours of normal operation, the camera stopped emitting events
+// (and presence transitions stalled, so MQTT/HA went silent) until restart.
+//
+// Root cause: tracker.Update was gated behind motion. During quiet periods
+// nothing aged the tracks, so they froze with their last position. When motion
+// resumed, the IoU greedy matcher absorbed each fresh detection into one of
+// the stale tracks (any nonzero overlap is accepted, regardless of label).
+// The camera's confirmedTracks map still held the old eventID for that
+// TrackID, so the "is this a new track?" check skipped emission. The pipeline
+// went silent without any error log.
+//
+// The fix is to call runTrackingPipeline every frame (with detections=nil
+// during quiet periods) so unmatched tracks accumulate disappeared counters
+// and eventually decay. This test asserts the post-fix behavior across a full
+// motion → quiet → motion cycle and would have caught the bug before it
+// shipped.
+func TestRunTrackingPipeline_TrackDecaysAcrossQuietPeriods(t *testing.T) {
+	events := make(chan Event, 16)
+	eventEnds := make(chan EventEnd, 16)
+	presenceEvents := make(chan PresenceEvent, 4)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 100, Height: 100, FPS: 5},
+		},
+		nil,
+		config.MotionConfig{},
+		events,
+		eventEnds,
+		presenceEvents,
+		nil,
+		"", // no event snapshot dir → skip snapshot capture
+		85,
+		"",
+		nil,
+		nil,
+		"",
+		nil,
+		nil,
+	)
+
+	car := []detect.Detection{{Label: "car", Score: 0.9, Box: [4]int{10, 10, 50, 50}}}
+
+	// Default tracker is NewTracker(30, 3): confirm after 3 hits, decay after
+	// 30 misses. Drive 3 detection frames to confirm and emit the first event.
+	for i := 0; i < 3; i++ {
+		cam.runTrackingPipeline(car, nil, 100, 100)
+	}
+
+	var firstEv Event
+	select {
+	case firstEv = <-events:
+	default:
+		t.Fatal("expected an event after 3 confirmation frames")
+	}
+	if firstEv.Label != "car" {
+		t.Errorf("first event label = %q, want %q", firstEv.Label, "car")
+	}
+
+	// Quiet period: more than maxDisappeared empty frames so the track decays
+	// and DeletedTracks() reports it. With the bug this loop is a no-op
+	// (the tracker is never updated), the EventEnd never fires, and the
+	// confirmedTracks entry persists across the gap.
+	for i := 0; i < 32; i++ {
+		cam.runTrackingPipeline(nil, nil, 100, 100)
+	}
+
+	var endEv EventEnd
+	select {
+	case endEv = <-eventEnds:
+	default:
+		t.Fatal("expected EventEnd after 32 quiet frames — track did not decay (regression: tracker.Update was not invoked during quiet period)")
+	}
+	if endEv.EventID != firstEv.ID {
+		t.Errorf("EventEnd.EventID = %q, want %q (mismatched event lifecycle)", endEv.EventID, firstEv.ID)
+	}
+	if endEv.CameraName != "test" {
+		t.Errorf("EventEnd.CameraName = %q, want %q", endEv.CameraName, "test")
+	}
+
+	// Motion resumes with a detection at the SAME position. Because the
+	// previous track was deleted and its TrackID retired, this must produce a
+	// fresh track and a fresh event. Under the bug, IoU matching would map
+	// the new detection onto the old (stale) track and the confirmedTracks
+	// lookup would suppress emission entirely — i.e., events <- nothing.
+	for i := 0; i < 3; i++ {
+		cam.runTrackingPipeline(car, nil, 100, 100)
+	}
+
+	var secondEv Event
+	select {
+	case secondEv = <-events:
+	default:
+		t.Fatal("expected a NEW event after motion resumed — production bug suppressed this exact case")
+	}
+	if secondEv.ID == firstEv.ID {
+		t.Errorf("second event reused the first event's ID %q — track was not retired", secondEv.ID)
+	}
+	if secondEv.Label != "car" {
+		t.Errorf("second event label = %q, want %q", secondEv.Label, "car")
+	}
+
+	// And the event channel should be drained — only one new event per
+	// confirmation cycle. A spurious extra event would indicate double emission.
+	select {
+	case extra := <-events:
+		t.Errorf("unexpected extra event after motion resumed: %+v", extra)
+	default:
+	}
+}
+
+// TestRunTrackingPipeline_NoEventWithoutMotion makes sure the fix doesn't
+// over-correct: calling the pipeline every frame with empty detections must
+// not synthesize events out of nothing.
+func TestRunTrackingPipeline_NoEventWithoutMotion(t *testing.T) {
+	events := make(chan Event, 4)
+	eventEnds := make(chan EventEnd, 4)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 100, Height: 100, FPS: 5},
+		},
+		nil,
+		config.MotionConfig{},
+		events,
+		eventEnds,
+		make(chan PresenceEvent, 1),
+		nil, "", 85, "", nil, nil, "", nil, nil,
+	)
+
+	for i := 0; i < 50; i++ {
+		cam.runTrackingPipeline(nil, nil, 100, 100)
+	}
+
+	select {
+	case ev := <-events:
+		t.Errorf("got unexpected event with no detections ever: %+v", ev)
+	default:
+	}
+	select {
+	case end := <-eventEnds:
+		t.Errorf("got unexpected EventEnd with no events ever: %+v", end)
+	default:
+	}
+}
+
+// TestProcessFrame_DrivesPipelineDuringQuietFrames is a higher-level regression
+// guard: even if the runTrackingPipeline contract holds, the bug also requires
+// that processFrame call into it on every frame (not just motion-qualifying
+// ones). This test primes a confirmed track and then runs processFrame with
+// frames guaranteed not to qualify (MinRegionScore=2.0 with region scores
+// bounded at 1.0). EventEnd must still fire — proving processFrame keeps
+// driving the pipeline even when no motion is detected.
+func TestProcessFrame_DrivesPipelineDuringQuietFrames(t *testing.T) {
+	events := make(chan Event, 16)
+	eventEnds := make(chan EventEnd, 16)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 32, Height: 32, FPS: 5},
+		},
+		nil,
+		// MinRegionScore=2.0 guarantees motion never qualifies (region.Score ≤ 1.0).
+		// This keeps the nil detector from being dereferenced in processFrame.
+		config.MotionConfig{PixelThreshold: 25, MinArea: 200, BackgroundAlpha: 0.05, MinRegionScore: 2.0},
+		events, eventEnds, make(chan PresenceEvent, 1),
+		nil, "", 85, "", nil, nil, "", nil, nil,
+	)
+
+	car := []detect.Detection{{Label: "car", Score: 0.9, Box: [4]int{1, 1, 10, 10}}}
+	for i := 0; i < 3; i++ {
+		cam.runTrackingPipeline(car, nil, 32, 32)
+	}
+	select {
+	case <-events:
+	default:
+		t.Fatal("setup: expected event after confirming track")
+	}
+
+	black := make([]byte, 32*32*3)
+	for i := 0; i < 40; i++ { // 40 > tracker maxDisappeared (30)
+		cam.processFrame(black, 32, 32)
+	}
+
+	select {
+	case <-eventEnds:
+	default:
+		t.Fatal("expected EventEnd after non-motion frames — processFrame did not drive the tracking pipeline (regression)")
+	}
+}
+
+// TestRunTrackingPipeline_StableTrackEmitsExactlyOnce verifies that a track
+// which keeps being detected (continuous motion) produces exactly one event
+// across many frames — i.e., the new always-on Update call doesn't cause
+// re-emission for the same TrackID.
+func TestRunTrackingPipeline_StableTrackEmitsExactlyOnce(t *testing.T) {
+	events := make(chan Event, 16)
+	eventEnds := make(chan EventEnd, 16)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 100, Height: 100, FPS: 5},
+		},
+		nil,
+		config.MotionConfig{},
+		events,
+		eventEnds,
+		make(chan PresenceEvent, 1),
+		nil, "", 85, "", nil, nil, "", nil, nil,
+	)
+
+	person := []detect.Detection{{Label: "person", Score: 0.9, Box: [4]int{30, 30, 70, 70}}}
+	for i := 0; i < 50; i++ {
+		cam.runTrackingPipeline(person, nil, 100, 100)
+	}
+
+	count := 0
+	for {
+		select {
+		case <-events:
+			count++
+			continue
+		default:
+		}
+		break
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 event across 50 stable-detection frames, got %d", count)
+	}
+
+	select {
+	case end := <-eventEnds:
+		t.Errorf("got unexpected EventEnd while track was still alive: %+v", end)
+	default:
 	}
 }
