@@ -51,7 +51,7 @@ type Server struct {
 	streams              *stream.StreamManager
 	mse                  *stream.MSEManager
 	faceRecognizer       *detect.FaceRecognizer
-	objectEmbedder       *detect.ObjectEmbedder
+	objectEmbedder       objectEmbedder
 	ObjectMatchThreshold float64
 	mqttClient           MQTTPublisher
 	mqttEnabled          bool
@@ -404,7 +404,13 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 	s.streams = stream.NewStreamManager(hub)
 	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins, s.config.TrustedProxies)
 	s.faceRecognizer = faceRecognizer
-	s.objectEmbedder = objectEmbedder
+	if objectEmbedder != nil {
+		// Avoid the typed-nil-in-interface trap when callers pass a
+		// nil *detect.ObjectEmbedder (the concrete type).
+		s.objectEmbedder = objectEmbedder
+	} else {
+		s.objectEmbedder = nil
+	}
 	s.snapshotPath = snapshotPath
 	s.faceCropDir = faceCropDir
 	s.cameraConfigs = cameraConfigs

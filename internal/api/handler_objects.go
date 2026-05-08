@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"image"
 	"log/slog"
 	"math"
 	"net/http"
@@ -11,6 +12,13 @@ import (
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/storage"
 )
+
+// objectEmbedder is the subset of detect.ObjectEmbedder used by HTTP handlers.
+// Defined as an interface so tests can substitute a stub.
+type objectEmbedder interface {
+	Embed(frame *image.RGBA, box [4]int) ([]float32, error)
+	SaveCrop(frame *image.RGBA, box [4]int, dir string, objectID int64) string
+}
 
 func (s *Server) ListObjects(w http.ResponseWriter, _ *http.Request) {
 	objects, err := s.db.ListKnownObjects()
