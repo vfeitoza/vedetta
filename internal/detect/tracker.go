@@ -1,6 +1,9 @@
 package detect
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // TrackState represents the lifecycle state of a tracked object.
 type TrackState string
@@ -23,32 +26,99 @@ type TrackedObject struct {
 
 // track is the internal state for a single tracked object.
 type track struct {
-	id           int
-	label        string
-	box          [4]int
-	score        float32
-	age          int
-	hits         int
-	disappeared  int
-	state        TrackState
+	id          int
+	label       string
+	box         [4]int
+	prevBox     [4]int // last matched box (for stationarity IoU comparison)
+	score       float32
+	age         int
+	hits        int
+	disappeared int
+	state       TrackState
+
+	// Stationarity bookkeeping. A track is stationary while
+	// stationaryHits >= Tracker.stationaryThreshold AND its centroid hasn't
+	// drifted past Tracker.stationaryDriftRatio × max(box dims) from the
+	// streak anchor. lastWasStationary captures that decision at the most
+	// recent matched update so it can be consulted during miss-streak aging.
+	stationaryHits      int
+	stationaryAnchor    [4]int // box at the start of the current high-IoU streak
+	hasStationaryAnchor bool
+	lastWasStationary   bool
 }
 
 // Tracker matches detections across frames using IoU to maintain stable object identities.
+//
+// A track that has been matched to a near-identical bounding box for several
+// consecutive updates is treated as "stationary" and granted a much longer
+// disappearance budget. This prevents motion-gated detection gaps (a parked
+// car only re-detected when something nearby moves) from churning the
+// TrackID and triggering duplicate events for the same object.
 type Tracker struct {
-	maxDisappeared int
-	minHits        int
-	nextID         int
-	tracks         []*track
+	maxDisappeared           int
+	stationaryMaxDisappeared int
+	minHits                  int
+	stationaryThreshold      int     // consecutive high-IoU matches needed to promote
+	stationaryIoU            float64 // per-frame IoU above which a match counts toward the streak
+	stationaryDriftRatio     float64 // cumulative drift cap (× max box dim) before streak resets
+	nextID                   int
+	tracks                   []*track
 }
 
-// NewTracker creates a tracker with the given parameters.
-// maxDisappeared: frames before a track is deleted.
+// Default stationarity tuning. Sized for a 5 fps detect loop with YOLO
+// gated behind motion: in production a parked car only generates matched
+// updates while motion is actively qualifying nearby, so we need a low
+// enough hit threshold to promote inside the brief motion-active window
+// at arrival (typically 1–3s of qualified motion as the car settles).
+//
+// 10 hits ≈ 2s of continuous high-IoU matches. Combined with the 0.3
+// drift ratio that catches a person walking 3 px/frame within 11 frames,
+// this gives reliable promotion of stationary objects while still
+// rejecting realistic slow walkers.
+//
+// stationaryMaxDisappeared = 50 × maxDisappeared keeps the parked-car
+// identity alive for ~5 minutes at 5 fps with maxDisappeared=30, which
+// covers any plausible motion-quiet window (wind, brief obstructions,
+// short YOLO stalls).
+const (
+	defaultStationaryThresholdHits = 10
+	defaultStationaryIoU           = 0.85
+	defaultStationaryDriftRatio    = 0.3
+	defaultStationaryMaxMultiplier = 50
+)
+
+// NewTracker creates a tracker with the given decay parameters and the
+// default stationary preservation policy.
+//
+// maxDisappeared: frames before a non-stationary track is deleted.
 // minHits: consecutive frames before a tentative track is confirmed.
 func NewTracker(maxDisappeared, minHits int) *Tracker {
+	return NewTrackerWithStationary(
+		maxDisappeared,
+		minHits,
+		maxDisappeared*defaultStationaryMaxMultiplier,
+		defaultStationaryThresholdHits,
+		defaultStationaryIoU,
+		defaultStationaryDriftRatio,
+	)
+}
+
+// NewTrackerWithStationary builds a tracker with explicit stationarity tuning.
+// Tests use this to dial down the timeouts and thresholds for fast scenarios;
+// production wires up the tuned defaults via NewTracker.
+func NewTrackerWithStationary(
+	maxDisappeared, minHits int,
+	stationaryMaxDisappeared, stationaryThreshold int,
+	stationaryIoU, stationaryDriftRatio float64,
+) *Tracker {
 	return &Tracker{
-		maxDisappeared: maxDisappeared,
-		minHits:        minHits,
-		nextID:         1,
+		maxDisappeared:           maxDisappeared,
+		stationaryMaxDisappeared: stationaryMaxDisappeared,
+		minHits:                  minHits,
+		stationaryThreshold:      stationaryThreshold,
+		stationaryIoU:            stationaryIoU,
+		stationaryDriftRatio:     stationaryDriftRatio,
+		nextID:                   1,
 	}
 }
 
@@ -82,7 +152,7 @@ func (t *Tracker) Update(detections []Detection) []TrackedObject {
 	if len(detections) == 0 {
 		for _, tr := range t.tracks {
 			tr.disappeared++
-			if tr.disappeared > t.maxDisappeared {
+			if tr.disappeared > t.effectiveMaxDisappeared(tr) {
 				tr.state = TrackDeleted
 			}
 		}
@@ -123,21 +193,14 @@ func (t *Tracker) Update(detections []Detection) []TrackedObject {
 
 		tr := t.tracks[p.trackIdx]
 		d := detections[p.detectionIdx]
-		tr.box = d.Box
-		tr.score = d.Score
-		tr.label = d.Label
-		tr.hits++
-		tr.disappeared = 0
-		if tr.state == TrackTentative && tr.hits >= t.minHits {
-			tr.state = TrackConfirmed
-		}
+		t.applyMatch(tr, d)
 	}
 
 	// Unmatched tracks: increment disappeared
 	for ti, tr := range t.tracks {
 		if !matchedTracks[ti] {
 			tr.disappeared++
-			if tr.disappeared > t.maxDisappeared {
+			if tr.disappeared > t.effectiveMaxDisappeared(tr) {
 				tr.state = TrackDeleted
 			}
 		}
@@ -151,6 +214,58 @@ func (t *Tracker) Update(detections []Detection) []TrackedObject {
 	}
 
 	return t.confirmedObjects()
+}
+
+// applyMatch updates a track with a freshly-matched detection and refreshes
+// its stationarity state. The stationary streak grows when the match has
+// high IoU with the *previous* matched box AND the cumulative drift from
+// the streak anchor stays below the configured ratio. Either guard failing
+// resets the streak — slow drift over time is treated as motion even if
+// per-frame IoU is high.
+func (t *Tracker) applyMatch(tr *track, d Detection) {
+	prevIoU := iou(tr.prevBox, d.Box)
+	streakActive := prevIoU > t.stationaryIoU
+
+	if streakActive {
+		if !tr.hasStationaryAnchor {
+			tr.stationaryAnchor = tr.prevBox
+			tr.hasStationaryAnchor = true
+			tr.stationaryHits = 0
+		}
+		drift := centroidDistance(tr.stationaryAnchor, d.Box)
+		boxDim := math.Max(float64(d.Box[2]-d.Box[0]), float64(d.Box[3]-d.Box[1]))
+		if boxDim <= 0 || drift > t.stationaryDriftRatio*boxDim {
+			tr.stationaryHits = 0
+			tr.hasStationaryAnchor = false
+		} else {
+			tr.stationaryHits++
+		}
+	} else {
+		tr.stationaryHits = 0
+		tr.hasStationaryAnchor = false
+	}
+
+	tr.lastWasStationary = tr.stationaryHits >= t.stationaryThreshold
+
+	tr.box = d.Box
+	tr.prevBox = d.Box
+	tr.score = d.Score
+	tr.label = d.Label
+	tr.hits++
+	tr.disappeared = 0
+	if tr.state == TrackTentative && tr.hits >= t.minHits {
+		tr.state = TrackConfirmed
+	}
+}
+
+// effectiveMaxDisappeared returns the disappearance budget that should
+// apply to this track on the current Update. Stationary tracks earn the
+// longer budget; everything else uses the standard one.
+func (t *Tracker) effectiveMaxDisappeared(tr *track) int {
+	if tr.lastWasStationary {
+		return t.stationaryMaxDisappeared
+	}
+	return t.maxDisappeared
 }
 
 // DeletedTracks returns tracks that were just marked deleted in the last Update call.
@@ -173,13 +288,14 @@ func (t *Tracker) DeletedTracks() []TrackedObject {
 
 func (t *Tracker) newTrack(d Detection) *track {
 	tr := &track{
-		id:    t.nextID,
-		label: d.Label,
-		box:   d.Box,
-		score: d.Score,
-		age:   1,
-		hits:  1,
-		state: TrackTentative,
+		id:      t.nextID,
+		label:   d.Label,
+		box:     d.Box,
+		prevBox: d.Box,
+		score:   d.Score,
+		age:     1,
+		hits:    1,
+		state:   TrackTentative,
 	}
 	t.nextID++
 	if tr.hits >= t.minHits {
@@ -205,3 +321,14 @@ func (t *Tracker) confirmedObjects() []TrackedObject {
 	return result
 }
 
+// centroidDistance returns the Euclidean distance between the centroids of
+// two boxes (x1,y1,x2,y2).
+func centroidDistance(a, b [4]int) float64 {
+	cx1 := float64(a[0]+a[2]) / 2
+	cy1 := float64(a[1]+a[3]) / 2
+	cx2 := float64(b[0]+b[2]) / 2
+	cy2 := float64(b[1]+b[3]) / 2
+	dx := cx1 - cx2
+	dy := cy1 - cy2
+	return math.Sqrt(dx*dx + dy*dy)
+}
