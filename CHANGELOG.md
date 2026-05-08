@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
+
+## [0.2.2](https://github.com/rvben/vedetta/compare/v0.2.1...v0.2.2) - 2026-05-08
+
+### Added
+
+- **web**: click a tracked object on the live view to name it ([1c3e3e0](https://github.com/rvben/vedetta/commit/1c3e3e09c6e60463f8375ff95ab9df2723ce1ce7))
+- **api**: add POST /api/cameras/{name}/objects to name a live track ([8c1dcd4](https://github.com/rvben/vedetta/commit/8c1dcd4484fa7f18e96ac64e1ebad511ce249484))
+- **main**: push matched object names back to the camera overlay ([b613eed](https://github.com/rvben/vedetta/commit/b613eed4ce3e7e55a589f48fbf6cca1e081b1932))
+- **camera**: track per-object display names and expose live frame ([27c05fa](https://github.com/rvben/vedetta/commit/27c05fa94693ca3b16b21f5ca83bb928253fff5e))
+
+### Fixed
+
+- **stream**: batch fMP4 fragments and stabilize live-edge auto-seek ([6c6af5d](https://github.com/rvben/vedetta/commit/6c6af5d057eeb7eafb31e4f3cec76bcb59fda97a))
+- **camera**: age tracks every frame so events resume after quiet periods ([e340981](https://github.com/rvben/vedetta/commit/e34098190c7e6aafdd3549f89a3712a358fab887))
+- **detect**: preserve stationary tracks across motion-gated quiet periods ([3447041](https://github.com/rvben/vedetta/commit/3447041d4123a8292e80b2a342a9dac520f3e1e6))
+- **media**: rewrite fMP4 trim/concat to handle multi-track moofs ([668c025](https://github.com/rvben/vedetta/commit/668c025be1a549e13ef228acea929120860ee955))
+
 ## [0.2.1](https://github.com/rvben/vedetta/compare/v0.2.0...v0.2.1) - 2026-05-02
 
 ### Added
