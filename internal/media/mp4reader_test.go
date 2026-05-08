@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/mpeg4audio"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/mp4/codecs"
 )
@@ -75,6 +77,127 @@ func writeSyntheticFMP4(t *testing.T, path string, numFragments int, frameDurati
 		}
 		baseTime += uint64(frameDuration)
 	}
+}
+
+// writeMultiTrackFMP4 creates a minimal fMP4 file with one video track (90kHz)
+// and one audio track (16kHz). Each fragment contains both a video and an audio
+// sample, producing a single moof with two trafs sharing one mdat — matching
+// the on-disk format produced by SegmentWriter.
+func writeMultiTrackFMP4(t *testing.T, path string, numFragments int, videoSampleDur, audioSampleDur uint32) {
+	t.Helper()
+
+	const videoTrackID = 1
+	const audioTrackID = 2
+	const videoTimeScale = 90000
+	const audioTimeScale = 16000
+
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	defer f.Close()
+
+	sps := []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2}
+	pps := []byte{0x68, 0xce, 0x38, 0x80}
+
+	init := fmp4.Init{
+		Tracks: []*fmp4.InitTrack{
+			{
+				ID:        videoTrackID,
+				TimeScale: videoTimeScale,
+				Codec:     &codecs.H264{SPS: sps, PPS: pps},
+			},
+			{
+				ID:        audioTrackID,
+				TimeScale: audioTimeScale,
+				Codec: &codecs.MPEG4Audio{
+					Config: mpeg4audio.AudioSpecificConfig{
+						Type:          mpeg4audio.ObjectTypeAACLC,
+						SampleRate:    16000,
+						ChannelConfig: 1,
+					},
+				},
+			},
+		},
+	}
+	if err := init.Marshal(f); err != nil {
+		t.Fatalf("write init: %v", err)
+	}
+
+	var videoBaseTime, audioBaseTime uint64
+	for i := range numFragments {
+		idrData := []byte{0x65, 0x88}
+		for j := range 50 {
+			idrData = append(idrData, byte(i*50+j))
+		}
+		avcc := h264.AVCC([][]byte{idrData})
+		videoPayload, err := avcc.Marshal()
+		if err != nil {
+			t.Fatalf("marshal AVCC: %v", err)
+		}
+
+		audioPayload := make([]byte, 32)
+		for j := range audioPayload {
+			audioPayload[j] = byte(i + j)
+		}
+
+		part := fmp4.Part{
+			SequenceNumber: uint32(i + 1),
+			Tracks: []*fmp4.PartTrack{
+				{
+					ID:       videoTrackID,
+					BaseTime: videoBaseTime,
+					Samples: []*fmp4.Sample{{
+						Duration:        videoSampleDur,
+						Payload:         videoPayload,
+						IsNonSyncSample: false,
+					}},
+				},
+				{
+					ID:       audioTrackID,
+					BaseTime: audioBaseTime,
+					Samples: []*fmp4.Sample{{
+						Duration:        audioSampleDur,
+						Payload:         audioPayload,
+						IsNonSyncSample: false,
+					}},
+				},
+			},
+		}
+		if err := part.Marshal(f); err != nil {
+			t.Fatalf("write part %d: %v", i, err)
+		}
+		videoBaseTime += uint64(videoSampleDur)
+		audioBaseTime += uint64(audioSampleDur)
+	}
+}
+
+// countTopLevelBoxes returns the count of top-level boxes of the given type.
+func countTopLevelBoxes(t *testing.T, path, boxType string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	count := 0
+	off := 0
+	for off+8 <= len(data) {
+		size := int(binary.BigEndian.Uint32(data[off : off+4]))
+		typ := string(data[off+4 : off+8])
+		if size == 1 && off+16 <= len(data) {
+			size = int(binary.BigEndian.Uint64(data[off+8 : off+16]))
+		} else if size == 0 {
+			size = len(data) - off
+		}
+		if size < 8 || off+size > len(data) {
+			break
+		}
+		if typ == boxType {
+			count++
+		}
+		off += size
+	}
+	return count
 }
 
 func TestProbeDuration_FMP4(t *testing.T) {
@@ -169,6 +292,72 @@ func TestTrimMP4(t *testing.T) {
 	// Should be approximately 1 second
 	if dur < 800*time.Millisecond || dur > 1200*time.Millisecond {
 		t.Errorf("trimmed duration = %v, want ~1s", dur)
+	}
+}
+
+// TestTrimMP4_MultiTrackNoMoofDuplication asserts that trimming a multi-track
+// fMP4 (video + audio per moof) writes each source moof exactly once. A regression
+// caused indexFile to emit one fragment per traf, which made TrimMP4 copy the
+// shared moof+mdat once per traf — duplicating moofs in the output and inflating
+// the player-reported duration.
+func TestTrimMP4_MultiTrackNoMoofDuplication(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.mp4")
+	outputPath := filepath.Join(dir, "output.mp4")
+
+	// 30 fragments of 100ms each: video=9000@90k, audio=1600@16k. Total 3s.
+	writeMultiTrackFMP4(t, inputPath, 30, 9000, 1600)
+
+	// Trim a 1-second window starting at 1s. Should include ~10 fragments.
+	if err := TrimMP4(inputPath, outputPath, time.Second, time.Second); err != nil {
+		t.Fatalf("TrimMP4: %v", err)
+	}
+
+	moofs := countTopLevelBoxes(t, outputPath, "moof")
+	mdats := countTopLevelBoxes(t, outputPath, "mdat")
+	if moofs != mdats {
+		t.Errorf("moof count (%d) must equal mdat count (%d) — moofs are being duplicated", moofs, mdats)
+	}
+
+	dur, err := ProbeDuration(outputPath)
+	if err != nil {
+		t.Fatalf("ProbeDuration: %v", err)
+	}
+	if dur < 800*time.Millisecond || dur > 1200*time.Millisecond {
+		t.Errorf("trimmed duration = %v, want ~1s (duplicated moofs would report ~2s)", dur)
+	}
+}
+
+// TestConcatMP4_MultiTrackNoMoofDuplication asserts the same invariant for
+// ConcatMP4: one moof per source moof in the output.
+func TestConcatMP4_MultiTrackNoMoofDuplication(t *testing.T) {
+	dir := t.TempDir()
+	in1 := filepath.Join(dir, "seg1.mp4")
+	in2 := filepath.Join(dir, "seg2.mp4")
+	outputPath := filepath.Join(dir, "output.mp4")
+
+	writeMultiTrackFMP4(t, in1, 10, 9000, 1600)
+	writeMultiTrackFMP4(t, in2, 10, 9000, 1600)
+
+	if err := ConcatMP4([]string{in1, in2}, outputPath, 0, 0); err != nil {
+		t.Fatalf("ConcatMP4: %v", err)
+	}
+
+	moofs := countTopLevelBoxes(t, outputPath, "moof")
+	mdats := countTopLevelBoxes(t, outputPath, "mdat")
+	if moofs != mdats {
+		t.Errorf("moof count (%d) must equal mdat count (%d) — moofs are being duplicated", moofs, mdats)
+	}
+	if moofs != 20 {
+		t.Errorf("expected 20 moofs (10 per input), got %d", moofs)
+	}
+
+	dur, err := ProbeDuration(outputPath)
+	if err != nil {
+		t.Fatalf("ProbeDuration: %v", err)
+	}
+	if dur < 1800*time.Millisecond || dur > 2200*time.Millisecond {
+		t.Errorf("concatenated duration = %v, want ~2s", dur)
 	}
 }
 
@@ -348,7 +537,7 @@ func TestIndexFileDetectsSync(t *testing.T) {
 	}
 
 	for i, frag := range fragments {
-		if !frag.isSync {
+		if len(frag.trafs) == 0 || !frag.trafs[0].isSync {
 			t.Errorf("fragment %d: expected isSync=true (IDR frame), got false", i)
 		}
 	}

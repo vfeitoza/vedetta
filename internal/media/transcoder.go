@@ -290,8 +290,8 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	// the encoder's rate-control is accurate for non-30fps sources (e.g. 25fps).
 	fps := float32(15)
 	for _, f := range indexedFrags {
-		if int(f.trackID) == videoTrackID && f.duration > 0 {
-			fps = float32(videoTS) / float32(f.duration)
+		if t := f.traf(uint32(videoTrackID)); t != nil && t.duration > 0 {
+			fps = float32(videoTS) / float32(t.duration)
 			break
 		}
 	}

@@ -235,16 +235,33 @@ func probeFMP4Duration(r io.ReadSeeker) (time.Duration, error) {
 	return time.Duration(float64(totalTicks) / float64(timeScale) * float64(time.Second)), nil
 }
 
-// fragment represents a moof+mdat pair with timing metadata.
+// trafEntry is the per-track timing inside a moof.
+type trafEntry struct {
+	trackID    uint32
+	decodeTime uint64
+	duration   uint32
+	isSync     bool // true if the first sample in this traf is a sync sample (keyframe)
+}
+
+// fragment represents a single moof+mdat pair on disk. A moof contains one or
+// more trafs (one per track), all sharing the moof's mdat. Per-track timing is
+// stored in trafs.
 type fragment struct {
 	moofOffset int64
 	moofSize   int64
 	mdatOffset int64
 	mdatSize   int64
-	decodeTime uint64
-	duration   uint32
-	trackID    uint32
-	isSync     bool // true if the first sample in this fragment is a sync sample (keyframe)
+	trafs      []trafEntry
+}
+
+// traf returns the entry for trackID, or nil if not present.
+func (f *fragment) traf(trackID uint32) *trafEntry {
+	for i := range f.trafs {
+		if f.trafs[i].trackID == trackID {
+			return &f.trafs[i]
+		}
+	}
+	return nil
 }
 
 // boxLoc stores the position and size of a top-level box.
@@ -287,28 +304,46 @@ func TrimMP4(inputPath, outputPath string, start, duration time.Duration) error 
 		}
 	}
 
-	// Copy matching fragments, adjusting timestamps
+	videoTrackID := findVideoTrack(fragments, trackTimeScales)
+
+	// Copy matching fragments, adjusting timestamps. Window matching uses the
+	// video traf since the requested [start, start+duration) is in wall time
+	// and the video timeline is the canonical clock.
 	var newSeqNum uint32 = 1
-	newBaseTimes := make(map[uint32]uint64) // per-track base times
+	// Pre-populate base times so the first kept fragment's tfdt is rewritten to 0.
+	// patchTraf skips trafs whose trackID is missing from this map.
+	newBaseTimes := make(map[uint32]uint64)
+	for trackID := range trackTimeScales {
+		newBaseTimes[trackID] = 0
+	}
 	for _, frag := range fragments {
-		ts := trackTimeScales[frag.trackID]
+		var refTraf *trafEntry
+		if t := frag.traf(videoTrackID); t != nil {
+			refTraf = t
+		} else if len(frag.trafs) > 0 {
+			refTraf = &frag.trafs[0]
+		} else {
+			continue
+		}
+		ts := trackTimeScales[refTraf.trackID]
 		if ts == 0 {
 			ts = 90000
 		}
 		startTick := uint64(start.Seconds() * float64(ts))
 		endTick := startTick + uint64(duration.Seconds()*float64(ts))
 
-		fragEnd := frag.decodeTime + uint64(frag.duration)
-		if frag.decodeTime >= endTick || fragEnd <= startTick {
+		fragEnd := refTraf.decodeTime + uint64(refTraf.duration)
+		if refTraf.decodeTime >= endTick || fragEnd <= startTick {
 			continue
 		}
 
-		baseTime := newBaseTimes[frag.trackID]
-		if err := copyFragmentAdjusted(in, out, frag, newSeqNum, baseTime); err != nil {
+		if err := copyFragmentAdjusted(in, out, frag, newSeqNum, newBaseTimes); err != nil {
 			return fmt.Errorf("copy fragment: %w", err)
 		}
 		newSeqNum++
-		newBaseTimes[frag.trackID] = baseTime + uint64(frag.duration)
+		for _, tr := range frag.trafs {
+			newBaseTimes[tr.trackID] += uint64(tr.duration)
+		}
 	}
 
 	return nil
@@ -339,25 +374,39 @@ func TrimMP4ToWriter(inputPath string, w io.Writer, start time.Duration) error {
 		}
 	}
 
+	videoTrackID := findVideoTrack(fragments, trackTimeScales)
+
 	// Copy fragments from the start offset onward
 	var newSeqNum uint32 = 1
 	newBaseTimes := make(map[uint32]uint64)
+	for trackID := range trackTimeScales {
+		newBaseTimes[trackID] = 0
+	}
 	for _, frag := range fragments {
-		ts := trackTimeScales[frag.trackID]
+		var refTraf *trafEntry
+		if t := frag.traf(videoTrackID); t != nil {
+			refTraf = t
+		} else if len(frag.trafs) > 0 {
+			refTraf = &frag.trafs[0]
+		} else {
+			continue
+		}
+		ts := trackTimeScales[refTraf.trackID]
 		if ts == 0 {
 			ts = 90000
 		}
 		startTick := uint64(start.Seconds() * float64(ts))
-		if frag.decodeTime+uint64(frag.duration) <= startTick {
+		if refTraf.decodeTime+uint64(refTraf.duration) <= startTick {
 			continue
 		}
 
-		baseTime := newBaseTimes[frag.trackID]
-		if err := copyFragmentAdjusted(in, w, frag, newSeqNum, baseTime); err != nil {
+		if err := copyFragmentAdjusted(in, w, frag, newSeqNum, newBaseTimes); err != nil {
 			return fmt.Errorf("copy fragment: %w", err)
 		}
 		newSeqNum++
-		newBaseTimes[frag.trackID] = baseTime + uint64(frag.duration)
+		for _, tr := range frag.trafs {
+			newBaseTimes[tr.trackID] += uint64(tr.duration)
+		}
 	}
 
 	return nil
@@ -376,8 +425,9 @@ func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration
 	defer out.Close()
 
 	var globalSeqNum uint32 = 1
-	var globalBaseTime uint64
-	var timeScale uint32
+	globalBaseTimes := make(map[uint32]uint64)
+	var videoTimeScale uint32
+	var videoTrackID uint32
 	initWritten := false
 
 	for _, path := range inputs {
@@ -386,22 +436,20 @@ func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration
 			return fmt.Errorf("open %s: %w", path, err)
 		}
 
-		// Read timescale from the first file
-		if timeScale == 0 {
-			ts, _ := readTimeScale(in)
-			if ts > 0 {
-				timeScale = ts
-			}
-			if _, err := in.Seek(0, io.SeekStart); err != nil {
-				in.Close()
-				return err
-			}
-		}
-
-		initBoxes, fragments, _, err := indexFile(in)
+		initBoxes, fragments, trackTimeScales, err := indexFile(in)
 		if err != nil {
 			in.Close()
 			return fmt.Errorf("index %s: %w", path, err)
+		}
+
+		if videoTrackID == 0 {
+			videoTrackID = findVideoTrack(fragments, trackTimeScales)
+			videoTimeScale = trackTimeScales[videoTrackID]
+			for trackID := range trackTimeScales {
+				if _, ok := globalBaseTimes[trackID]; !ok {
+					globalBaseTimes[trackID] = 0
+				}
+			}
 		}
 
 		if !initWritten {
@@ -419,12 +467,14 @@ func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration
 		}
 
 		for _, frag := range fragments {
-			if err := copyFragmentAdjusted(in, out, frag, globalSeqNum, globalBaseTime); err != nil {
+			if err := copyFragmentAdjusted(in, out, frag, globalSeqNum, globalBaseTimes); err != nil {
 				in.Close()
 				return fmt.Errorf("copy fragment from %s: %w", path, err)
 			}
 			globalSeqNum++
-			globalBaseTime += uint64(frag.duration)
+			for _, tr := range frag.trafs {
+				globalBaseTimes[tr.trackID] += uint64(tr.duration)
+			}
 		}
 
 		in.Close()
@@ -432,10 +482,10 @@ func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration
 
 	// Apply start/duration trimming if requested
 	if start > 0 || duration > 0 {
-		if timeScale == 0 {
-			timeScale = 90000
+		if videoTimeScale == 0 {
+			videoTimeScale = 90000
 		}
-		totalDur := time.Duration(float64(globalBaseTime) / float64(timeScale) * float64(time.Second))
+		totalDur := time.Duration(float64(globalBaseTimes[videoTrackID]) / float64(videoTimeScale) * float64(time.Second))
 		if start > 0 || (duration > 0 && duration < totalDur) {
 			// Close output before rename so TrimMP4 can rewrite it
 			out.Close()
@@ -451,33 +501,6 @@ func ConcatMP4(inputs []string, outputPath string, start, duration time.Duration
 	return nil
 }
 
-// readTimeScale extracts the track timescale from moov/trak/mdia/mdhd.
-func readTimeScale(r io.ReadSeeker) (uint32, error) {
-	var ts uint32
-	_, err := gomp4.ReadBoxStructure(r, func(h *gomp4.ReadHandle) (interface{}, error) {
-		switch h.BoxInfo.Type {
-		case gomp4.BoxTypeMoov():
-			return h.Expand()
-		case gomp4.BoxTypeTrak():
-			return h.Expand()
-		case gomp4.BoxTypeMdia():
-			return h.Expand()
-		case gomp4.BoxTypeMdhd():
-			box, _, err := h.ReadPayload()
-			if err != nil {
-				return nil, err
-			}
-			mdhd := box.(*gomp4.Mdhd)
-			if ts == 0 {
-				ts = mdhd.Timescale
-			}
-			return nil, nil
-		}
-		return nil, nil
-	})
-	return ts, err
-}
-
 // indexFile scans an fMP4 file and returns init box locations, fragment metadata,
 // and per-track timescales (from mdhd boxes in the init segment).
 func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, trackTimeScales map[uint32]uint32, err error) {
@@ -488,9 +511,10 @@ func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, track
 	trackTimeScales = make(map[uint32]uint32)
 	var currentTrackID uint32
 
-	// First pass with ReadBoxStructure to get fragment timing info
+	// First pass with ReadBoxStructure to get fragment timing info.
+	// One fragment is emitted per moof (with one trafEntry per traf inside it).
 	var currentFrag *fragment
-	var currentMoofTrafCount int
+	var currentTraf *trafEntry
 	_, err = gomp4.ReadBoxStructure(r, func(h *gomp4.ReadHandle) (interface{}, error) {
 		switch h.BoxInfo.Type {
 		case gomp4.BoxTypeFtyp(), gomp4.BoxTypeMoov(), gomp4.BoxTypeStyp():
@@ -535,51 +559,45 @@ func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, track
 				moofOffset: int64(h.BoxInfo.Offset),
 				moofSize:   int64(h.BoxInfo.Size),
 			}
-			currentMoofTrafCount = 0
+			currentTraf = nil
 			return h.Expand()
 
 		case gomp4.BoxTypeTraf():
-			currentMoofTrafCount++
-			// Multi-track moofs (per-GOP) have multiple trafs sharing one mdat.
-			// Emit a fragment for each completed traf after the first.
-			if currentMoofTrafCount > 1 && currentFrag != nil && currentFrag.trackID != 0 {
-				fragments = append(fragments, *currentFrag)
-				currentFrag = &fragment{
-					moofOffset: currentFrag.moofOffset,
-					moofSize:   currentFrag.moofSize,
-				}
+			if currentFrag != nil {
+				currentFrag.trafs = append(currentFrag.trafs, trafEntry{})
+				currentTraf = &currentFrag.trafs[len(currentFrag.trafs)-1]
 			}
 			return h.Expand()
 
 		case gomp4.BoxTypeTfhd():
-			if currentFrag != nil {
+			if currentTraf != nil {
 				box, _, err := h.ReadPayload()
 				if err != nil {
 					return nil, err
 				}
 				tfhd := box.(*gomp4.Tfhd)
-				currentFrag.trackID = tfhd.TrackID
+				currentTraf.trackID = tfhd.TrackID
 				if tfhd.GetFlags()&0x000020 != 0 {
-					currentFrag.isSync = tfhd.DefaultSampleFlags&0x00010000 == 0
+					currentTraf.isSync = tfhd.DefaultSampleFlags&0x00010000 == 0
 				} else {
-					currentFrag.isSync = true
+					currentTraf.isSync = true
 				}
 			}
 			return nil, nil
 
 		case gomp4.BoxTypeTfdt():
-			if currentFrag != nil {
+			if currentTraf != nil {
 				box, _, err := h.ReadPayload()
 				if err != nil {
 					return nil, err
 				}
 				tfdt := box.(*gomp4.Tfdt)
-				currentFrag.decodeTime = tfdt.GetBaseMediaDecodeTime()
+				currentTraf.decodeTime = tfdt.GetBaseMediaDecodeTime()
 			}
 			return nil, nil
 
 		case gomp4.BoxTypeTrun():
-			if currentFrag != nil {
+			if currentTraf != nil {
 				box, _, err := h.ReadPayload()
 				if err != nil {
 					return nil, err
@@ -589,13 +607,13 @@ func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, track
 				for _, e := range trun.Entries {
 					totalDur += e.SampleDuration
 				}
-				currentFrag.duration += totalDur
+				currentTraf.duration += totalDur
 
 				trunFlags := trun.GetFlags()
 				if trunFlags&0x000004 != 0 {
-					currentFrag.isSync = trun.FirstSampleFlags&0x00010000 == 0
+					currentTraf.isSync = trun.FirstSampleFlags&0x00010000 == 0
 				} else if trunFlags&0x000400 != 0 && len(trun.Entries) > 0 {
-					currentFrag.isSync = trun.Entries[0].SampleFlags&0x00010000 == 0
+					currentTraf.isSync = trun.Entries[0].SampleFlags&0x00010000 == 0
 				}
 			}
 			return nil, nil
@@ -606,6 +624,7 @@ func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, track
 				currentFrag.mdatSize = int64(h.BoxInfo.Size)
 				fragments = append(fragments, *currentFrag)
 				currentFrag = nil
+				currentTraf = nil
 			}
 			return nil, nil
 		}
@@ -617,7 +636,7 @@ func indexFile(r io.ReadSeeker) (initBoxes []boxLoc, fragments []fragment, track
 
 // copyFragmentAdjusted copies a moof+mdat pair, rewriting the sequence number
 // and base decode time.
-func copyFragmentAdjusted(src io.ReadSeeker, dst io.Writer, frag fragment, seqNum uint32, baseTime uint64) error {
+func copyFragmentAdjusted(src io.ReadSeeker, dst io.Writer, frag fragment, seqNum uint32, baseTimes map[uint32]uint64) error {
 	// Read the entire moof into memory (typically small)
 	if _, err := src.Seek(frag.moofOffset, io.SeekStart); err != nil {
 		return err
@@ -627,7 +646,7 @@ func copyFragmentAdjusted(src io.ReadSeeker, dst io.Writer, frag fragment, seqNu
 		return err
 	}
 
-	patchMoof(moofData, seqNum, baseTime)
+	patchMoof(moofData, seqNum, baseTimes)
 
 	if _, err := dst.Write(moofData); err != nil {
 		return err
@@ -751,16 +770,12 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 		}
 
 		for _, frag := range fragments {
-			fragTS := trackTimeScales[frag.trackID]
-			if fragTS == 0 {
-				fragTS = 90000
+			vTraf := frag.traf(videoTrackID)
+			if vTraf == nil {
+				continue
 			}
 			if fileIdx == 0 && start > 0 {
-				fragStartTick := frag.decodeTime
-				if frag.trackID != videoTrackID && fragTS != videoTS {
-					fragStartTick = uint64(float64(fragStartTick) / float64(fragTS) * float64(videoTS))
-				}
-				fragEndTick := fragStartTick + uint64(float64(frag.duration)/float64(fragTS)*float64(videoTS))
+				fragEndTick := vTraf.decodeTime + uint64(vTraf.duration)
 				if fragEndTick <= startTick {
 					continue
 				}
@@ -768,7 +783,7 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 
 			fragEnd := frag.mdatOffset + frag.mdatSize
 			curDurSec := float64(curDurTicks) / float64(videoTS)
-			if frag.trackID == videoTrackID && frag.isSync && curByteStart >= 0 && curDurSec >= targetSegDur {
+			if vTraf.isSync && curByteStart >= 0 && curDurSec >= targetSegDur {
 				flush()
 			}
 
@@ -778,9 +793,7 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 			if fragEnd > curByteEnd {
 				curByteEnd = fragEnd
 			}
-			if frag.trackID == videoTrackID {
-				curDurTicks += uint64(frag.duration)
-			}
+			curDurTicks += uint64(vTraf.duration)
 		}
 		flush()
 	}
@@ -972,7 +985,7 @@ func (ws *writeSeeker) Seek(offset int64, whence int) (int64, error) {
 
 // findVideoTrack identifies the video track ID from fragments and timescales.
 // It picks the track with the highest timescale (video is typically 90000),
-// falling back to the track with the most fragments.
+// falling back to the track present in the most fragments.
 func findVideoTrack(fragments []fragment, trackTimeScales map[uint32]uint32) uint32 {
 	// Try highest timescale first
 	var bestID uint32
@@ -987,10 +1000,12 @@ func findVideoTrack(fragments []fragment, trackTimeScales map[uint32]uint32) uin
 		return bestID
 	}
 
-	// Fallback: track with most fragments
+	// Fallback: track present in the most fragments
 	counts := make(map[uint32]int)
 	for _, f := range fragments {
-		counts[f.trackID]++
+		for _, tr := range f.trafs {
+			counts[tr.trackID]++
+		}
 	}
 	var maxCount int
 	for id, c := range counts {
@@ -1002,8 +1017,10 @@ func findVideoTrack(fragments []fragment, trackTimeScales map[uint32]uint32) uin
 	return bestID
 }
 
-// patchMoof modifies mfhd.SequenceNumber and tfdt.BaseMediaDecodeTime in raw moof bytes.
-func patchMoof(data []byte, seqNum uint32, baseTime uint64) {
+// patchMoof modifies mfhd.SequenceNumber and each traf's tfdt.BaseMediaDecodeTime
+// in raw moof bytes. Each traf is patched with the baseTime for its own trackID,
+// so video and audio timelines stay independent after rebasing.
+func patchMoof(data []byte, seqNum uint32, baseTimes map[uint32]uint64) {
 	i := 8 // Skip moof box header
 	for i+8 <= len(data) {
 		boxSize := int(binary.BigEndian.Uint32(data[i : i+4]))
@@ -1019,15 +1036,39 @@ func patchMoof(data []byte, seqNum uint32, baseTime uint64) {
 				binary.BigEndian.PutUint32(data[i+12:i+16], seqNum)
 			}
 		case "traf":
-			patchTraf(data[i+8:i+boxSize], baseTime)
+			patchTraf(data[i+8:i+boxSize], baseTimes)
 		}
 
 		i += boxSize
 	}
 }
 
-func patchTraf(data []byte, baseTime uint64) {
+// patchTraf reads the traf's tfhd to learn its trackID, then rewrites its tfdt
+// with baseTimes[trackID]. Tracks not present in baseTimes are left untouched.
+func patchTraf(data []byte, baseTimes map[uint32]uint64) {
+	var trackID uint32
 	i := 0
+	for i+8 <= len(data) {
+		boxSize := int(binary.BigEndian.Uint32(data[i : i+4]))
+		boxType := string(data[i+4 : i+8])
+
+		if boxSize < 8 || i+boxSize > len(data) {
+			break
+		}
+
+		if boxType == "tfhd" && boxSize >= 16 {
+			trackID = binary.BigEndian.Uint32(data[i+12 : i+16])
+		}
+
+		i += boxSize
+	}
+
+	baseTime, ok := baseTimes[trackID]
+	if !ok {
+		return
+	}
+
+	i = 0
 	for i+8 <= len(data) {
 		boxSize := int(binary.BigEndian.Uint32(data[i : i+4]))
 		boxType := string(data[i+4 : i+8])
