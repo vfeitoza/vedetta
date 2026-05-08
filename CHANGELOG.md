@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.3](https://github.com/rvben/vedetta/compare/v0.2.2...v0.2.3) - 2026-05-08
+
+### Fixed
+
+- **web**: drift-correct MSE playback to smooth out live preview ([d739707](https://github.com/rvben/vedetta/commit/d7397073526d3ec871cf44f43ce08dec05a89997))
+
 ## [0.2.2](https://github.com/rvben/vedetta/compare/v0.2.1...v0.2.2) - 2026-05-08
 
 ### Added
