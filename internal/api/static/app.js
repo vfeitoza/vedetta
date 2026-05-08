@@ -590,6 +590,7 @@ function startMSE() {
       updateStreamButtons();
       updateMuteButton(codecStr.indexOf('mp4a') !== -1);
       startMSEStats();
+      attachAutoplayBlockedDetector(video);
       toast('MSE stream connected');
       return;
     }
@@ -826,6 +827,41 @@ function startMJPEG() {
 var userPaused = false;
 var pausedAtTime = 0;
 var resumedFromPause = 0; // timestamp when user resumed, suppresses drift correction
+
+// Some browsers (Safari/iOS, Chrome on flaky tabs) silently block autoplay
+// even on a muted <video>. Show a "Click to start" overlay when we detect
+// a non-user-initiated pause and dismiss it as soon as the user interacts.
+function attachAutoplayBlockedDetector(video) {
+  if (!video || video._autoplayDetectorAttached) return;
+  video._autoplayDetectorAttached = true;
+  var overlay = el('video-tap-to-start');
+  if (!overlay) return;
+  var check = function() {
+    if (video.paused && !userPaused && video.readyState >= 2 && !video.ended) {
+      overlay.classList.remove('hidden');
+    }
+  };
+  video.addEventListener('pause', check);
+  video.addEventListener('play', function() { overlay.classList.add('hidden'); });
+  video.addEventListener('playing', function() { overlay.classList.add('hidden'); });
+  // Initial probe in case autoplay was blocked before we attached.
+  setTimeout(check, 500);
+}
+
+function startBlockedVideo() {
+  var video = el('live-video');
+  var overlay = el('video-tap-to-start');
+  if (!video) return;
+  video.muted = true;
+  var p = video.play();
+  if (p && typeof p.then === 'function') {
+    p.then(function() {
+      if (overlay) overlay.classList.add('hidden');
+    }).catch(function() {
+      // Still blocked — keep overlay visible
+    });
+  }
+}
 
 function togglePause() {
   var video = el('live-video');
@@ -3571,23 +3607,30 @@ function openNamePopover(viewport, cameraName, box, screenX, screenY) {
 
   viewport.appendChild(pop);
 
-  // Anchor near the box: prefer above, fall back to below.
+  // Anchor near the box: prefer above, fall back to below. Clamp both axes
+  // so the popover stays inside the viewport even for boxes near edges.
   var rect = boxOverlayRenderRect();
   if (rect) {
     var bx = rect.x + box.x1 * rect.w;
     var by = rect.y + box.y1 * rect.h;
     var bw = (box.x2 - box.x1) * rect.w;
+    var bh = (box.y2 - box.y1) * rect.h;
     var popW = 240;
     var popH = pop.offsetHeight || 180;
     var px = bx + bw / 2 - popW / 2;
     px = Math.max(8, Math.min(rect.parentW - popW - 8, px));
     var py = by - popH - 8;
-    if (py < 8) py = by + (box.y2 - box.y1) * rect.h + 8;
+    if (py < 8) py = by + bh + 8;
+    py = Math.max(8, Math.min(rect.parentH - popH - 8, py));
     pop.style.left = px + 'px';
     pop.style.top = py + 'px';
   } else if (typeof screenX === 'number') {
-    pop.style.left = (screenX - 120) + 'px';
-    pop.style.top = (screenY + 12) + 'px';
+    var fallbackW = 240;
+    var fallbackH = pop.offsetHeight || 180;
+    var fpx = Math.max(8, Math.min(window.innerWidth - fallbackW - 8, screenX - 120));
+    var fpy = Math.max(8, Math.min(window.innerHeight - fallbackH - 8, screenY + 12));
+    pop.style.left = fpx + 'px';
+    pop.style.top = fpy + 'px';
   }
 
   setTimeout(function() { input.focus(); input.select(); }, 0);

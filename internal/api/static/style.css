@@ -1035,6 +1035,29 @@ input, select { font-family: inherit; }
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
 }
 .video-pause-indicator.hidden { display: none; }
+/* Click-to-start overlay shown when browser blocks autoplay */
+.video-tap-to-start {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 28px;
+  background: rgba(10, 14, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.video-tap-to-start:hover { background: rgba(10, 14, 20, 0.9); }
+.video-tap-to-start.hidden { display: none; }
 .video-pause-flash {
   animation: pause-flash 0.4s var(--ease-out) forwards;
 }
