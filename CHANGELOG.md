@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.4](https://github.com/rvben/vedetta/compare/v0.2.3...v0.2.4) - 2026-05-08
+
+### Added
+
+- **stream**: allow ?quality=low to route MSE to the detect substream ([07af2dc](https://github.com/rvben/vedetta/commit/07af2dc06aae0b6458dc3b00d8603b39d64bf8d8))
+- **web**: clamp name popover and show click-to-start on autoplay block ([b4d7970](https://github.com/rvben/vedetta/commit/b4d79702f3a69df6e922e6f9655428678078d3a6))
+- **api**: expose source_fps in camera detail response ([309ea14](https://github.com/rvben/vedetta/commit/309ea14b452e0f35b8a8c335d786ba2e0426fb23))
+
+### Performance
+
+- **stream**: halve MSE fragment cadence and normalize sample durations ([5273bd7](https://github.com/rvben/vedetta/commit/5273bd7c45667be2607bfbdafb72fa9abad7d8cd))
+
 ## [0.2.3](https://github.com/rvben/vedetta/compare/v0.2.2...v0.2.3) - 2026-05-08
 
 ### Fixed
