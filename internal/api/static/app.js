@@ -616,22 +616,22 @@ function startMSE() {
         }
       }
 
-      // Auto-seek to live edge to minimize latency. Rate-limited and
-      // conservative: snapping per-segment overshoots bufferedEnd on bursty
-      // delivery, causing currentTime > bufferedEnd → underrun → stall.
-      // Only seek when we're meaningfully behind, target a 1s headroom from
-      // the live edge, and at most once per second.
-      var suppressAutoSeek = userPaused || (resumedFromPause > 0 && Date.now() - resumedFromPause < 30000);
-      var nowMs = Date.now();
-      if (!suppressAutoSeek && video.buffered.length > 0 &&
-          nowMs - lastLiveSeekMs > 1000) {
+      // Drift correction: nudge playbackRate up slightly when we fall behind
+      // live, return to 1.0 when caught up. This is invisible to the eye and
+      // the ear, where snap-seeking jumps ~20 frames at once. Reserve a real
+      // seek for genuine stalls (lag > 10s).
+      var suppressDrift = userPaused || (resumedFromPause > 0 && Date.now() - resumedFromPause < 30000);
+      if (!suppressDrift && video.buffered.length > 0) {
         var liveEdge = video.buffered.end(video.buffered.length - 1);
-        if (liveEdge - video.currentTime > 4) {
-          var target = liveEdge - 1.0;
-          if (target > video.currentTime) {
-            video.currentTime = target;
-            lastLiveSeekMs = nowMs;
-          }
+        var lag = liveEdge - video.currentTime;
+        if (lag > 10) {
+          var target = liveEdge - 2.0;
+          if (target > video.currentTime) video.currentTime = target;
+          if (video.playbackRate !== 1.0) video.playbackRate = 1.0;
+        } else if (lag > 3.0) {
+          if (video.playbackRate !== 1.10) video.playbackRate = 1.10;
+        } else if (lag <= 2.0) {
+          if (video.playbackRate !== 1.0) video.playbackRate = 1.0;
         }
       }
     }
@@ -825,8 +825,7 @@ function startMJPEG() {
 
 var userPaused = false;
 var pausedAtTime = 0;
-var resumedFromPause = 0; // timestamp when user resumed, suppresses auto-seek
-var lastLiveSeekMs = 0; // rate-limit auto-seek to live edge (avoid bursty appendBuffer overshoot)
+var resumedFromPause = 0; // timestamp when user resumed, suppresses drift correction
 
 function togglePause() {
   var video = el('live-video');
@@ -843,6 +842,7 @@ function togglePause() {
         video.currentTime = pausedAtTime;
       }
     }
+    video.playbackRate = 1.0;
     video.play();
     flashPauseIcon(false);
   } else {
@@ -861,6 +861,7 @@ function seekToLive() {
   if (video.buffered.length > 0) {
     video.currentTime = video.buffered.end(video.buffered.length - 1);
   }
+  video.playbackRate = 1.0;
   if (userPaused) {
     userPaused = false;
     video.play();
