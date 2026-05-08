@@ -109,6 +109,100 @@ func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, obj)
 }
 
+// CreateObjectFromCameraTrack names a live tracked object directly from the
+// camera overlay. The request carries a normalized 0..1 box (matching what
+// the SSE detection stream emits). The handler grabs the camera's most recent
+// decoded frame, computes a pixel-space box from the normalized coords,
+// embeds the crop with OSNet, and persists a new KnownObject. It also pushes
+// the name back to the camera so the live overlay reflects the change on the
+// very next frame, and schedules a re-match of recent unmatched events.
+func (s *Server) CreateObjectFromCameraTrack(w http.ResponseWriter, r *http.Request, cameraName string) {
+	// Validate the request before any availability checks. Bad JSON, empty
+	// name, missing label, or an out-of-range box should always come back as
+	// a 400 — even if the embedder happens to be offline.
+	var req CreateObjectFromTrackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	name, err := normalizeRequiredDisplayName(req.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.Label == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "label is required"})
+		return
+	}
+	if req.X1 < 0 || req.Y1 < 0 || req.X2 > 1 || req.Y2 > 1 || req.X2 <= req.X1 || req.Y2 <= req.Y1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid normalized box"})
+		return
+	}
+
+	cam := s.cameras.GetCamera(cameraName)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	if s.objectEmbedder == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "object re-identification not available"})
+		return
+	}
+
+	frame := cam.LiveFrame()
+	if frame == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no live frame available"})
+		return
+	}
+
+	bounds := frame.Bounds()
+	fw := float32(bounds.Dx())
+	fh := float32(bounds.Dy())
+	box := [4]int{
+		int(req.X1 * fw),
+		int(req.Y1 * fh),
+		int(req.X2 * fw),
+		int(req.Y2 * fh),
+	}
+
+	embedding, err := s.objectEmbedder.Embed(frame, box)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		return
+	}
+
+	obj := storage.KnownObject{
+		Name:     name,
+		Label:    req.Label,
+		Centroid: detect.Float32ToBytes(embedding),
+	}
+	objID, err := s.db.SaveKnownObject(obj)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	cropDir := filepath.Join(s.snapshotPath, "objects")
+	cropPath := s.objectEmbedder.SaveCrop(frame, box, cropDir, objID)
+	if cropPath != "" {
+		_ = s.db.UpdateKnownObjectCrop(objID, cropPath)
+	}
+
+	_, _ = s.db.SaveObjectReference(storage.ObjectReference{
+		ObjectID:  objID,
+		Embedding: detect.Float32ToBytes(embedding),
+		CropPath:  cropPath,
+	})
+
+	cam.SetTrackName(req.TrackId, name)
+	s.scheduleObjectRematch(objID)
+
+	obj.ID = objID
+	obj.CropPath = cropPath
+	writeJSON(w, http.StatusCreated, obj)
+}
+
 func (s *Server) UpdateObject(w http.ResponseWriter, r *http.Request, id int64) {
 	var req struct {
 		Name           *string  `json:"name"`

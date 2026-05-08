@@ -107,6 +107,7 @@ func TestOpenAPISpecIsValid(t *testing.T) {
 		"/api/objects/{id}/references",
 		"/api/objects/references/{id}",
 		"/api/objects/sightings/{id}",
+		"/api/cameras/{name}/objects",
 
 		// Streaming
 		"/api/cameras/{name}/webrtc/offer",

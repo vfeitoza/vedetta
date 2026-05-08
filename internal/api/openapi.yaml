@@ -1393,6 +1393,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/cameras/{name}/objects:
+    post:
+      operationId: createObjectFromCameraTrack
+      summary: Name a live tracked object on this camera (from the live overlay)
+      tags: [objects]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateObjectFromTrackRequest"
+      responses:
+        "201":
+          description: Object created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnownObject"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Camera not found or no live frame available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Object re-identification not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /api/cameras/{name}/timeline:
     get:
       operationId: getCameraTimeline
@@ -2215,6 +2258,29 @@ components:
           type: string
         name:
           type: string
+
+    CreateObjectFromTrackRequest:
+      type: object
+      required: [track_id, label, name, x1, y1, x2, y2]
+      properties:
+        track_id:
+          type: integer
+        label:
+          type: string
+        name:
+          type: string
+        x1:
+          type: number
+          format: float
+        y1:
+          type: number
+          format: float
+        x2:
+          type: number
+          format: float
+        y2:
+          type: number
+          format: float
 
     UpdateObjectRequest:
       type: object
