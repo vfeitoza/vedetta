@@ -86,11 +86,12 @@ const (
 
 	// Per-frame fMP4 fragments choke browser appendBuffer and bunch up on
 	// remote viewers (TLS/HTTP-2/Cloudflare buffering produces bursty
-	// delivery → bufferedEnd jumps → underruns). Batch ~250ms of samples
-	// per fragment instead. At 25fps that's ~6 frames/fragment → 4 ws
-	// messages/sec for video instead of 25.
-	videoBatchTicks = 90000 / 4 // 250ms at 90kHz
-	audioBatchMs    = 250
+	// delivery → bufferedEnd jumps → underruns). Batch ~125ms of samples
+	// per fragment: enough to amortize moof overhead, small enough that a
+	// late fragment only stalls playback briefly. At 25fps that's ~3
+	// frames/fragment → 8 ws messages/sec for video instead of 25.
+	videoBatchTicks = 90000 / 8 // 125ms at 90kHz
+	audioBatchMs    = 125
 )
 
 // mseClient represents a single WebSocket viewer.
@@ -423,6 +424,19 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 func (mc *mseConsumer) flushVideoLocked() {
 	if len(mc.pendingVideo) == 0 {
 		return
+	}
+
+	// Normalize per-sample durations to a uniform target so the browser
+	// renders frames at evenly-spaced intervals even when RTP timestamps
+	// arrive jittered (network or capture-side). The fragment's total
+	// duration is preserved by absorbing the remainder into the last sample.
+	if n := uint32(len(mc.pendingVideo)); n >= 2 {
+		target := mc.pendingVideoTicks / n
+		last := n - 1
+		for i := uint32(0); i < last; i++ {
+			mc.pendingVideo[i].Duration = target
+		}
+		mc.pendingVideo[last].Duration = mc.pendingVideoTicks - target*last
 	}
 
 	part := fmp4.Part{
