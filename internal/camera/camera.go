@@ -25,6 +25,7 @@ type Event struct {
 	CameraName        string      `json:"camera"`
 	Label             string      `json:"label"`
 	Score             float32     `json:"score"`
+	TrackID           int         `json:"track_id"`
 	Box               [4]int      `json:"box"` // x1, y1, x2, y2
 	Timestamp         time.Time   `json:"timestamp"`
 	EndTime           time.Time   `json:"end_time,omitempty"` // when the tracked object left the frame
@@ -66,6 +67,7 @@ type DetectionBox struct {
 	Label   string  `json:"label"`
 	Score   float32 `json:"score"`
 	TrackID int     `json:"track_id"`
+	Name    string  `json:"name,omitempty"` // user-assigned object name when this track has been re-IDed
 	X1      float32 `json:"x1"`
 	Y1      float32 `json:"y1"`
 	X2      float32 `json:"x2"`
@@ -107,6 +109,7 @@ type Camera struct {
 	lastFrameTime    time.Time
 	lastSnapshotSave time.Time
 	confirmedTracks  map[int]string // trackID → eventID
+	trackNames       map[int]string // trackID → display name (from re-ID match or click-to-name); guarded by mu
 
 	zones           []Zone
 	presenceTracker *PresenceTracker
@@ -155,6 +158,7 @@ func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config
 		motionMinRegionScore: motion.MinRegionScore,
 		motionActivity:       motionActivity,
 		confirmedTracks:      make(map[int]string),
+		trackNames:           make(map[int]string),
 		presenceTracker:      NewPresenceTracker(),
 		faceRecognizer:       faceRecognizer,
 		faceEvents:           faceEvents,
@@ -178,17 +182,20 @@ func (c *Camera) broadcastDetections(tracked []detect.TrackedObject, w, h int) {
 	boxes := make([]DetectionBox, len(tracked))
 	fw := float32(w)
 	fh := float32(h)
+	c.mu.RLock()
 	for i, obj := range tracked {
 		boxes[i] = DetectionBox{
 			Label:   obj.Label,
 			Score:   obj.Score,
 			TrackID: obj.TrackID,
+			Name:    c.trackNames[obj.TrackID],
 			X1:      float32(obj.Box[0]) / fw,
 			Y1:      float32(obj.Box[1]) / fh,
 			X2:      float32(obj.Box[2]) / fw,
 			Y2:      float32(obj.Box[3]) / fh,
 		}
 	}
+	c.mu.RUnlock()
 	frame := DetectionFrame{
 		Camera:    c.config.Name,
 		Timestamp: time.Now(),
@@ -198,6 +205,19 @@ func (c *Camera) broadcastDetections(tracked []detect.TrackedObject, w, h int) {
 	case c.detections <- frame:
 	default:
 	}
+}
+
+// SetTrackName attaches a display name to a live track so subsequent overlay
+// frames render it as a known object. Called from the central event loop after
+// re-ID matching, and from the click-to-name API handler. Safe to call from
+// any goroutine; a no-op once the track is deleted.
+func (c *Camera) SetTrackName(trackID int, name string) {
+	if name == "" {
+		return
+	}
+	c.mu.Lock()
+	c.trackNames[trackID] = name
+	c.mu.Unlock()
 }
 
 // SetZones replaces the camera's zone list and returns the old zones.
@@ -242,6 +262,20 @@ func (c *Camera) LastSnapshot() *image.RGBA {
 		return nil
 	}
 	return rawToRGBA(c.rawFrame, c.frameW, c.frameH)
+}
+
+// LiveFrame returns the highest-quality recent decoded frame for downstream
+// processing (e.g. on-demand OSNet embedding from the live overlay). Prefers
+// the main-stream snapshot consumer's full-res frame; falls back to the
+// detect-resolution frame when the snap consumer has nothing yet. Returns nil
+// if no frame has been decoded.
+func (c *Camera) LiveFrame() *image.RGBA {
+	if sc := c.snapConsumer; sc != nil {
+		if f := sc.LastFrame(); f != nil {
+			return f
+		}
+	}
+	return c.LastSnapshot()
 }
 
 // snapshotPath returns the path for the cached latest snapshot.
@@ -638,6 +672,7 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 				CameraName:        c.config.Name,
 				Label:             obj.Label,
 				Score:             obj.Score,
+				TrackID:           obj.TrackID,
 				Box:               box,
 				Timestamp:         time.Now(),
 				ZoneName:          zoneName,
@@ -733,6 +768,9 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 			}
 			delete(c.confirmedTracks, obj.TrackID)
 		}
+		c.mu.Lock()
+		delete(c.trackNames, obj.TrackID)
+		c.mu.Unlock()
 	}
 }
 

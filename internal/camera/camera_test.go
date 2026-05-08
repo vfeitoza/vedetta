@@ -438,3 +438,151 @@ func TestRunTrackingPipeline_StableTrackEmitsExactlyOnce(t *testing.T) {
 	default:
 	}
 }
+
+// TestSetTrackName_PropagatesToBroadcast asserts that a name pushed via
+// SetTrackName appears on subsequent broadcastDetections frames for the
+// same TrackID. This is the wire that lets re-IDed objects light up on the
+// live overlay without the client polling separately.
+func TestSetTrackName_PropagatesToBroadcast(t *testing.T) {
+	events := make(chan Event, 16)
+	eventEnds := make(chan EventEnd, 16)
+	presenceEvents := make(chan PresenceEvent, 4)
+	detections := make(chan DetectionFrame, 16)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 100, Height: 100, FPS: 5},
+		},
+		nil,
+		config.MotionConfig{},
+		events, eventEnds, presenceEvents,
+		nil, "", 85, "", nil, nil, "", nil, detections,
+	)
+
+	car := []detect.Detection{{Label: "car", Score: 0.9, Box: [4]int{10, 10, 50, 50}}}
+
+	// Drive 3 frames to confirm the track and emit the first event.
+	for i := 0; i < 3; i++ {
+		cam.runTrackingPipeline(car, nil, 100, 100)
+	}
+	var ev Event
+	select {
+	case ev = <-events:
+	default:
+		t.Fatal("expected first event after 3 confirmation frames")
+	}
+	if ev.TrackID == 0 {
+		t.Fatal("event TrackID should be set so callers can SetTrackName(id, name)")
+	}
+
+	// Before naming: drain detection frames and assert no Name set.
+	drainDetections(detections)
+	cam.runTrackingPipeline(car, nil, 100, 100)
+	pre := mustReceiveDetectionFrame(t, detections)
+	if len(pre.Boxes) != 1 || pre.Boxes[0].Name != "" {
+		t.Fatalf("pre-name detection box should have empty Name, got %+v", pre.Boxes)
+	}
+
+	// Push a name and assert the next broadcast carries it.
+	cam.SetTrackName(ev.TrackID, "Renault Trafic")
+	cam.runTrackingPipeline(car, nil, 100, 100)
+	post := mustReceiveDetectionFrame(t, detections)
+	if len(post.Boxes) != 1 {
+		t.Fatalf("expected 1 box, got %d", len(post.Boxes))
+	}
+	if post.Boxes[0].Name != "Renault Trafic" {
+		t.Errorf("post-name detection box Name = %q, want %q", post.Boxes[0].Name, "Renault Trafic")
+	}
+	if post.Boxes[0].TrackID != ev.TrackID {
+		t.Errorf("TrackID changed across name set: was %d, now %d", ev.TrackID, post.Boxes[0].TrackID)
+	}
+}
+
+// TestSetTrackName_ClearedOnTrackDelete pins the cleanup invariant: once a
+// track has decayed, its entry in trackNames must be gone. TrackIDs are
+// monotonic in the current tracker so collisions are impossible, but
+// asserting the cleanup prevents stale names from ever leaking onto a
+// future track that happens to reuse the same ID.
+func TestSetTrackName_ClearedOnTrackDelete(t *testing.T) {
+	events := make(chan Event, 16)
+	eventEnds := make(chan EventEnd, 16)
+	presenceEvents := make(chan PresenceEvent, 4)
+	detections := make(chan DetectionFrame, 16)
+
+	cam := NewCamera(
+		config.CameraConfig{
+			Name:   "test",
+			URL:    "rtsp://localhost/test",
+			Detect: config.DetectStreamConfig{Width: 100, Height: 100, FPS: 5},
+		},
+		nil,
+		config.MotionConfig{},
+		events, eventEnds, presenceEvents,
+		nil, "", 85, "", nil, nil, "", nil, detections,
+	)
+
+	car := []detect.Detection{{Label: "car", Score: 0.9, Box: [4]int{10, 10, 50, 50}}}
+
+	for i := 0; i < 3; i++ {
+		cam.runTrackingPipeline(car, nil, 100, 100)
+	}
+	var ev Event
+	select {
+	case ev = <-events:
+	default:
+		t.Fatal("expected first event")
+	}
+	cam.SetTrackName(ev.TrackID, "Renault Trafic")
+
+	// Decay the track.
+	for i := 0; i < 32; i++ {
+		cam.runTrackingPipeline(nil, nil, 100, 100)
+	}
+
+	cam.mu.RLock()
+	_, stillThere := cam.trackNames[ev.TrackID]
+	cam.mu.RUnlock()
+	if stillThere {
+		t.Errorf("trackNames[%d] should be cleared after track delete", ev.TrackID)
+	}
+}
+
+// TestSetTrackName_EmptyIsNoOp documents that SetTrackName ignores empty
+// names so callers can pass a re-ID match result without guarding the call
+// site for the no-match case.
+func TestSetTrackName_EmptyIsNoOp(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "test",
+		Detect: config.DetectStreamConfig{Width: 4, Height: 4, FPS: 5},
+	}, nil)
+	cam.SetTrackName(42, "")
+	cam.mu.RLock()
+	_, present := cam.trackNames[42]
+	cam.mu.RUnlock()
+	if present {
+		t.Fatal("SetTrackName(_, \"\") must be a no-op")
+	}
+}
+
+func drainDetections(ch chan DetectionFrame) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+func mustReceiveDetectionFrame(t *testing.T, ch chan DetectionFrame) DetectionFrame {
+	t.Helper()
+	select {
+	case f := <-ch:
+		return f
+	default:
+		t.Fatal("expected a detection frame on the channel")
+	}
+	return DetectionFrame{}
+}
