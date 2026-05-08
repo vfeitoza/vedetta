@@ -790,6 +790,11 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if sub.objectEmbedder != nil && event.SnapshotImage != nil {
 					go func(ev camera.Event) {
 						matched := matchEventToKnownObjects(db, sub.objectEmbedder, ev, cfg.Detect.ObjectMatchThreshold)
+						if len(matched) > 0 {
+							if cam := sub.manager.GetCamera(ev.CameraName); cam != nil {
+								cam.SetTrackName(ev.TrackID, matched[0])
+							}
+						}
 						if sub.mqttClient != nil {
 							for _, name := range matched {
 								sub.mqttClient.PublishObjectSighting(name, ev)
