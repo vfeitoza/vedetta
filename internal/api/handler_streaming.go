@@ -42,7 +42,12 @@ func (s *Server) GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 
+	// Default to the high-res record stream. ?quality=low routes to the
+	// detect substream for bandwidth-constrained clients (mobile, remote).
 	rtspURL := cam.RecordURL()
+	if r.URL.Query().Get("quality") == "low" {
+		rtspURL = cam.DetectURL()
+	}
 	s.mse.HandleWebSocket(w, r, name, rtspURL)
 }
 
