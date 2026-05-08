@@ -3460,6 +3460,77 @@ kbd {
   z-index: 3;
 }
 
+/* Click-to-name popover anchored over the live overlay */
+.name-popover {
+  position: absolute;
+  z-index: 10;
+  width: 240px;
+  background: rgba(15, 18, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #e6edf3;
+  font-size: 13px;
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  grid-template-rows: auto auto auto;
+  gap: 8px 12px;
+  align-items: start;
+}
+.name-popover-thumb {
+  grid-row: 1 / span 1;
+  grid-column: 1;
+  width: 96px;
+  height: 96px;
+  border-radius: 4px;
+  background: #0a0e14;
+}
+.name-popover-meta {
+  grid-row: 1;
+  grid-column: 2;
+}
+.name-popover-title {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+}
+.name-popover-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.name-popover-input {
+  grid-column: 1 / span 2;
+  background: #0a0e14;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e6edf3;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.name-popover-input:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+.name-popover-error {
+  grid-column: 1 / span 2;
+  font-size: 11px;
+  color: #ff7d7d;
+}
+.name-popover-actions {
+  grid-column: 1 / span 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.name-popover-actions .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 /* ─── Touch-target overrides for coarse pointers ─── */
 /* Ensures all interactive elements meet the 44×44 px iOS/WCAG minimum on
    touch devices. All rules are scoped to (pointer: coarse) so desktop

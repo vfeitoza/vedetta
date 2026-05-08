@@ -3273,11 +3273,25 @@ function initDetectionOverlay(cameraName) {
   };
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('pagehide', closeBoxOverlayStream);
+
+  // Click-to-name: hit-test the live overlay on viewport mousemove/click.
+  // Canvas keeps pointer-events:none so video remains uninteractive in the
+  // empty space; we read coords from the viewport instead.
+  var onMove = function(e) { handleOverlayPointerMove(e, viewport); };
+  var onClick = function(e) { handleOverlayClick(e, viewport, cameraName); };
+  viewport.addEventListener('mousemove', onMove);
+  viewport.addEventListener('mouseleave', resetOverlayHover);
+  viewport.addEventListener('click', onClick);
+
   boxOverlayState.cleanup = function() {
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pagehide', closeBoxOverlayStream);
+    viewport.removeEventListener('mousemove', onMove);
+    viewport.removeEventListener('mouseleave', resetOverlayHover);
+    viewport.removeEventListener('click', onClick);
     closeBoxOverlayStream();
     cancelBoxOverlayFrame();
+    closeNamePopover();
   };
   if (btn) btn.classList.remove('hidden');
 }
@@ -3401,30 +3415,39 @@ function drawBoxOverlay() {
     if (ageMs > 3000) return;
   }
 
-  ctx.lineWidth = 2;
-  ctx.font = '600 11px system-ui, sans-serif';
   ctx.textBaseline = 'top';
 
   for (var i = 0; i < frame.boxes.length; i++) {
     var b = frame.boxes[i];
     var color = BOX_CLASS_COLORS[b.label] || BOX_DEFAULT_COLOR;
     var alpha = b.score < 0.4 ? 0.5 : 1;
+    var named = !!(b.name && b.name.length > 0);
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = color;
+    // Named tracks render bolder so the eye picks them out.
+    ctx.lineWidth = named ? 3 : 2;
     var x = rect.x + b.x1 * rect.w;
     var y = rect.y + b.y1 * rect.h;
     var w = (b.x2 - b.x1) * rect.w;
     var h = (b.y2 - b.y1) * rect.h;
     ctx.strokeRect(x, y, w, h);
 
-    var label = b.label;
-    if (b.track_id) label += '#' + b.track_id;
-    if (typeof b.score === 'number') label += ' ' + Math.round(b.score * 100) + '%';
+    // Label: bold name (if assigned) takes precedence over class+id.
+    var label;
+    if (named) {
+      label = b.name;
+      if (typeof b.score === 'number') label += ' ' + Math.round(b.score * 100) + '%';
+    } else {
+      label = b.label;
+      if (b.track_id) label += '#' + b.track_id;
+      if (typeof b.score === 'number') label += ' ' + Math.round(b.score * 100) + '%';
+    }
+    ctx.font = named ? '700 12px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
     var paddingX = 4;
     var paddingY = 2;
     var metrics = ctx.measureText(label);
     var labelW = metrics.width + paddingX * 2;
-    var labelH = 16;
+    var labelH = named ? 18 : 16;
     var labelY = y - labelH;
     if (labelY < rect.y) labelY = y + 2;
     ctx.fillStyle = color;
@@ -3433,6 +3456,221 @@ function drawBoxOverlay() {
     ctx.fillText(label, x + paddingX, labelY + paddingY);
   }
   ctx.globalAlpha = 1;
+}
+
+// ─── Click-to-name on live overlay ───
+//
+// Hit testing maps a viewport-relative click to a normalized 0..1 point in
+// the same space as the SSE detection boxes, then picks the smallest-area
+// box that contains it (so a person standing in front of a car is named
+// individually, not as the car).
+function pointerToBoxSpace(e, viewport) {
+  var rect = boxOverlayRenderRect();
+  if (!rect) return null;
+  var vrect = viewport.getBoundingClientRect();
+  var px = e.clientX - vrect.left - rect.x;
+  var py = e.clientY - vrect.top - rect.y;
+  if (px < 0 || py < 0 || px > rect.w || py > rect.h) return null;
+  return { nx: px / rect.w, ny: py / rect.h, screenX: e.clientX - vrect.left, screenY: e.clientY - vrect.top };
+}
+
+function hitTestBoxes(nx, ny) {
+  var frame = boxOverlayState.frame;
+  if (!frame || !frame.boxes) return null;
+  var best = null;
+  var bestArea = Infinity;
+  for (var i = 0; i < frame.boxes.length; i++) {
+    var b = frame.boxes[i];
+    if (nx < b.x1 || nx > b.x2 || ny < b.y1 || ny > b.y2) continue;
+    var area = (b.x2 - b.x1) * (b.y2 - b.y1);
+    if (area < bestArea) { best = b; bestArea = area; }
+  }
+  return best;
+}
+
+function handleOverlayPointerMove(e, viewport) {
+  if (!boxOverlayState.enabled) return;
+  var p = pointerToBoxSpace(e, viewport);
+  var hit = p ? hitTestBoxes(p.nx, p.ny) : null;
+  // The viewport's stylesheet cursor is `pointer`; explicitly set `default`
+  // when *not* over a box so the change-of-cursor remains a meaningful
+  // affordance.
+  viewport.style.cursor = hit ? 'pointer' : 'default';
+}
+
+function resetOverlayHover() {
+  var canvas = boxOverlayState.canvas;
+  if (canvas && canvas.parentElement) canvas.parentElement.style.cursor = '';
+}
+
+function handleOverlayClick(e, viewport, cameraName) {
+  if (!boxOverlayState.enabled) return;
+  var p = pointerToBoxSpace(e, viewport);
+  if (!p) return;
+  var hit = hitTestBoxes(p.nx, p.ny);
+  if (!hit) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openNamePopover(viewport, cameraName, hit, p.screenX, p.screenY);
+}
+
+// Inline popover anchored to the box. Closes on Esc, click-outside, or after
+// successful save. Optimistically annotates the local box so the visual
+// distinction kicks in before the next SSE frame arrives.
+function openNamePopover(viewport, cameraName, box, screenX, screenY) {
+  closeNamePopover();
+  var pop = document.createElement('div');
+  pop.className = 'name-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Name this object');
+
+  var thumb = document.createElement('canvas');
+  thumb.className = 'name-popover-thumb';
+  thumb.width = 96;
+  thumb.height = 96;
+  drawBoxThumbnail(thumb, box);
+
+  var meta = document.createElement('div');
+  meta.className = 'name-popover-meta';
+  var headline = box.name ? 'Rename object' : 'Name this ' + box.label;
+  meta.innerHTML = '<div class="name-popover-title"></div>' +
+    '<div class="name-popover-sub"></div>';
+  meta.querySelector('.name-popover-title').textContent = headline;
+  meta.querySelector('.name-popover-sub').textContent = box.label + ' · track #' + box.track_id;
+
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = box.label === 'car' ? 'e.g. Renault Trafic' : 'Display name';
+  input.maxLength = 120;
+  input.className = 'name-popover-input';
+  if (box.name) input.value = box.name;
+
+  var btnRow = document.createElement('div');
+  btnRow.className = 'name-popover-actions';
+  var save = document.createElement('button');
+  save.className = 'btn btn-primary';
+  save.type = 'button';
+  save.textContent = 'Save';
+  var cancel = document.createElement('button');
+  cancel.className = 'btn';
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+  btnRow.appendChild(cancel);
+  btnRow.appendChild(save);
+
+  var error = document.createElement('div');
+  error.className = 'name-popover-error';
+  error.style.display = 'none';
+
+  pop.appendChild(thumb);
+  pop.appendChild(meta);
+  pop.appendChild(input);
+  pop.appendChild(error);
+  pop.appendChild(btnRow);
+
+  viewport.appendChild(pop);
+
+  // Anchor near the box: prefer above, fall back to below.
+  var rect = boxOverlayRenderRect();
+  if (rect) {
+    var bx = rect.x + box.x1 * rect.w;
+    var by = rect.y + box.y1 * rect.h;
+    var bw = (box.x2 - box.x1) * rect.w;
+    var popW = 240;
+    var popH = pop.offsetHeight || 180;
+    var px = bx + bw / 2 - popW / 2;
+    px = Math.max(8, Math.min(rect.parentW - popW - 8, px));
+    var py = by - popH - 8;
+    if (py < 8) py = by + (box.y2 - box.y1) * rect.h + 8;
+    pop.style.left = px + 'px';
+    pop.style.top = py + 'px';
+  } else if (typeof screenX === 'number') {
+    pop.style.left = (screenX - 120) + 'px';
+    pop.style.top = (screenY + 12) + 'px';
+  }
+
+  setTimeout(function() { input.focus(); input.select(); }, 0);
+
+  var onKey = function(ev) {
+    if (ev.key === 'Escape') closeNamePopover();
+    else if (ev.key === 'Enter') doSave();
+  };
+  var onOutside = function(ev) {
+    if (!pop.contains(ev.target)) closeNamePopover();
+  };
+  document.addEventListener('keydown', onKey);
+  setTimeout(function() { document.addEventListener('mousedown', onOutside); }, 0);
+
+  cancel.addEventListener('click', closeNamePopover);
+  save.addEventListener('click', doSave);
+
+  function doSave() {
+    var name = (input.value || '').trim();
+    if (!name) { input.focus(); return; }
+    save.disabled = true;
+    cancel.disabled = true;
+    error.style.display = 'none';
+    fetch('/api/cameras/' + encodeURIComponent(cameraName) + '/objects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        track_id: box.track_id,
+        label: box.label,
+        name: name,
+        x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2,
+      }),
+      credentials: 'same-origin',
+    }).then(function(res) {
+      if (!res.ok) return res.json().then(function(j) { throw new Error(j && j.error || 'request failed'); });
+      return res.json();
+    }).then(function() {
+      box.name = name;
+      var f = boxOverlayState.frame;
+      if (f && f.boxes) {
+        for (var i = 0; i < f.boxes.length; i++) {
+          if (f.boxes[i].track_id === box.track_id) f.boxes[i].name = name;
+        }
+      }
+      closeNamePopover();
+    }).catch(function(err) {
+      save.disabled = false;
+      cancel.disabled = false;
+      error.textContent = String(err.message || err);
+      error.style.display = '';
+    });
+  }
+
+  boxOverlayState.popover = { el: pop, onKey: onKey, onOutside: onOutside };
+}
+
+function closeNamePopover() {
+  var p = boxOverlayState.popover;
+  if (!p) return;
+  document.removeEventListener('keydown', p.onKey);
+  document.removeEventListener('mousedown', p.onOutside);
+  if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+  boxOverlayState.popover = null;
+}
+
+// Draw a square crop of the live <video> at the given normalized box onto a
+// thumbnail canvas. Uses contain-fit so the full crop stays visible without
+// distortion, with letterbox padding matching the popover background.
+function drawBoxThumbnail(canvas, box) {
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e14';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  var video = boxOverlayState.video;
+  if (!video || !video.videoWidth || !video.videoHeight) return;
+  var vw = video.videoWidth, vh = video.videoHeight;
+  var sx = box.x1 * vw, sy = box.y1 * vh;
+  var sw = (box.x2 - box.x1) * vw, sh = (box.y2 - box.y1) * vh;
+  if (sw <= 0 || sh <= 0) return;
+  var scale = Math.min(canvas.width / sw, canvas.height / sh);
+  var dw = sw * scale, dh = sh * scale;
+  var dx = (canvas.width - dw) / 2, dy = (canvas.height - dh) / 2;
+  try {
+    ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
+  } catch (_) { /* video not ready or tainted */ }
 }
 
 (function() {
