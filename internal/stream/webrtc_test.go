@@ -1038,6 +1038,82 @@ func TestRewriteAnswerProfileLevelIDLeavesCandidatesIntact(t *testing.T) {
 	}
 }
 
+// TestHandleOfferAudioMLineNotRejected guards against a regression where the
+// SDP answer rejected the audio m-line (port=0) whenever the camera's audio
+// codec wasn't browser-compatible (e.g. AAC). Pion attaches every ICE
+// candidate to the first m-line of the answer; when that m-line was rejected
+// it dropped out of the BUNDLE group, stranding the active video m-line with
+// no candidates. Chrome's iceConnectionState then stayed at "new" forever and
+// the stream stalled in the loading state.
+//
+// The fix is to register a placeholder audio codec and an inactive audio
+// transceiver so the m=audio negotiates with a real port and stays inside
+// BUNDLE.
+func TestHandleOfferAudioMLineNotRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := rtsp.NewHub(ctx)
+	defer hub.Close()
+	sm := NewStreamManager(hub)
+	defer sm.Close()
+
+	// Build a client offer that mirrors Chrome's: both audio and video
+	// transceivers, recvonly direction.
+	client, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create client pc: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		t.Fatalf("add audio transceiver: %v", err)
+	}
+	if _, err := client.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		t.Fatalf("add video transceiver: %v", err)
+	}
+
+	offer, err := client.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	if err := client.SetLocalDescription(offer); err != nil {
+		t.Fatalf("set local description: %v", err)
+	}
+
+	// HandleOffer with an unreachable RTSP URL — the Source has no audio
+	// track info, which previously triggered the rejected m=audio bug.
+	answer, err := sm.HandleOffer("test-cam", "rtsp://invalid:554/stream", offer)
+	if err != nil {
+		t.Fatalf("HandleOffer: %v", err)
+	}
+
+	// Parse the m-lines and confirm audio is NOT rejected.
+	mAudioRe := regexp.MustCompile(`(?m)^m=audio (\d+) `)
+	m := mAudioRe.FindStringSubmatch(answer.SDP)
+	if len(m) != 2 {
+		t.Fatalf("no m=audio line in answer SDP:\n%s", answer.SDP)
+	}
+	if m[1] == "0" {
+		t.Fatalf("m=audio port is 0 (rejected); BUNDLE will exclude audio and ICE will fail.\nSDP:\n%s", answer.SDP)
+	}
+
+	// Confirm BUNDLE includes both mids.
+	bundleRe := regexp.MustCompile(`(?m)^a=group:BUNDLE ([^\r\n]+)`)
+	b := bundleRe.FindStringSubmatch(answer.SDP)
+	if len(b) != 2 {
+		t.Fatalf("no a=group:BUNDLE line in answer SDP:\n%s", answer.SDP)
+	}
+	mids := strings.Fields(b[1])
+	if len(mids) < 2 {
+		t.Errorf("BUNDLE group only contains %d mid(s) (%q); expected audio+video both bundled.\nSDP:\n%s", len(mids), b[1], answer.SDP)
+	}
+}
+
 func TestClampLevelIDC(t *testing.T) {
 	tests := []struct {
 		name string

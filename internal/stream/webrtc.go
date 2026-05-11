@@ -771,14 +771,32 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		return nil, fmt.Errorf("register video codec: %w", err)
 	}
 
-	// Register audio codec if the camera provides G.711
+	// Register an audio codec unconditionally. Chrome's offer always includes
+	// m=audio; if Pion answers with no audio codec registered, the answer's
+	// m=audio is rejected (port=0) and Pion pulls it out of the BUNDLE group.
+	// Pion still attaches every ICE candidate to the first m-line in the
+	// answer, so when audio is the rejected first m-line the candidates land
+	// on a dead port and the active video m-line is left with none — Chrome
+	// then never moves past iceConnectionState=new and the stream stalls.
+	//
+	// Use the camera's actual codec when it's G.711-compatible. Otherwise
+	// register PCMU as a placeholder: it keeps the m=audio negotiation alive
+	// (non-zero port, included in BUNDLE) without forcing us to transcode.
 	audioCodec := audioCodecForTrack(source.AudioTrack())
-	if audioCodec != nil {
-		if err := me.RegisterCodec(*audioCodec, webrtc.RTPCodecTypeAudio); err != nil {
-			slog.Warn("failed to register audio codec, continuing without audio", "error", err)
-			audioCodec = nil
+	if audioCodec == nil {
+		audioCodec = &webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypePCMU,
+				ClockRate: 8000,
+				Channels:  1,
+			},
+			PayloadType: 0,
 		}
 	}
+	if err := me.RegisterCodec(*audioCodec, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, fmt.Errorf("register audio codec: %w", err)
+	}
+	audioPassthrough := audioCodecForTrack(source.AudioTrack()) != nil
 
 	// Force IPv4 only — IPv6 UDP causes packet loss on some networks
 	se := webrtc.SettingEngine{}
@@ -841,8 +859,12 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		}
 	}
 
-	// Add audio track if G.711
-	if audioCodec != nil {
+	// Add audio track if the camera's audio is browser-compatible (G.711).
+	// When it isn't (e.g. AAC), add an inactive audio transceiver instead so
+	// the answer's m=audio is accepted (non-zero port) and stays inside the
+	// BUNDLE group — otherwise Chrome's ICE candidate pairing breaks. See
+	// the placeholder codec comment above.
+	if audioPassthrough {
 		audioTrack, err := webrtc.NewTrackLocalStaticRTP(
 			audioCodec.RTPCodecCapability,
 			"audio",
@@ -855,6 +877,12 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		} else {
 			peer.audio = &trackState{track: audioTrack}
 			slog.Info("WebRTC audio enabled", "camera", cameraName, "codec", source.AudioTrack().Codec)
+		}
+	} else {
+		if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+			Direction: webrtc.RTPTransceiverDirectionInactive,
+		}); err != nil {
+			slog.Warn("failed to add inactive audio transceiver", "error", err)
 		}
 	}
 
