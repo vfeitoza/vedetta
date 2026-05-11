@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.10](https://github.com/rvben/vedetta/compare/v0.2.9...v0.2.10) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: default to sub-stream so Chrome can decode ([f482025](https://github.com/rvben/vedetta/commit/f482025315850845c8b3c9973ca3bdf05da46ca3))
+
 ## [0.2.9](https://github.com/rvben/vedetta/compare/v0.2.8...v0.2.9) - 2026-05-11
 
 ### Fixed
