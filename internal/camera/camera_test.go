@@ -3,6 +3,7 @@ package camera
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
@@ -148,6 +149,56 @@ func TestStatus_NoHub(t *testing.T) {
 	}
 	if st.Name != "test" {
 		t.Errorf("Name = %q, want %q", st.Name, "test")
+	}
+}
+
+// Online state must reflect whether frames are actually flowing — not the raw
+// RTSP source connection flag. The flag can be stale after reconnects, leaving
+// MQTT/HA/Prometheus reporting a healthy camera as offline. lastFrameTime
+// freshness is the signal users actually observe (snapshots succeeding,
+// dashboard images updating).
+
+func TestStatus_OnlineWhenFrameIsFresh(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test"}, nil)
+	cam.SetTestLastFrameTime(time.Now())
+
+	if st := cam.Status(); !st.Online {
+		t.Error("expected Online=true with a fresh frame")
+	}
+}
+
+func TestStatus_OfflineWhenFrameIsStale(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test"}, nil)
+	cam.SetTestLastFrameTime(time.Now().Add(-30 * time.Second))
+
+	if st := cam.Status(); st.Online {
+		t.Error("expected Online=false when last frame is older than the freshness window")
+	}
+}
+
+func TestStatus_OfflineWhenNoFrameYet(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test"}, nil)
+
+	if st := cam.Status(); st.Online {
+		t.Error("expected Online=false when no frame has ever arrived")
+	}
+}
+
+func TestIsOnline_FreshFrameWithoutHub(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test"}, nil)
+	cam.SetTestLastFrameTime(time.Now())
+
+	if !cam.IsOnline() {
+		t.Error("expected IsOnline=true when last frame is fresh, regardless of hub state")
+	}
+}
+
+func TestIsOnline_StaleFrame(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test"}, nil)
+	cam.SetTestLastFrameTime(time.Now().Add(-30 * time.Second))
+
+	if cam.IsOnline() {
+		t.Error("expected IsOnline=false when last frame is stale")
 	}
 }
 

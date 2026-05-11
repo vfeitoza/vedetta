@@ -796,21 +796,25 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 	}
 }
 
-// IsOnline returns true if the camera's detection RTSP source is connected.
+// onlineFreshness is the maximum age of the most recent frame for a camera to
+// be considered online. Picked to span ~50+ frame intervals at our slowest
+// detect FPS, so brief RTSP reconnects don't flap the online flag, while a
+// camera that has truly stopped delivering frames flips within a few seconds.
+const onlineFreshness = 15 * time.Second
+
+// IsOnline returns true when the camera has decoded a frame within the
+// freshness window. This reflects the user-visible "can I see this camera
+// right now?" semantics — the raw RTSP source's Connected() flag can lag
+// real frame flow after reconnects and is unreliable as a health signal.
 func (c *Camera) IsOnline() bool {
 	c.mu.RLock()
 	override := c.testOnlineOverride
+	last := c.lastFrameTime
 	c.mu.RUnlock()
 	if override != nil {
 		return *override
 	}
-	if c.hub == nil {
-		return false
-	}
-	if src := c.hub.Get(c.config.URL); src != nil {
-		return src.Connected()
-	}
-	return false
+	return !last.IsZero() && time.Since(last) < onlineFreshness
 }
 
 // HasMotion returns true if motion was detected within the last 5 seconds.
@@ -820,15 +824,14 @@ func (c *Camera) HasMotion() bool {
 	return !c.lastMotion.IsZero() && time.Since(c.lastMotion) < 5*time.Second
 }
 
-// Status returns the current status of the camera.
+// Status returns the current status of the camera. Online is derived from
+// frame freshness — see IsOnline.
 func (c *Camera) Status() CameraStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	online := false
-	if c.hub != nil {
-		if src := c.hub.Get(c.config.URL); src != nil {
-			online = src.Connected()
-		}
+	online := !c.lastFrameTime.IsZero() && time.Since(c.lastFrameTime) < onlineFreshness
+	if c.testOnlineOverride != nil {
+		online = *c.testOnlineOverride
 	}
 	var fps float64
 	if c.detectConsumer != nil {
