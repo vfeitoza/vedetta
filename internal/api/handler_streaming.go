@@ -10,6 +10,18 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// pickWebRTCRTSPURL chooses which RTSP source vedetta will negotiate over
+// WebRTC. The default is the sub-stream because browser offers advertise
+// H.264 level 3.1 at most, and a 1080p main stream at level 4.1 leaves
+// Chrome's depacketizer stuck with framesAssembled=0. ?quality=high opts
+// back into the record stream for clients that explicitly want full-res.
+func pickWebRTCRTSPURL(detectURL, recordURL, quality string) string {
+	if quality == "high" {
+		return recordURL
+	}
+	return detectURL
+}
+
 func (s *Server) PostWebRTCOffer(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {
@@ -23,7 +35,7 @@ func (s *Server) PostWebRTCOffer(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 
-	rtspURL := cam.RecordURL()
+	rtspURL := pickWebRTCRTSPURL(cam.DetectURL(), cam.RecordURL(), r.URL.Query().Get("quality"))
 
 	answer, err := s.streams.HandleOffer(name, rtspURL, offer)
 	if err != nil {
