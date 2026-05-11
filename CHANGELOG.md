@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.13](https://github.com/rvben/vedetta/compare/v0.2.12...v0.2.13) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: cap answer level_idc at 3.1 so Chrome can allocate decoder ([44152d6](https://github.com/rvben/vedetta/commit/44152d647ad287db7af2797570e39d37b4c1791d))
+
 ## [0.2.12](https://github.com/rvben/vedetta/compare/v0.2.11...v0.2.12) - 2026-05-11
 
 ### Fixed
