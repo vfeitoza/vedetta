@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.14](https://github.com/rvben/vedetta/compare/v0.2.13...v0.2.14) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: keep m=audio in BUNDLE so ICE candidates land on an active m-line ([5b1cc1b](https://github.com/rvben/vedetta/commit/5b1cc1b0b79e5ab61fbb6f10649954892e07d7c7))
+
 ## [0.2.13](https://github.com/rvben/vedetta/compare/v0.2.12...v0.2.13) - 2026-05-11
 
 ### Fixed
