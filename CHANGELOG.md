@@ -12,6 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.9](https://github.com/rvben/vedetta/compare/v0.2.8...v0.2.9) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: advertise rtcp-fb in answer SDP so Chrome decoder commits ([38fc49b](https://github.com/rvben/vedetta/commit/38fc49b568f74780f66fcb74daf8da66e661bf1d))
+
 ## [0.2.8](https://github.com/rvben/vedetta/compare/v0.2.7...v0.2.8) - 2026-05-11
 
 ### Fixed
