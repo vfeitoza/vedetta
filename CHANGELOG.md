@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.6](https://github.com/rvben/vedetta/compare/v0.2.5...v0.2.6) - 2026-05-11
+
+### Fixed
+
+- **camera**: derive Online from frame freshness, not raw RTSP Connected() ([2116259](https://github.com/rvben/vedetta/commit/21162590f488cc646500260fc7fcbb34adcbae7d))
+
 ## [0.2.5](https://github.com/rvben/vedetta/compare/v0.2.4...v0.2.5) - 2026-05-11
 
 ### Fixed
