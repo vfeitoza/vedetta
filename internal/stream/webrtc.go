@@ -177,6 +177,20 @@ func (p *peerState) writeVideo(pkt *rtp.Packet) error {
 		nalType = pkt.Payload[0] & 0x1f
 	}
 
+	// Some cameras (notably Tapo) set marker=1 on every packet of an access
+	// unit, including the SPS and PPS NALs that precede the IDR slice.
+	// Chrome's H.264 depacketizer treats marker=1 as "end of access unit"
+	// and assembles each into a separate frame; the SPS/PPS frames have no
+	// slice data so the decoder silently rejects every keyframe and
+	// framesDecoded stays at 0. RFC 6184 §5.1 specifies the marker bit
+	// MUST be set only on the final RTP packet of an access unit, and
+	// parameter-set NALs are never the final NAL of a decodable access
+	// unit. Clearing their marker bit makes Chrome assemble SPS+PPS+IDR
+	// into a single frame and decoding starts working.
+	if (nalType == 7 || nalType == 8) && pkt.Marker {
+		pkt.Marker = false
+	}
+
 	if needsParams {
 		if err := p.video.write(buildNALPacket(pkt, p.sps)); err != nil {
 			p.recordWriteErr("video", err, pkt)

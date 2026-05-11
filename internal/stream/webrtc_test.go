@@ -573,6 +573,47 @@ func TestWriteVideoFragmentsLargeIDR(t *testing.T) {
 	}
 }
 
+func TestWriteVideoClearsMarkerOnSPSAndPPS(t *testing.T) {
+	// Some cameras (Tapo C200) ship SPS, PPS and IDR as three RTP packets
+	// sharing one access-unit timestamp but all wrongly carrying marker=1.
+	// Chrome's H.264 depacketizer reads marker=1 as the end of an access
+	// unit, so it produces three "frames" of which only the third has a
+	// slice and the decoder never produces a picture. We must clear the
+	// marker bit on SPS/PPS so Chrome assembles a single access unit.
+	peer, w := newTestPeer(nil, nil)
+
+	sps := spsPacket(100, 12345)
+	sps.Marker = true
+	pps := &rtp.Packet{
+		Header: rtp.Header{
+			Version: 2, PayloadType: 96, SequenceNumber: 101,
+			Timestamp: 12345, SSRC: 0xCAFEBABE, Marker: true,
+		},
+		Payload: []byte{0x68, 0xce, 0x3c, 0x80},
+	}
+	idr := idrPacket(102, 12345) // helper already sets Marker=true
+
+	for _, pk := range []*rtp.Packet{sps, pps, idr} {
+		if err := peer.writeVideo(pk); err != nil {
+			t.Fatalf("writeVideo: %v", err)
+		}
+	}
+
+	pkts := w.snapshot()
+	if len(pkts) != 3 {
+		t.Fatalf("expected 3 forwarded packets, got %d", len(pkts))
+	}
+	if pkts[0].Marker {
+		t.Errorf("SPS forwarded with marker=true, want false")
+	}
+	if pkts[1].Marker {
+		t.Errorf("PPS forwarded with marker=true, want false")
+	}
+	if !pkts[2].Marker {
+		t.Errorf("IDR forwarded with marker=false, want true (slice ends the AU)")
+	}
+}
+
 func TestWriteVideoMonotonicSequence(t *testing.T) {
 	peer, w := newTestPeer(nil, nil)
 
