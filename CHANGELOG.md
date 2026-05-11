@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.7](https://github.com/rvben/vedetta/compare/v0.2.6...v0.2.7) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: refragment oversized FU-A and disable NACK responder ([7a182ef](https://github.com/rvben/vedetta/commit/7a182efc2dcaab98f1ac3d35d31f7cf06d2f7b04))
+
 ## [0.2.6](https://github.com/rvben/vedetta/compare/v0.2.5...v0.2.6) - 2026-05-11
 
 ### Fixed
