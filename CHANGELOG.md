@@ -15,6 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.12](https://github.com/rvben/vedetta/compare/v0.2.11...v0.2.12) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: sniff in-band SPS/PPS so cameras without sprop-parameter-sets negotiate the right profile ([2ad06b0](https://github.com/rvben/vedetta/commit/2ad06b006a823d167d8b56e7426f50068042cc94))
+
 ## [0.2.11](https://github.com/rvben/vedetta/compare/v0.2.10...v0.2.11) - 2026-05-11
 
 ### Fixed
