@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.5](https://github.com/rvben/vedetta/compare/v0.2.4...v0.2.5) - 2026-05-11
+
+### Fixed
+
+- **api**: snapshot endpoint serves live frames with no-cache headers ([3816adc](https://github.com/rvben/vedetta/commit/3816adc46ef662d86aac15732fd5249b809a1c4d))
+
 ## [0.2.4](https://github.com/rvben/vedetta/compare/v0.2.3...v0.2.4) - 2026-05-08
 
 ### Added
