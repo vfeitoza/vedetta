@@ -1,8 +1,10 @@
 package rtsp
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pion/rtp"
 )
@@ -166,5 +168,99 @@ func TestSourceTrackInfo_NilBeforeConnect(t *testing.T) {
 	}
 	if s.Connected() {
 		t.Error("Connected should be false before connect")
+	}
+}
+
+func TestMaybeLearnParameterSets_SingleNAL(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	sps := []byte{0x67, 0x64, 0x00, 0x29, 0xac, 0x2c, 0xa5, 0x01, 0x40}
+	pps := []byte{0x68, 0xee, 0x3c, 0x80}
+
+	s.maybeLearnParameterSets(&rtp.Packet{Payload: sps})
+	s.maybeLearnParameterSets(&rtp.Packet{Payload: pps})
+
+	vt := s.VideoTrack()
+	if vt == nil {
+		t.Fatal("VideoTrack should be created after observing SPS/PPS")
+	}
+	if string(vt.SPS) != string(sps) {
+		t.Errorf("SPS = %x, want %x", vt.SPS, sps)
+	}
+	if string(vt.PPS) != string(pps) {
+		t.Errorf("PPS = %x, want %x", vt.PPS, pps)
+	}
+}
+
+func TestMaybeLearnParameterSets_STAPA(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	sps := []byte{0x67, 0x64, 0x00, 0x29, 0xac, 0x2c, 0xa5, 0x01, 0x40}
+	pps := []byte{0x68, 0xee, 0x3c, 0x80}
+	// STAP-A: indicator | sizeSPS | SPS | sizePPS | PPS
+	payload := []byte{0x78, byte(len(sps) >> 8), byte(len(sps))}
+	payload = append(payload, sps...)
+	payload = append(payload, byte(len(pps)>>8), byte(len(pps)))
+	payload = append(payload, pps...)
+
+	s.maybeLearnParameterSets(&rtp.Packet{Payload: payload})
+
+	vt := s.VideoTrack()
+	if vt == nil {
+		t.Fatal("VideoTrack should be created from STAP-A")
+	}
+	if string(vt.SPS) != string(sps) {
+		t.Errorf("SPS from STAP-A = %x, want %x", vt.SPS, sps)
+	}
+	if string(vt.PPS) != string(pps) {
+		t.Errorf("PPS from STAP-A = %x, want %x", vt.PPS, pps)
+	}
+}
+
+func TestMaybeLearnParameterSets_DoesNotOverwrite(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	original := []byte{0x67, 0x64, 0x00, 0x29, 0xac, 0x2c, 0xa5, 0x01, 0x40}
+	overwrite := []byte{0x67, 0x42, 0xc0, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+	s.maybeLearnParameterSets(&rtp.Packet{Payload: original})
+	s.maybeLearnParameterSets(&rtp.Packet{Payload: overwrite})
+
+	if string(s.VideoTrack().SPS) != string(original) {
+		t.Errorf("SPS was overwritten; got %x, want %x", s.VideoTrack().SPS, original)
+	}
+}
+
+func TestWaitForVideoParams_ReturnsTrueWhenReady(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	s.SetVideoTrack(&TrackInfo{
+		Codec: "H264",
+		SPS:   []byte{0x67, 0x64, 0x00, 0x29, 0xac, 0x2c, 0xa5, 0x01, 0x40},
+		PPS:   []byte{0x68, 0xee, 0x3c, 0x80},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if !s.WaitForVideoParams(ctx) {
+		t.Error("WaitForVideoParams should return true when SPS/PPS are present")
+	}
+}
+
+func TestWaitForVideoParams_TimesOut(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if s.WaitForVideoParams(ctx) {
+		t.Error("WaitForVideoParams should return false when SPS never arrives")
+	}
+}
+
+func TestWaitForVideoParams_BlocksUntilParamsArrive(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		s.maybeLearnParameterSets(&rtp.Packet{Payload: []byte{0x67, 0x64, 0x00, 0x29, 0xac}})
+		s.maybeLearnParameterSets(&rtp.Packet{Payload: []byte{0x68, 0xee, 0x3c, 0x80}})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if !s.WaitForVideoParams(ctx) {
+		t.Error("WaitForVideoParams should return true once in-band SPS/PPS are sniffed")
 	}
 }

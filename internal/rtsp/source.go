@@ -95,6 +95,33 @@ func (s *Source) Connected() bool {
 	return s.connected
 }
 
+// WaitForVideoParams blocks until the source has cached an SPS+PPS pair for the
+// video track, or until ctx is done. Returns true on success.
+//
+// Cameras that omit sprop-parameter-sets from their RTSP SDP (e.g. some
+// Reolink/Foscam doorbells) only advertise SPS/PPS in-band, which means the
+// initial DESCRIBE leaves videoTrack.SPS empty. Negotiating a WebRTC answer
+// without an SPS forces vedetta to fall back to a default profile-level-id;
+// when the in-band bitstream uses a different profile, Chrome configures the
+// wrong decoder and drops every frame. Blocking the offer until in-band
+// parameter sets are sniffed lets us advertise a profile that actually matches
+// what the camera is about to send.
+func (s *Source) WaitForVideoParams(ctx context.Context) bool {
+	for {
+		s.mu.RLock()
+		ready := s.videoTrack != nil && len(s.videoTrack.SPS) >= 4 && len(s.videoTrack.PPS) > 0
+		s.mu.RUnlock()
+		if ready {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 // Connect starts reading from the RTSP stream, reconnecting on failure.
 // Blocks until ctx is cancelled.
 func (s *Source) Connect(ctx context.Context) {
@@ -275,6 +302,7 @@ func (s *Source) extractTracks(desc *description.Session) {
 }
 
 func (s *Source) fanOutVideo(pkt *rtp.Packet) {
+	s.maybeLearnParameterSets(pkt)
 	start := time.Now()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -283,6 +311,63 @@ func (s *Source) fanOutVideo(pkt *rtp.Packet) {
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
 		slog.Warn("slow fanOutVideo", "url", SanitizeURL(s.url), "elapsed", elapsed, "consumers", len(s.consumers))
+	}
+}
+
+// maybeLearnParameterSets scans an inbound H.264 RTP payload for SPS (NAL 7)
+// and PPS (NAL 8) and caches them on videoTrack when not already present.
+// Single-NAL packets and STAP-A aggregates are handled; FU-A fragments are
+// ignored because reassembling them just for learning would require buffering
+// across packets and parameter sets virtually never need fragmentation.
+//
+// Only the FIRST observed SPS/PPS wins. Updating mid-stream would invalidate
+// the profile-level-id already negotiated with active peers and trigger a
+// silent decoder mismatch — far worse than missing one parameter-set update.
+func (s *Source) maybeLearnParameterSets(pkt *rtp.Packet) {
+	if len(pkt.Payload) < 1 {
+		return
+	}
+	var sps, pps []byte
+	switch pkt.Payload[0] & 0x1f {
+	case 7:
+		sps = append([]byte(nil), pkt.Payload...)
+	case 8:
+		pps = append([]byte(nil), pkt.Payload...)
+	case 24:
+		offset := 1
+		for offset+2 <= len(pkt.Payload) {
+			size := int(pkt.Payload[offset])<<8 | int(pkt.Payload[offset+1])
+			offset += 2
+			if size < 1 || offset+size > len(pkt.Payload) {
+				return
+			}
+			inner := pkt.Payload[offset : offset+size]
+			switch inner[0] & 0x1f {
+			case 7:
+				if sps == nil {
+					sps = append([]byte(nil), inner...)
+				}
+			case 8:
+				if pps == nil {
+					pps = append([]byte(nil), inner...)
+				}
+			}
+			offset += size
+		}
+	}
+	if sps == nil && pps == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.videoTrack == nil {
+		s.videoTrack = &TrackInfo{Codec: "H264", IsVideo: true, ClockRate: 90000, PayloadType: pkt.PayloadType}
+	}
+	if sps != nil && len(s.videoTrack.SPS) == 0 {
+		s.videoTrack.SPS = sps
+	}
+	if pps != nil && len(s.videoTrack.PPS) == 0 {
+		s.videoTrack.PPS = pps
 	}
 }
 

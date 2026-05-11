@@ -685,6 +685,15 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	// browser's offered level, mis-configuring the decoder).
 	sdpFmtpLine := "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f"
 	source := sm.hub.GetOrCreate(rtspURL)
+	// Block briefly so cameras that ship SPS/PPS in-band (rather than via
+	// sprop-parameter-sets in the SDP) have time to populate them. Without
+	// this wait, the answer SDP keeps the default 42001f profile-level-id;
+	// when the real bitstream uses a different profile (e.g. High 3.1)
+	// Chrome configures a Baseline decoder, rejects every frame, and ICE
+	// fails after ~30s.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	source.WaitForVideoParams(waitCtx)
+	waitCancel()
 	var (
 		spsForLog, ppsForLog []byte
 		cameraPLI            string
