@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.11](https://github.com/rvben/vedetta/compare/v0.2.10...v0.2.11) - 2026-05-11
+
+### Fixed
+
+- **webrtc**: clear marker bit on SPS/PPS so Chrome assembles full access unit ([117eb82](https://github.com/rvben/vedetta/commit/117eb82fd5c3793953cec8b591ba3db01717ca4e))
+
 ## [0.2.10](https://github.com/rvben/vedetta/compare/v0.2.9...v0.2.10) - 2026-05-11
 
 ### Fixed
