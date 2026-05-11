@@ -121,6 +121,10 @@ type Camera struct {
 	faceProcessed  map[int]time.Time
 	detections     chan<- DetectionFrame
 	degradedReason string
+
+	// testOnlineOverride forces IsOnline to return the given value regardless
+	// of hub state. Set via SetTestOnline in tests only; nil in production.
+	testOnlineOverride *bool
 }
 
 // CameraStatus represents the current status of a camera.
@@ -264,6 +268,14 @@ func (c *Camera) LastSnapshot() *image.RGBA {
 		return nil
 	}
 	return rawToRGBA(c.rawFrame, c.frameW, c.frameH)
+}
+
+// LastFrameTime returns the wall-clock time at which the most recent frame was
+// decoded. Zero value means no frame has ever been seen.
+func (c *Camera) LastFrameTime() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastFrameTime
 }
 
 // LiveFrame returns the highest-quality recent decoded frame for downstream
@@ -786,6 +798,12 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 
 // IsOnline returns true if the camera's detection RTSP source is connected.
 func (c *Camera) IsOnline() bool {
+	c.mu.RLock()
+	override := c.testOnlineOverride
+	c.mu.RUnlock()
+	if override != nil {
+		return *override
+	}
 	if c.hub == nil {
 		return false
 	}

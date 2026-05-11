@@ -3,6 +3,7 @@ package camera
 import (
 	"image"
 	"sync"
+	"time"
 
 	"github.com/rvben/vedetta/internal/config"
 )
@@ -47,6 +48,24 @@ func (c *Camera) SetTestFrame(img *image.RGBA) {
 	c.rawFrame = rgb
 	c.frameW = w
 	c.frameH = h
+}
+
+// SetTestOnline overrides IsOnline to return the given value. Intended for
+// handler tests that need deterministic online/offline state without a
+// running RTSP source.
+func (c *Camera) SetTestOnline(online bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v := online
+	c.testOnlineOverride = &v
+}
+
+// SetTestLastFrameTime primes lastFrameTime so handlers exercising
+// Last-Modified or freshness logic have a deterministic timestamp.
+func (c *Camera) SetTestLastFrameTime(ts time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastFrameTime = ts
 }
 
 // RegisterForTest installs a pre-built Camera into the manager without

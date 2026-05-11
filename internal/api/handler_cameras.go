@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"image"
 	"image/jpeg"
 	"log/slog"
 	"net/http"
@@ -136,20 +135,39 @@ func (s *Server) GetCameraSnapshot(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
-	img := cam.LastSnapshot()
-	if img == nil {
-		// Return a 1x1 dark pixel so <img> tags don't break
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "no-cache")
-		placeholder := image.NewRGBA(image.Rect(0, 0, 1, 1))
-		_ = jpeg.Encode(w, placeholder, &jpeg.Options{Quality: 50})
+	// Disable HTTP caching unconditionally — snapshots are live data, and a
+	// cached error response would otherwise stick around indefinitely.
+	setSnapshotNoCacheHeaders(w)
+
+	if !cam.IsOnline() {
+		w.Header().Set("X-Vedetta-Camera-State", "offline")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "camera offline"})
 		return
 	}
 
+	img := cam.LiveFrame()
+	if img == nil {
+		w.Header().Set("X-Vedetta-Camera-State", "warming-up")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no frame yet"})
+		return
+	}
+
+	if ts := cam.LastFrameTime(); !ts.IsZero() {
+		w.Header().Set("Last-Modified", ts.UTC().Format(http.TimeFormat))
+	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	if err := jpeg.Encode(w, img, &jpeg.Options{Quality: 85}); err != nil {
 		slog.Error("failed to encode snapshot", "error", err)
 	}
+}
+
+// setSnapshotNoCacheHeaders writes the headers needed to keep browsers and
+// intermediate proxies from caching live snapshot responses. Single-source so
+// success and error paths cannot drift.
+func setSnapshotNoCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 func (s *Server) GetCameraThumbnail(w http.ResponseWriter, r *http.Request, name string, params GetCameraThumbnailParams) {
