@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -124,18 +125,18 @@ func (p *peerState) classifyInbound(pkt *rtp.Packet) {
 		p.inOther.Add(1)
 		return
 	}
-	switch nt := pkt.Payload[0] & 0x1f; {
-	case nt == 5:
+	switch pkt.Payload[0] & 0x1f {
+	case 5:
 		p.inSingleIDR.Add(1)
-	case nt == 1:
+	case 1:
 		p.inSingleP.Add(1)
-	case nt == 7:
+	case 7:
 		p.inSingleSPS.Add(1)
-	case nt == 8:
+	case 8:
 		p.inSinglePPS.Add(1)
-	case nt == 24:
+	case 24:
 		p.inSTAPA.Add(1)
-	case nt == 28:
+	case 28:
 		p.inFUA.Add(1)
 	default:
 		p.inOther.Add(1)
@@ -629,15 +630,54 @@ func audioCodecForTrack(at *rtsp.TrackInfo) *webrtc.RTPCodecParameters {
 	}
 }
 
+// profileLevelIDRegex matches a profile-level-id parameter inside an H.264
+// fmtp line. The value is exactly 6 hex digits (3 bytes: profile_idc,
+// profile_iop, level_idc).
+var profileLevelIDRegex = regexp.MustCompile(`profile-level-id=[0-9a-fA-F]{6}`)
+
+// rewriteAnswerProfileLevelID replaces every occurrence of
+// "profile-level-id=XXXXXX" in answerSDP with the supplied 6-hex-char value.
+//
+// Pion's MediaEngine stores the remote offer's codec parameters in the
+// negotiated codec list, so the answer's profile-level-id always echoes the
+// browser's offered value. When that value advertises a lower H.264 level
+// than the camera actually emits in-band, the browser configures its decoder
+// for the smaller level and silently drops every frame whose SPS exceeds it
+// (framesReceived rises but framesDecoded stays at 0).
+//
+// RFC 6184 explicitly permits the level component (third byte) of
+// profile-level-id to differ between offer and answer when the offerer set
+// "level-asymmetry-allowed=1". The profile_idc and profile_iop bytes must
+// match symmetrically — but Pion's H.264 fmtp matcher already requires those
+// to be equal for negotiation to have succeeded, so substituting the full
+// camera-derived PLI here is safe in practice. If pli is malformed (not a
+// valid 6-char hex string), the input is returned unchanged.
+func rewriteAnswerProfileLevelID(answerSDP, pli string) string {
+	if len(pli) != 6 {
+		return answerSDP
+	}
+	if _, err := hex.DecodeString(pli); err != nil {
+		return answerSDP
+	}
+	return profileLevelIDRegex.ReplaceAllString(answerSDP, "profile-level-id="+pli)
+}
+
 // HandleOffer processes a WebRTC SDP offer and returns an SDP answer.
 func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	// Build H264 codec capability with profile-level-id from camera SPS
+	// Build H264 codec capability with profile-level-id from camera SPS.
+	// cameraPLI is the 6-hex-char profile-level-id derived from the camera's
+	// SPS; when non-empty, the final answer SDP is rewritten so its
+	// profile-level-id matches the bitstream (Pion otherwise echoes the
+	// browser's offered level, mis-configuring the decoder).
 	sdpFmtpLine := "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f"
 	source := sm.hub.GetOrCreate(rtspURL)
-	var spsForLog, ppsForLog []byte
+	var (
+		spsForLog, ppsForLog []byte
+		cameraPLI            string
+	)
 	if vt := source.VideoTrack(); vt != nil && len(vt.SPS) >= 4 {
-		profileLevelID := hex.EncodeToString(vt.SPS[1:4])
-		sdpFmtpLine = fmt.Sprintf("level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s", profileLevelID)
+		cameraPLI = hex.EncodeToString(vt.SPS[1:4])
+		sdpFmtpLine = fmt.Sprintf("level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s", cameraPLI)
 		spsForLog, ppsForLog = vt.SPS, vt.PPS
 	}
 	slog.Info("WebRTC offer received",
@@ -807,7 +847,14 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	<-gatherComplete
 
-	return pc.LocalDescription(), nil
+	finalAnswer := pc.LocalDescription()
+	if cameraPLI != "" {
+		finalAnswer = &webrtc.SessionDescription{
+			Type: finalAnswer.Type,
+			SDP:  rewriteAnswerProfileLevelID(finalAnswer.SDP, cameraPLI),
+		}
+	}
+	return finalAnswer, nil
 }
 
 func (sm *StreamManager) getOrCreateConsumer(rtspURL string) *webrtcConsumer {

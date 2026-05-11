@@ -879,3 +879,83 @@ func TestNewStreamManager(t *testing.T) {
 	}
 	sm.Close()
 }
+
+// TestRewriteAnswerProfileLevelIDReplacesLevel verifies the typical case where
+// Pion echoes Chrome's offered level (1f = 3.1) in the answer while the camera
+// emits a higher level (29 = 4.1). The rewrite must substitute the camera's
+// PLI so the browser configures its decoder for the bitstream's actual level.
+func TestRewriteAnswerProfileLevelIDReplacesLevel(t *testing.T) {
+	in := "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f\r\n"
+	want := "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640029\r\n"
+	if got := rewriteAnswerProfileLevelID(in, "640029"); got != want {
+		t.Fatalf("rewrite mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRewriteAnswerProfileLevelIDPreservesOtherFmtpParams confirms that the
+// surrounding fmtp parameters (level-asymmetry-allowed, packetization-mode)
+// and any trailing parameters are untouched.
+func TestRewriteAnswerProfileLevelIDPreservesOtherFmtpParams(t *testing.T) {
+	in := "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f;sprop-parameter-sets=Z0LAH9oCgPaA,aMuMsg==\r\n"
+	got := rewriteAnswerProfileLevelID(in, "42e029")
+	want := "a=fmtp:96 packetization-mode=1;profile-level-id=42e029;sprop-parameter-sets=Z0LAH9oCgPaA,aMuMsg==\r\n"
+	if got != want {
+		t.Fatalf("rewrite mangled surrounding params:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRewriteAnswerProfileLevelIDReplacesEveryOccurrence catches the case
+// where the SDP contains multiple fmtp lines (e.g. when Pion has emitted both
+// the negotiated codec and a redundant retransmission stanza). All should be
+// rewritten to keep the bitstream/SDP advertised level consistent.
+func TestRewriteAnswerProfileLevelIDReplacesEveryOccurrence(t *testing.T) {
+	in := "a=fmtp:96 profile-level-id=64001f\r\n" +
+		"a=fmtp:97 profile-level-id=42e01f\r\n"
+	got := rewriteAnswerProfileLevelID(in, "640029")
+	want := "a=fmtp:96 profile-level-id=640029\r\n" +
+		"a=fmtp:97 profile-level-id=640029\r\n"
+	if got != want {
+		t.Fatalf("rewrite did not replace every occurrence:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRewriteAnswerProfileLevelIDNoOpWhenAbsent verifies that an SDP without
+// any H.264 fmtp line is returned untouched (e.g. audio-only answers).
+func TestRewriteAnswerProfileLevelIDNoOpWhenAbsent(t *testing.T) {
+	in := "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 0\r\na=rtpmap:0 PCMU/8000\r\n"
+	if got := rewriteAnswerProfileLevelID(in, "640029"); got != in {
+		t.Fatalf("rewrite altered SDP with no profile-level-id:\n got: %q\nwant: %q", got, in)
+	}
+}
+
+// TestRewriteAnswerProfileLevelIDRejectsMalformedPLI exercises the safety
+// guards: malformed input must leave the answer unchanged rather than
+// corrupting the SDP with invalid characters.
+func TestRewriteAnswerProfileLevelIDRejectsMalformedPLI(t *testing.T) {
+	in := "a=fmtp:96 profile-level-id=64001f\r\n"
+	for _, bad := range []string{"", "64", "640029ab", "gghhii"} {
+		if got := rewriteAnswerProfileLevelID(in, bad); got != in {
+			t.Errorf("malformed PLI %q caused rewrite: got %q want %q", bad, got, in)
+		}
+	}
+}
+
+// TestRewriteAnswerProfileLevelIDLeavesCandidatesIntact ensures ICE candidate
+// lines and other SDP attributes survive the rewrite unchanged. Pion appends
+// candidates after gathering completes, so the rewrite happens with them
+// present in the SDP.
+func TestRewriteAnswerProfileLevelIDLeavesCandidatesIntact(t *testing.T) {
+	in := "v=0\r\n" +
+		"m=video 9 UDP/TLS/RTP/SAVPF 96\r\n" +
+		"a=rtpmap:96 H264/90000\r\n" +
+		"a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f\r\n" +
+		"a=candidate:842163049 1 udp 1677729535 192.0.2.1 50000 typ srflx\r\n"
+	want := "v=0\r\n" +
+		"m=video 9 UDP/TLS/RTP/SAVPF 96\r\n" +
+		"a=rtpmap:96 H264/90000\r\n" +
+		"a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640029\r\n" +
+		"a=candidate:842163049 1 udp 1677729535 192.0.2.1 50000 typ srflx\r\n"
+	if got := rewriteAnswerProfileLevelID(in, "640029"); got != want {
+		t.Fatalf("rewrite damaged surrounding SDP lines:\n got: %q\nwant: %q", got, want)
+	}
+}
