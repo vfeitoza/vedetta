@@ -690,14 +690,33 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	)
 
 	// Register only the codecs we'll actually send.
+	//
+	// RTCPFeedback is advertised in the answer SDP (a=rtcp-fb lines) so the
+	// browser's H.264 decoder commits to a full receive pipeline. Without
+	// these, Chrome accepts packets and counts keyframes in inbound-rtp
+	// stats but never delivers a single decoded frame to the <video>
+	// element — `framesDecoded` stays at 0 indefinitely. We're a one-way
+	// forwarder and won't act on NACK/PLI/FIR requests (the camera can't
+	// honor them), but advertising support is what unblocks the decoder
+	// path. The set mirrors Pion's RegisterDefaultCodecs and matches
+	// Chrome's own offer.
+	h264Feedback := []webrtc.RTCPFeedback{
+		{Type: "goog-remb"},
+		{Type: "ccm", Parameter: "fir"},
+		{Type: "nack"},
+		{Type: "nack", Parameter: "pli"},
+		{Type: "transport-cc"},
+	}
+	h264Capability := webrtc.RTPCodecCapability{
+		MimeType:     webrtc.MimeTypeH264,
+		ClockRate:    90000,
+		SDPFmtpLine:  sdpFmtpLine,
+		RTCPFeedback: h264Feedback,
+	}
 	me := &webrtc.MediaEngine{}
 	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeH264,
-			ClockRate:   90000,
-			SDPFmtpLine: sdpFmtpLine,
-		},
-		PayloadType: 96,
+		RTPCodecCapability: h264Capability,
+		PayloadType:        96,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, fmt.Errorf("register video codec: %w", err)
 	}
@@ -743,11 +762,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	}
 
 	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeH264,
-			ClockRate:   90000,
-			SDPFmtpLine: sdpFmtpLine,
-		},
+		h264Capability,
 		"video",
 		fmt.Sprintf("vedetta-%s", cameraName),
 	)

@@ -3,6 +3,9 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -859,11 +862,45 @@ func TestSDPOfferAnswerExchange(t *testing.T) {
 	answer, err := sm.HandleOffer("test-cam", "rtsp://invalid:554/stream", offer)
 	if err != nil {
 		t.Logf("HandleOffer returned error (expected, no stream): %v", err)
-	} else {
-		if answer.Type != webrtc.SDPTypeAnswer {
-			t.Errorf("expected SDP answer type, got %v", answer.Type)
+		return
+	}
+	if answer.Type != webrtc.SDPTypeAnswer {
+		t.Errorf("expected SDP answer type, got %v", answer.Type)
+	}
+
+	// The answer must advertise the rtcp feedback Chrome's H264 receiver
+	// expects. Without these lines the decoder pipeline silently fails to
+	// commit and framesDecoded stays at 0 even though packets are received
+	// and counted as keyframes in inbound-rtp stats.
+	//
+	// Pion negotiates a single payload type from the offer (often 102, not
+	// our registered 96), so locate the H264 PT in the answer and assert
+	// against that.
+	pt := extractH264PayloadType(t, answer.SDP)
+	for _, fb := range []string{
+		"goog-remb",
+		"ccm fir",
+		"nack",
+		"nack pli",
+		"transport-cc",
+	} {
+		line := fmt.Sprintf("a=rtcp-fb:%s %s", pt, fb)
+		if !strings.Contains(answer.SDP, line) {
+			t.Errorf("answer SDP missing %q:\n%s", line, answer.SDP)
 		}
 	}
+}
+
+// extractH264PayloadType returns the payload type assigned to H264/90000 in the
+// rtpmap line of sdp. Fails the test if no H264 rtpmap is found.
+func extractH264PayloadType(t *testing.T, sdp string) string {
+	t.Helper()
+	re := regexp.MustCompile(`a=rtpmap:(\d+) H264/90000`)
+	m := re.FindStringSubmatch(sdp)
+	if len(m) != 2 {
+		t.Fatalf("no H264 rtpmap line found in answer SDP:\n%s", sdp)
+	}
+	return m[1]
 }
 
 func TestNewStreamManager(t *testing.T) {
