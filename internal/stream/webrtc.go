@@ -649,6 +649,33 @@ func audioCodecForTrack(at *rtsp.TrackInfo) *webrtc.RTPCodecParameters {
 // profile_iop, level_idc).
 var profileLevelIDRegex = regexp.MustCompile(`profile-level-id=[0-9a-fA-F]{6}`)
 
+// maxAnswerLevelIDC is the highest level_idc we'll ever advertise in an SDP
+// answer. Chrome's WebRTC stack universally offers H.264 Level 3.1 (0x1f) and
+// silently fails to allocate a decoder when the answer demands a higher level,
+// even though level-asymmetry-allowed=1 ostensibly permits it — the connection
+// stalls in ICE checking and the peer gives up after ~30s. Cameras like
+// Reolink commonly stamp their sub-stream SPS with an inflated 5.1 (0x33) that
+// no browser honors. Capping here keeps the answer within the offered
+// envelope; the camera's real SPS still rides in the bitstream so Chrome's
+// decoder reconfigures itself once frames arrive.
+const maxAnswerLevelIDC = 0x1f
+
+// clampLevelIDC returns pli with its level_idc byte clamped to maxAnswerLevelIDC.
+// Returns the input unchanged if it isn't a well-formed 6-char hex value.
+func clampLevelIDC(pli string) string {
+	if len(pli) != 6 {
+		return pli
+	}
+	b, err := hex.DecodeString(pli)
+	if err != nil {
+		return pli
+	}
+	if b[2] <= maxAnswerLevelIDC {
+		return pli
+	}
+	return pli[:4] + fmt.Sprintf("%02x", maxAnswerLevelIDC)
+}
+
 // rewriteAnswerProfileLevelID replaces every occurrence of
 // "profile-level-id=XXXXXX" in answerSDP with the supplied 6-hex-char value.
 //
@@ -699,7 +726,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		cameraPLI            string
 	)
 	if vt := source.VideoTrack(); vt != nil && len(vt.SPS) >= 4 {
-		cameraPLI = hex.EncodeToString(vt.SPS[1:4])
+		cameraPLI = clampLevelIDC(hex.EncodeToString(vt.SPS[1:4]))
 		sdpFmtpLine = fmt.Sprintf("level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s", cameraPLI)
 		spsForLog, ppsForLog = vt.SPS, vt.PPS
 	}

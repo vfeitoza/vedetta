@@ -1037,3 +1037,28 @@ func TestRewriteAnswerProfileLevelIDLeavesCandidatesIntact(t *testing.T) {
 		t.Fatalf("rewrite damaged surrounding SDP lines:\n got: %q\nwant: %q", got, want)
 	}
 }
+
+func TestClampLevelIDC(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"high level 5.1 clamps to 3.1", "640033", "64001f"},
+		{"high level 4.1 clamps to 3.1", "640029", "64001f"},
+		{"high level 3.1 passes through", "64001f", "64001f"},
+		{"high level 2.2 passes through unchanged", "640016", "640016"},
+		{"baseline level 3.1 passes through", "42001f", "42001f"},
+		{"baseline level 5.0 clamps", "420032", "42001f"},
+		{"malformed length passes through", "640", "640"},
+		{"malformed hex passes through", "6400zz", "6400zz"},
+		{"empty passes through", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampLevelIDC(tt.in); got != tt.want {
+				t.Errorf("clampLevelIDC(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
