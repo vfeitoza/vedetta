@@ -1683,6 +1683,32 @@ func TestClipsByCamera_NoWindow(t *testing.T) {
 	}
 }
 
+func TestClipsByCameraOlderThan(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+	// cam-a: before cutoff — no end_time, COALESCE falls back to timestamp.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -5), time.Time{}, "/c/before.mp4", "")
+	// cam-a: after cutoff — should be excluded.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, +5), time.Time{}, "/c/after.mp4", "")
+	// cam-b: before cutoff — cross-camera isolation check.
+	mustInsertEvent(t, db, "cam-b", mid.AddDate(0, 0, -5), time.Time{}, "/c/other.mp4", "")
+	// cam-a: before cutoff but no media — media-predicate check.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -3), time.Time{}, "", "")
+
+	got, err := db.ClipsByCameraOlderThan("cam-a", mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1", len(got))
+	}
+	wantID := fmt.Sprintf("cam-a-%s-%s-%s", mid.AddDate(0, 0, -5).Format("20060102T150405.000"), "/c/before.mp4", "")
+	if got[0].ID != wantID {
+		t.Errorf("got ID %q, want %q", got[0].ID, wantID)
+	}
+}
+
 func mustInsertSegment(t *testing.T, db *DB, camera string, start time.Time, size int64) {
 	t.Helper()
 	if err := db.SaveSegment(SegmentRecord{

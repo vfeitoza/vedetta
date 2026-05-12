@@ -2505,6 +2505,7 @@ func (d *DB) ListNotificationPrefs(username string) ([]NotificationPref, error) 
 // proxy Remote-User, bearer token), and those usernames do not all appear
 // in auth_users. Iterating push_subscriptions directly also avoids doing
 // pref/mute/cooldown work for users who aren't subscribed.
+
 // eventSelectCols is the fixed column list matched by scanEvents.
 const eventSelectCols = "id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label"
 
