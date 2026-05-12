@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -180,45 +179,26 @@ func TestCleanSegments_PerCameraRetention(t *testing.T) {
 
 func TestRunCleanupHoldsSegmentOpMu(t *testing.T) {
 	r := &Recorder{} // zero-value; subsystems are nil
-	lockHeld := atomic.Bool{}
 
-	// Intercept when the lock is held by replacing the body with a channel sync.
-	// We can't run runCleanupLocked on a nil Recorder (it would nil-deref on r.db),
-	// so we test the wrapper by observing lock state from a concurrent goroutine
-	// that races against runCleanup. Instead, we directly exercise the wrapper
-	// contract: acquire → lock is held → release → lock is free.
 	done := make(chan struct{})
 	go func() {
 		defer func() {
-			// runCleanupLocked panics on nil r.db; recover so we can still
-			// observe that the lock was taken and released by the wrapper.
-			recover() //nolint:errcheck
+			// runCleanupLocked nil-derefs on r.db; recover so the wrapper's
+			// deferred Unlock still fires and the lock is released cleanly.
+			recover()
 			close(done)
 		}()
-		lockHeld.Store(false)
-		r.runCleanup() // wrapper takes segmentOpMu; body panics and is recovered
+		r.runCleanup()
 	}()
 
-	deadline := time.After(100 * time.Millisecond)
-	for {
-		select {
-		case <-done:
-			// runCleanup (or its recover) returned; lock must be released.
-			if !r.segmentOpMu.TryLock() {
-				t.Fatal("expected lock released after runCleanup")
-			}
-			r.segmentOpMu.Unlock()
-			return
-		case <-deadline:
-			t.Fatal("runCleanup did not return within deadline")
-		default:
-			// Busy-spin: if we can grab the lock while the goroutine is
-			// between wrapper entry and body panic, that's fine — the body
-			// exits so fast we may race. Record it for diagnostics only.
-			if r.segmentOpMu.TryLock() {
-				lockHeld.Store(true)
-				r.segmentOpMu.Unlock()
-			}
+	select {
+	case <-done:
+		// runCleanup returned (via recover); lock must now be free.
+		if !r.segmentOpMu.TryLock() {
+			t.Fatal("expected segmentOpMu released after runCleanup")
 		}
+		r.segmentOpMu.Unlock()
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("runCleanup did not return within deadline")
 	}
 }

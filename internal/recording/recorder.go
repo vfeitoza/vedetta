@@ -96,8 +96,8 @@ type Recorder struct {
 	exportProcess        func(inputs []string, outputPath string, start, duration time.Duration) error
 
 	// segmentOpMu serializes every operation that creates, renames, or
-	// deletes a segment/clip/snapshot file. See docs/superpowers/specs/
-	// 2026-05-12-storage-management-design.md for the lock model.
+	// deletes a segment, clip, or snapshot file. Callers that perform
+	// any of those file operations must hold this mutex.
 	segmentOpMu sync.Mutex
 
 	// Cached storage stats refreshed in background

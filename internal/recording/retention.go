@@ -352,4 +352,3 @@ func (r *Recorder) removeEmptyDirsIn(root string) {
 		return nil
 	})
 }
-
