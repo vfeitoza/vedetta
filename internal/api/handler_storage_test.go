@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rvben/vedetta/internal/storage"
 )
 
 func TestGetStorage_ReturnsBreakdown(t *testing.T) {
@@ -96,5 +98,54 @@ func TestPostStorageDelete_409WhenLockHeld(t *testing.T) {
 	}
 	if got := w.Header().Get("Retry-After"); got != "5" {
 		t.Errorf("Retry-After=%q, want 5", got)
+	}
+}
+
+func TestPostStorageCleanup_Started(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/cleanup", nil)
+	w := httptest.NewRecorder()
+	s.PostStorageCleanup(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var res map[string]bool
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res["started"] {
+		t.Errorf("started=false, want true")
+	}
+}
+
+func TestGetStorageAudit_ReturnsEntries(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := db.InsertStorageAudit(storage.StorageAuditEntry{
+		Timestamp: time.Now().UTC(),
+		Actor:     "admin",
+		ScopeJSON: `{"camera":"cam-a"}`,
+		Bytes:     1 << 30,
+		Files:     7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/storage/audit?limit=10", nil)
+	w := httptest.NewRecorder()
+	limit := 10
+	s.GetStorageAudit(w, req, GetStorageAuditParams{Limit: &limit})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("got %d entries, want 1", len(out))
+	}
+	if out[0]["actor"] != "admin" {
+		t.Errorf("actor=%v, want admin", out[0]["actor"])
 	}
 }

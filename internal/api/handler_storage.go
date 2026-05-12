@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/rvben/vedetta/internal/recording"
 )
@@ -72,12 +73,43 @@ func storageActor(r *http.Request) string {
 	return p.Username
 }
 
-// PostStorageCleanup is a stub; full implementation follows in Task 24.
+// PostStorageCleanup triggers an async retention-cleanup pass. Returns 200 {"started":true}
+// immediately, or 409 if a cleanup is already running.
 func (s *Server) PostStorageCleanup(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	if err := s.recorder.TryRunCleanupAsync(); errors.Is(err, recording.ErrStorageBusy) {
+		w.Header().Set("Retry-After", "5")
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "storage busy"})
+		return
+	} else if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"started": true})
 }
 
-// GetStorageAudit is a stub; full implementation follows in Task 24.
-func (s *Server) GetStorageAudit(w http.ResponseWriter, _ *http.Request, _ GetStorageAuditParams) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+// GetStorageAudit returns the most recent storage-audit entries (default 50, max 500).
+func (s *Server) GetStorageAudit(w http.ResponseWriter, _ *http.Request, params GetStorageAuditParams) {
+	limit := 50
+	if params.Limit != nil && *params.Limit > 0 && *params.Limit <= 500 {
+		limit = *params.Limit
+	}
+	entries, err := s.recorder.StorageAudit(limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	type auditRow struct {
+		TS    time.Time      `json:"ts"`
+		Actor string         `json:"actor"`
+		Scope map[string]any `json:"scope"`
+		Bytes int64          `json:"bytes"`
+		Files int            `json:"files"`
+	}
+	resp := make([]auditRow, 0, len(entries))
+	for _, e := range entries {
+		var scope map[string]any
+		_ = json.Unmarshal([]byte(e.ScopeJSON), &scope)
+		resp = append(resp, auditRow{e.Timestamp, e.Actor, scope, e.Bytes, e.Files})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
