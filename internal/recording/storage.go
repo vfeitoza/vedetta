@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -287,4 +288,159 @@ func sameFilesystem(a, b string) bool {
 		return false
 	}
 	return sa.Fsid == sb.Fsid
+}
+
+// DeleteStorage implements POST /api/storage/delete. It validates the
+// request, acquires segmentOpMu via TryLock (returns ErrStorageBusy on
+// failure), excludes any currently-open segment by path equality
+// (returns ErrOpenSegmentProtected if the request explicitly targets
+// one), and removes files + DB rows in the same order as RemoveSegment
+// (FS first, then DB).
+func (r *Recorder) DeleteStorage(req DeleteRequest) (*DeleteResult, error) {
+	if err := validateDeleteRequest(req); err != nil {
+		return nil, err
+	}
+	if !req.DryRun {
+		if !r.segmentOpMu.TryLock() {
+			return nil, ErrStorageBusy
+		}
+		defer r.segmentOpMu.Unlock()
+	}
+
+	var openPaths map[string]struct{}
+	if r.segments != nil {
+		openPaths = pathSet(r.segments.CurrentSegmentPaths())
+	} else {
+		openPaths = map[string]struct{}{}
+	}
+
+	switch req.Target {
+	case DeleteSegments:
+		return r.deleteSegmentsScoped(req, openPaths)
+	case DeleteClips:
+		return r.deleteClipsScoped(req, openPaths)
+	case DeleteAll:
+		return r.deleteAllScoped(req, openPaths)
+	case DeleteFreeBytes:
+		return r.deleteFreeBytes(req, openPaths)
+	}
+	return nil, fmt.Errorf("recording: unreachable target %q", req.Target)
+}
+
+func validateDeleteRequest(req DeleteRequest) error {
+	switch req.Target {
+	case DeleteSegments, DeleteAll:
+		if req.Camera == "" {
+			return fmt.Errorf("camera required for target=%q", req.Target)
+		}
+		if !hasWindow(req) {
+			return fmt.Errorf("window required for target=%q", req.Target)
+		}
+	case DeleteClips:
+		if req.Camera == "" {
+			return fmt.Errorf("camera required for target=clips")
+		}
+	case DeleteFreeBytes:
+		if req.FreeBytesTarget <= 0 {
+			return fmt.Errorf("free_bytes_target must be > 0")
+		}
+		if req.Camera != "" || hasWindow(req) {
+			return fmt.Errorf("free_bytes target accepts no camera or window")
+		}
+	default:
+		return fmt.Errorf("invalid target %q", req.Target)
+	}
+	hasOTD := req.OlderThanDays > 0
+	hasRange := req.From != "" && req.To != ""
+	if hasOTD && hasRange {
+		return fmt.Errorf("set either older_than_days or from/to, not both")
+	}
+	if (req.From != "") != (req.To != "") {
+		return fmt.Errorf("set both from and to or neither")
+	}
+	return nil
+}
+
+func hasWindow(req DeleteRequest) bool {
+	return req.OlderThanDays > 0 || (req.From != "" && req.To != "")
+}
+
+func pathSet(segs []CurrentSegment) map[string]struct{} {
+	m := make(map[string]struct{}, len(segs))
+	for _, s := range segs {
+		m[s.Path] = struct{}{}
+	}
+	return m
+}
+
+func (r *Recorder) deleteSegmentsScoped(req DeleteRequest, openPaths map[string]struct{}) (*DeleteResult, error) {
+	from, to, err := resolveWindow(req)
+	if err != nil {
+		return nil, err
+	}
+	segs, err := r.db.SegmentsByCameraInRange(req.Camera, from, to)
+	if err != nil {
+		return nil, err
+	}
+	res := &DeleteResult{Cameras: []string{req.Camera}}
+	var protected []string
+	for _, s := range segs {
+		if _, isOpen := openPaths[s.Path]; isOpen {
+			protected = append(protected, s.Path)
+			continue
+		}
+		if req.DryRun {
+			res.Segments++
+			res.Bytes += s.SizeBytes
+			continue
+		}
+		if err := r.removeSegmentFile(s.Path); err == nil {
+			if err := r.db.DeleteSegmentByID(s.ID); err == nil {
+				res.Segments++
+				res.Bytes += s.SizeBytes
+			}
+		}
+	}
+	if len(protected) > 0 && !req.DryRun {
+		return nil, &ErrOpenSegmentProtected{Paths: protected}
+	}
+	return res, nil
+}
+
+func resolveWindow(req DeleteRequest) (from, to time.Time, err error) {
+	if req.OlderThanDays > 0 {
+		to = time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
+		from = time.Unix(0, 0)
+		return from, to, nil
+	}
+	fromDay, err := time.Parse("2006-01-02", req.From)
+	if err != nil {
+		return from, to, fmt.Errorf("invalid from: %w", err)
+	}
+	toDay, err := time.Parse("2006-01-02", req.To)
+	if err != nil {
+		return from, to, fmt.Errorf("invalid to: %w", err)
+	}
+	if toDay.Before(fromDay) {
+		return from, to, fmt.Errorf("to must be >= from")
+	}
+	return fromDay.UTC(), toDay.AddDate(0, 0, 1).UTC(), nil
+}
+
+func (r *Recorder) removeSegmentFile(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// Stubs — implemented in Task 19.
+func (r *Recorder) deleteClipsScoped(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
+	return nil, errors.New("deleteClipsScoped: not implemented")
+}
+func (r *Recorder) deleteAllScoped(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
+	return nil, errors.New("deleteAllScoped: not implemented")
+}
+func (r *Recorder) deleteFreeBytes(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
+	return nil, errors.New("deleteFreeBytes: not implemented")
 }

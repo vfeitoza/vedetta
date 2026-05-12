@@ -607,6 +607,12 @@ func (d *DB) DeleteSegment(path string) error {
 	return err
 }
 
+// DeleteSegmentByID removes a segment row by primary key.
+func (d *DB) DeleteSegmentByID(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM segments WHERE id = ?`, id)
+	return err
+}
+
 // GetAllSegments returns all segment records for a given camera.
 func (d *DB) GetAllSegments(cameraName string) ([]SegmentRecord, error) {
 	rows, err := d.db.Query(`
