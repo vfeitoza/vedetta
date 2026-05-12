@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
+	"github.com/rvben/vedetta/internal/storage"
 )
 
 // ErrStorageBusy is returned when segmentOpMu cannot be acquired
@@ -563,4 +564,35 @@ func (r *Recorder) deleteFreeBytes(req DeleteRequest, openPaths map[string]struc
 	}
 	sort.Strings(res.Cameras)
 	return res, nil
+}
+
+// TryRunCleanupAsync starts a background retention pass. Returns
+// ErrStorageBusy if segmentOpMu cannot be acquired. The spawned
+// goroutine owns the lock for the duration of the run.
+func (r *Recorder) TryRunCleanupAsync() error {
+	if !r.segmentOpMu.TryLock() {
+		return ErrStorageBusy
+	}
+	go func() {
+		defer r.segmentOpMu.Unlock()
+		r.runCleanupLocked()
+	}()
+	return nil
+}
+
+// RecordStorageAudit writes one audit row after a successful manual
+// delete. Errors are returned but the caller usually only logs them.
+func (r *Recorder) RecordStorageAudit(actor, scopeJSON string, bytes int64, files int) error {
+	return r.db.InsertStorageAudit(storage.StorageAuditEntry{
+		Timestamp: time.Now().UTC(),
+		Actor:     actor,
+		ScopeJSON: scopeJSON,
+		Bytes:     bytes,
+		Files:     files,
+	})
+}
+
+// StorageAudit returns the most recent N audit rows for GET /api/storage/audit.
+func (r *Recorder) StorageAudit(limit int) ([]storage.StorageAuditEntry, error) {
+	return r.db.StorageAudit(limit)
 }

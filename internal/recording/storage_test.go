@@ -213,3 +213,34 @@ func TestStorageBreakdown_SameFilesystemDetection(t *testing.T) {
 		t.Errorf("roots should be set: %+v %+v", out.Recording, out.Snapshots)
 	}
 }
+
+func TestTryRunCleanupAsync_BusyReturnsError(t *testing.T) {
+	r := &Recorder{}
+	r.segmentOpMu.Lock() // simulate in-flight
+	defer r.segmentOpMu.Unlock()
+	if err := r.TryRunCleanupAsync(); !errors.Is(err, ErrStorageBusy) {
+		t.Errorf("got %v, want ErrStorageBusy", err)
+	}
+}
+
+func TestTryRunCleanupAsync_SpawnsGoroutine(t *testing.T) {
+	db := openTestStorageDB(t)
+	r := &Recorder{db: db}
+	if err := r.TryRunCleanupAsync(); err != nil {
+		t.Fatal(err)
+	}
+	// Wait until we can grab the lock again — the goroutine must release it.
+	deadline := time.After(time.Second)
+	for {
+		if r.segmentOpMu.TryLock() {
+			r.segmentOpMu.Unlock()
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("goroutine did not release lock")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
