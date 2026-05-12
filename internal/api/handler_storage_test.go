@@ -188,6 +188,50 @@ func TestGetStorage_AllowsReadScope(t *testing.T) {
 	}
 }
 
+func TestStorageDelete_ProtectsOpenSegment(t *testing.T) {
+	s, db := newTestServer(t)
+
+	// Write a "live" segment file under the recorder's recording path.
+	openDir := filepath.Join(s.recorder.Path(), "cam-a")
+	if err := os.MkdirAll(openDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	openPath := filepath.Join(openDir, "live.mp4")
+	if err := os.WriteFile(openPath, []byte("live"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register it in the DB as today's segment.
+	now := time.Now().UTC()
+	seedSegment(t, db, "cam-a", openPath, now, now.Add(time.Hour), 4)
+
+	// Wire a fake open consumer pointing at this path.
+	s.recorder.RegisterFakeOpenConsumer("cam-a", openPath)
+
+	body := `{"target":"segments","camera":"cam-a","from":"` +
+		now.Format("2006-01-02") + `","to":"` + now.Format("2006-01-02") + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.PostStorageDelete(w, req, PostStorageDeleteParams{})
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s, want 422", w.Code, w.Body.String())
+	}
+	var body422 struct {
+		ProtectedPaths []string `json:"protected_paths"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body422); err != nil {
+		t.Fatal(err)
+	}
+	if len(body422.ProtectedPaths) != 1 || body422.ProtectedPaths[0] != openPath {
+		t.Errorf("protected_paths=%v, want [%q]", body422.ProtectedPaths, openPath)
+	}
+	if _, err := os.Stat(openPath); err != nil {
+		t.Errorf("open segment was deleted despite 422: %v", err)
+	}
+}
+
 func TestStorageDelete_ConcurrentWithCleanup_Returns409(t *testing.T) {
 	s, db := newTestServer(t)
 

@@ -325,3 +325,12 @@ func (rc *RecordingConsumer) CurrentSegmentPath() string {
 	defer rc.mu.Unlock()
 	return rc.currentPath
 }
+
+// SetTestState seeds the consumer's identity and open-path fields for
+// tests. Do not call from production code.
+func (rc *RecordingConsumer) SetTestState(camera, path string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.camera = camera
+	rc.currentPath = path
+}
