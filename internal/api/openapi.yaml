@@ -2031,6 +2031,88 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/storage:
+    get:
+      operationId: getStorage
+      summary: Return cached storage breakdown
+      tags: [health]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageBreakdown'
+
+  /api/storage/delete:
+    post:
+      operationId: postStorageDelete
+      summary: Delete segments/clips/snapshots in a scoped window
+      tags: [health]
+      parameters:
+        - in: query
+          name: dry_run
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '400':
+          description: Malformed request
+        '409':
+          description: Storage operation in progress
+        '422':
+          description: Request targets currently-open segment(s)
+
+  /api/storage/cleanup:
+    post:
+      operationId: postStorageCleanup
+      summary: Trigger an async retention pass
+      tags: [health]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started:
+                    type: boolean
+        '409':
+          description: Storage operation in progress
+
+  /api/storage/audit:
+    get:
+      operationId: getStorageAudit
+      summary: List recent manual-delete audit rows
+      tags: [health]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StorageAuditEntry'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3242,3 +3324,72 @@ components:
         total_bytes:
           type: integer
           format: int64
+
+    StorageBreakdown:
+      type: object
+      properties:
+        recording: { $ref: '#/components/schemas/FilesystemStats' }
+        snapshots: { $ref: '#/components/schemas/FilesystemStats' }
+        recording_paused: { type: boolean }
+        projection: { type: object }
+        cameras:
+          type: array
+          items: { $ref: '#/components/schemas/CameraBreakdown' }
+
+    FilesystemStats:
+      type: object
+      properties:
+        used_bytes: { type: integer, format: int64 }
+        segment_bytes: { type: integer, format: int64 }
+        clip_bytes: { type: integer, format: int64 }
+        disk_available: { type: integer, format: int64 }
+        root: { type: string }
+        same_filesystem_as_recording: { type: boolean }
+
+    CameraBreakdown:
+      type: object
+      properties:
+        name: { type: string }
+        segment_bytes: { type: integer, format: int64 }
+        clip_bytes: { type: integer, format: int64 }
+        oldest_segment: { type: string, format: date-time }
+        last_7d_bytes: { type: integer, format: int64 }
+        per_day:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              bytes: { type: integer, format: int64 }
+        effective_retain_days: { type: integer }
+
+    DeleteRequest:
+      type: object
+      required: [target]
+      properties:
+        target: { type: string, enum: [segments, clips, all, free_bytes] }
+        camera: { type: string }
+        older_than_days: { type: integer }
+        from: { type: string }
+        to: { type: string }
+        free_bytes_target: { type: integer, format: int64 }
+
+    DeleteResult:
+      type: object
+      properties:
+        segments: { type: integer }
+        clips: { type: integer }
+        snapshots: { type: integer }
+        bytes: { type: integer, format: int64 }
+        cameras:
+          type: array
+          items: { type: string }
+
+    StorageAuditEntry:
+      type: object
+      properties:
+        ts: { type: string, format: date-time }
+        actor: { type: string }
+        scope: { type: object }
+        bytes: { type: integer, format: int64 }
+        files: { type: integer }
