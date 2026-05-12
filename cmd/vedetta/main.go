@@ -749,16 +749,13 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if saveErr != nil {
 					slog.Error("failed to save event", "error", saveErr)
 				} else if event.SnapshotImage != nil && event.SnapshotPath != "" {
-					if actualPath, err := sub.snapshotSaver.Save(event.SnapshotImage, event.SnapshotPath); err != nil {
+					resolved, err := sub.recorder.SaveEventSnapshot(event, event.SnapshotImage, event.SnapshotPath)
+					if err != nil {
 						slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
-					} else if err := db.UpdateEventSnapshotPath(event.ID, actualPath); err != nil {
-						slog.Error("failed to persist event snapshot path", "event", event.ID, "error", err)
 					} else {
-						// Update so downstream consumers (MQTT, push) see the path
-						// that was actually written, which may be the fallback.
-						event.SnapshotPath = actualPath
-						// Main.go is the authoritative setter of this bit for
-						// downstream consumers (MQTT publish, push dispatcher).
+						// Update resolved path and availability so downstream
+						// consumers (MQTT, push) see the correct values.
+						event.SnapshotPath = resolved
 						event.SnapshotAvailable = true
 					}
 				}
