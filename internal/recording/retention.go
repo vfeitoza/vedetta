@@ -62,7 +62,18 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 	}()
 }
 
+// runCleanup acquires segmentOpMu and runs one retention pass.
+// The periodic loop calls this. Callers that already hold
+// segmentOpMu must call runCleanupLocked directly instead.
 func (r *Recorder) runCleanup() {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+	r.runCleanupLocked()
+}
+
+// runCleanupLocked is the actual retention body. Caller MUST hold
+// r.segmentOpMu.
+func (r *Recorder) runCleanupLocked() {
 	slog.Debug("running retention cleanup")
 
 	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
