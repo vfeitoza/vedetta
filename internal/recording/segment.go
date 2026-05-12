@@ -127,6 +127,32 @@ func (sr *SegmentRecorder) AnyPaused() bool {
 	return false
 }
 
+// CurrentSegment names an actively-recording segment file.
+type CurrentSegment struct {
+	Camera string
+	Path   string
+}
+
+// CurrentSegmentPaths returns one CurrentSegment per consumer that
+// currently has an open writer. Consumers with no open segment are
+// omitted. Order is the consumer-registration order.
+func (sr *SegmentRecorder) CurrentSegmentPaths() []CurrentSegment {
+	sr.mu.Lock()
+	consumers := make([]*media.RecordingConsumer, len(sr.consumers))
+	copy(consumers, sr.consumers)
+	sr.mu.Unlock()
+
+	out := make([]CurrentSegment, 0, len(consumers))
+	for _, c := range consumers {
+		path := c.CurrentSegmentPath()
+		if path == "" {
+			continue
+		}
+		out = append(out, CurrentSegment{Camera: c.Camera(), Path: path})
+	}
+	return out
+}
+
 func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, segDir string) {
 	source := sr.hub.GetOrCreate(rtspURL)
 

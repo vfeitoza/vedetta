@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -73,6 +74,17 @@ func TestSegmentRecorder_FindSegments_UnknownCamera(t *testing.T) {
 	if len(result) != 0 {
 		t.Errorf("expected 0 segments for unknown camera, got %d", len(result))
 	}
+}
+
+func TestCurrentSegmentPaths(t *testing.T) {
+	sr := &SegmentRecorder{}
+	if got := sr.CurrentSegmentPaths(); len(got) != 0 {
+		t.Errorf("empty SegmentRecorder = %v, want empty slice", got)
+	}
+
+	rc1 := &media.RecordingConsumer{}
+	sr.consumers = []*media.RecordingConsumer{rc1}
+	_ = sr.CurrentSegmentPaths() // smoke: should not panic, returns []
 }
 
 func TestSegmentRecorder_RemoveSegment(t *testing.T) {
