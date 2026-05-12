@@ -1626,6 +1626,63 @@ func TestGetRecompressionCandidatesBySize(t *testing.T) {
 	}
 }
 
+func mustInsertEvent(t *testing.T, db *DB, cam string, ts, end time.Time, clip, snap string) {
+	t.Helper()
+	// Include clip and snap in the ID to keep events unique when timestamp is the same.
+	ev := camera.Event{
+		ID:           fmt.Sprintf("%s-%s-%s-%s", cam, ts.Format("20060102T150405.000"), clip, snap),
+		CameraName:   cam,
+		Label:        "person",
+		Score:        0.9,
+		Timestamp:    ts,
+		ClipPath:     clip,
+		SnapshotPath: snap,
+	}
+	if !end.IsZero() {
+		ev.EndTime = end
+	}
+	if err := db.SaveEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClipsByCameraInRange(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+	// Event with clip_path, end_time inside window.
+	mustInsertEvent(t, db, "cam-a", mid, mid.Add(30*time.Second), "/c/1.mp4", "/s/1.jpg")
+	// Event with NULL end_time but timestamp outside window.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -5), time.Time{}, "/c/2.mp4", "")
+	// Snapshot-only event inside window.
+	mustInsertEvent(t, db, "cam-a", mid, time.Time{}, "", "/s/3.jpg")
+
+	got, err := db.ClipsByCameraInRange("cam-a",
+		mid.AddDate(0, 0, -1),
+		mid.AddDate(0, 0, +1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2 (one with clip, one snapshot-only)", len(got))
+	}
+}
+
+func TestClipsByCamera_NoWindow(t *testing.T) {
+	db := newTestDB(t)
+	mustInsertEvent(t, db, "cam-a", time.Now(), time.Time{}, "/c/1.mp4", "")
+	mustInsertEvent(t, db, "cam-a", time.Now().Add(time.Second), time.Time{}, "", "") // no media
+	mustInsertEvent(t, db, "cam-b", time.Now().Add(2*time.Second), time.Time{}, "/c/2.mp4", "")
+
+	got, err := db.ClipsByCamera("cam-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1 (only events with media for cam-a)", len(got))
+	}
+}
+
 func mustInsertSegment(t *testing.T, db *DB, camera string, start time.Time, size int64) {
 	t.Helper()
 	if err := db.SaveSegment(SegmentRecord{
