@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/draw"
 	"image/jpeg"
 	"log/slog"
 	"net/http"
@@ -231,63 +233,63 @@ func (s *Server) PressDoorbell(w http.ResponseWriter, r *http.Request, name stri
 		Score:             1.0,
 		Box:               [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()},
 		Timestamp:         time.Now(),
-		SnapshotAvailable: true,
+		SnapshotAvailable: false,
 	}
 
-	// Save snapshot
+	// Compute the primary snapshot destination.
 	snapDir, err := safepath.Join(s.snapshotPath, name)
 	snapPath := ""
 	if err != nil {
 		slog.Error("invalid doorbell snapshot path", "camera", name, "error", err)
 	} else {
 		snapPath, err = safepath.Join(snapDir, safepath.FileComponent(eventID)+".jpg")
-	}
-	if err == nil && os.MkdirAll(snapDir, 0o755) == nil {
-		var buf bytes.Buffer
-		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil {
-			if err := os.WriteFile(snapPath, buf.Bytes(), 0o644); err == nil {
-				ev.SnapshotPath = snapPath
-
-				// Publish snapshot to MQTT
-				if s.mqttClient != nil {
-					s.mqttClient.PublishSnapshot(name, "doorbell", buf.Bytes())
-				}
-			}
+		if err != nil {
+			slog.Error("invalid doorbell snapshot path", "camera", name, "error", err)
+			snapPath = ""
 		}
 	}
 
-	// Run face recognition on the snapshot
+	// Persist the event row first so SaveEventSnapshot's UPDATE has a row to hit.
+	if err := s.db.SaveEvent(ev); err != nil {
+		slog.Error("failed to save doorbell event", "error", err)
+	}
+
+	// Face recognition runs against the in-memory image; it does not need
+	// the snapshot file on disk.
 	if s.faceRecognizer != nil {
 		fullBox := [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()}
 		results := s.faceRecognizer.DetectAndEmbed(img, fullBox, s.faceCropDir)
 		if len(results) > 0 {
-			bestResult := results[0]
-			personID, similarity := s.matchFaceToPerson(bestResult.Embedding)
+			personID, _ := s.matchFaceToPerson(results[0].Embedding)
 			if personID > 0 {
 				if p, err := s.db.GetPerson(personID); err == nil && p != nil && p.Name != "" {
 					ev.SubLabel = p.Name
+					_ = s.db.UpdateEventSubLabel(ev.ID, p.Name)
 				}
 			}
-			_ = similarity
 		}
 	}
 
-	// Save event to DB
-	if err := s.db.SaveEvent(ev); err != nil {
-		slog.Error("failed to save doorbell event", "error", err)
-	}
-	if ev.SnapshotPath != "" {
-		_ = s.db.UpdateEventSnapshotPath(ev.ID, ev.SnapshotPath)
-	}
-	if ev.SubLabel != "" {
-		_ = s.db.UpdateEventSubLabel(ev.ID, ev.SubLabel)
+	// Save the snapshot via the locked recorder method.
+	if snapPath != "" {
+		rgba := toRGBA(img)
+		resolved, err := s.recorder.SaveEventSnapshot(ev, rgba, snapPath)
+		if err != nil {
+			slog.Error("save doorbell snapshot failed", "event", ev.ID, "error", err)
+		} else {
+			ev.SnapshotPath = resolved
+			ev.SnapshotAvailable = true
+		}
 	}
 
-	// Publish doorbell event to MQTT
+	// Publish snapshot + doorbell to MQTT using the on-disk JPEG if present.
 	if s.mqttClient != nil {
 		var jpegData []byte
 		if ev.SnapshotPath != "" {
 			jpegData, _ = os.ReadFile(ev.SnapshotPath)
+		}
+		if len(jpegData) > 0 {
+			s.mqttClient.PublishSnapshot(name, "doorbell", jpegData)
 		}
 		s.mqttClient.PublishDoorbell(name, ev.SubLabel, jpegData)
 	}
@@ -587,6 +589,17 @@ func (s *Server) reloadCameraZones(name string, cam *camera.Camera) {
 		return
 	}
 	cam.SetZones(zones)
+}
+
+// toRGBA returns img as *image.RGBA, converting if necessary.
+func toRGBA(img image.Image) *image.RGBA {
+	if r, ok := img.(*image.RGBA); ok {
+		return r
+	}
+	b := img.Bounds()
+	out := image.NewRGBA(b)
+	draw.Draw(out, b, img, b.Min, draw.Src)
+	return out
 }
 
 // TriggerDoorbell programmatically triggers a doorbell event for a camera.
