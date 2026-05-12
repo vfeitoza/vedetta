@@ -93,6 +93,25 @@ func TestRecordingConsumer_PausedState(t *testing.T) {
 	}
 }
 
+func TestRecordingConsumer_Accessors(t *testing.T) {
+	rc := &RecordingConsumer{camera: "kids_bedroom_3"}
+	if got := rc.Camera(); got != "kids_bedroom_3" {
+		t.Errorf("Camera() = %q, want kids_bedroom_3", got)
+	}
+	if got := rc.CurrentSegmentPath(); got != "" {
+		t.Errorf("CurrentSegmentPath() with no open segment = %q, want empty", got)
+	}
+
+	// Simulate an open segment by setting the writer path field directly.
+	rc.mu.Lock()
+	rc.currentPath = "/tmp/seg-001.mp4"
+	rc.mu.Unlock()
+
+	if got := rc.CurrentSegmentPath(); got != "/tmp/seg-001.mp4" {
+		t.Errorf("CurrentSegmentPath() = %q, want /tmp/seg-001.mp4", got)
+	}
+}
+
 func TestRecordingConsumer_EnsureSegmentError_PausesAfterRepeatedFailures(t *testing.T) {
 	// Use a read-only directory so segment file creation fails
 	dir := t.TempDir()

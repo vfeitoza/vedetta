@@ -25,7 +25,7 @@ func newProjectionRecorder(t *testing.T, retainDays int) (*Recorder, *storage.DB
 		SegmentLength: 10 * time.Minute,
 		RetainDays:    retainDays,
 	}
-	rec := New(cfg, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "")
+	rec := New(cfg, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "", nil)
 	return rec, db
 }
 

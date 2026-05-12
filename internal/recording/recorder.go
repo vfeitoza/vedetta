@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/safepath"
+	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -93,14 +95,22 @@ type Recorder struct {
 	startTime            time.Time
 	snapshotPath         string
 	snapshotFallbackPath string
+	snapshotSaver        *snapshot.Saver
 	exportProcess        func(inputs []string, outputPath string, start, duration time.Duration) error
+
+	// segmentOpMu serializes every operation that creates, renames, or
+	// deletes a segment, clip, or snapshot file. Callers that perform
+	// any of those file operations must hold this mutex.
+	segmentOpMu sync.Mutex
 
 	// Cached storage stats refreshed in background
 	statsMu     sync.RWMutex
 	cachedStats StorageStats
+
+	breakdownCache breakdownCache
 }
 
-func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string, snapshotSaver *snapshot.Saver) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -109,18 +119,18 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 	exportDir := filepath.Join(cfg.Path, ".exports")
 	os.RemoveAll(exportDir)
 
-	return &Recorder{
+	r := &Recorder{
 		config:               cfg,
 		eventConfig:          eventCfg,
 		db:                   db,
 		hub:                  hub,
 		segments:             NewSegmentRecorder(cfg, db, hub),
-		recompressor:         NewRecompressor(cfg.TieredStorage, cameras, db),
 		cameraURLs:           make(map[string]string),
 		cameraRetention:      buildCameraRetention(cameras),
 		startTime:            time.Now(),
 		snapshotPath:         snapshotPath,
 		snapshotFallbackPath: snapshotFallbackPath,
+		snapshotSaver:        snapshotSaver,
 		exportProcess: func(inputs []string, outputPath string, start, duration time.Duration) error {
 			if len(inputs) == 1 {
 				return media.TrimMP4(inputs[0], outputPath, start, duration)
@@ -128,6 +138,8 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 			return media.ConcatMP4(inputs, outputPath, start, duration)
 		},
 	}
+	r.recompressor = NewRecompressor(cfg.TieredStorage, cameras, db, &r.segmentOpMu)
+	return r
 }
 
 // RegisterCamera registers a camera's recording URL for direct-from-stream recording.
@@ -201,8 +213,16 @@ func (r *Recorder) StartContinuousRecording(ctx context.Context, stoppedCameras 
 	slog.Info("continuous recording started", "cameras", len(r.cameraURLs))
 }
 
-// SaveClip records a clip around the event timestamp.
+// SaveClip extracts a clip around the event timestamp and persists its
+// path on the event row. Blocks on segmentOpMu so a concurrent manual
+// delete cannot run between ExtractClip and UpdateEventClipPath.
 func (r *Recorder) SaveClip(_ context.Context, event camera.Event) error {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+	return r.saveClipLocked(event)
+}
+
+func (r *Recorder) saveClipLocked(event camera.Event) error {
 	clipPath, err := r.ExtractClip(context.Background(), event)
 	if err != nil {
 		return fmt.Errorf("extract clip: %w", err)
@@ -574,4 +594,23 @@ func buildCameraRetention(cams []config.CameraConfig) map[string]int {
 		}
 	}
 	return m
+}
+
+// ReextractClip removes the old clip file (if any), clears its
+// availability flag, then re-extracts. The entire sequence runs under
+// a single segmentOpMu acquisition so a concurrent manual delete pass
+// cannot observe a half-renamed state.
+func (r *Recorder) ReextractClip(event camera.Event) error {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+
+	if event.ClipPath != "" {
+		if err := os.Remove(event.ClipPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("re-extract: remove old clip", "path", event.ClipPath, "error", err)
+		}
+		if err := r.db.UpdateEventClipAvailability(event.ID, false); err != nil {
+			return fmt.Errorf("clear clip availability: %w", err)
+		}
+	}
+	return r.saveClipLocked(event)
 }

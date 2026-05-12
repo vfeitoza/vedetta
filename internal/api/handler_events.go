@@ -210,18 +210,10 @@ func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
 		return
 	}
-
-	// Remove old clip if it exists
-	if event.ClipPath != "" {
-		os.Remove(event.ClipPath)
-		_ = s.db.UpdateEventClipAvailability(event.ID, false)
-	}
-
-	if err := s.recorder.SaveClip(r.Context(), *event); err != nil {
+	if err := s.recorder.ReextractClip(*event); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "event": id})
 }
 

@@ -49,6 +49,7 @@ type RecordingConsumer struct {
 	mu              sync.Mutex
 	writer          *SegmentWriter
 	segPath         string
+	currentPath     string // path of the segment currently being written; "" when closed
 	segStart        time.Time
 	paused          bool
 	pausedAtomic    atomic.Bool // lock-free read for external status checks
@@ -256,6 +257,7 @@ func (rc *RecordingConsumer) ensureSegment() error {
 	if err != nil {
 		return fmt.Errorf("create segment writer: %w", err)
 	}
+	rc.currentPath = rc.segPath
 
 	slog.Debug("started new segment", "camera", rc.camera, "path", rc.segPath)
 
@@ -308,4 +310,27 @@ func (rc *RecordingConsumer) closeCurrentSegment() {
 	}
 
 	rc.writer = nil
+	rc.currentPath = ""
+}
+
+// Camera returns the camera name this consumer records for.
+func (rc *RecordingConsumer) Camera() string {
+	return rc.camera
+}
+
+// CurrentSegmentPath returns the absolute path of the segment currently
+// being written, or "" if no segment is open. Safe for concurrent use.
+func (rc *RecordingConsumer) CurrentSegmentPath() string {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.currentPath
+}
+
+// SetTestState seeds the consumer's identity and open-path fields for
+// tests. Do not call from production code.
+func (rc *RecordingConsumer) SetTestState(camera, path string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.camera = camera
+	rc.currentPath = path
 }

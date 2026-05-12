@@ -3,6 +3,7 @@ package recording
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func newTestRecompressor(t *testing.T) (*Recompressor, *storage.DB) {
 	cameras := []config.CameraConfig{
 		{Name: "cam1"},
 	}
-	r := NewRecompressor(cfg, cameras, db)
+	r := NewRecompressor(cfg, cameras, db, &sync.Mutex{})
 	return r, db
 }
 
@@ -91,7 +92,7 @@ func TestRecompressionJob_SkipsDisabledCamera(t *testing.T) {
 		{Name: "cam_enabled"},
 		{Name: "cam_disabled", TieredStorage: config.CameraTieredStorageConfig{Enabled: &disabled}},
 	}
-	r := NewRecompressor(cfg, cameras, db)
+	r := NewRecompressor(cfg, cameras, db, &sync.Mutex{})
 	eligible := r.eligibleCameras()
 
 	if _, ok := eligible["cam_disabled"]; ok {
@@ -126,7 +127,7 @@ func TestRecompressionJob_PerCameraAfterDaysOverride(t *testing.T) {
 		{Name: "cam_short"},
 		{Name: "cam_long", TieredStorage: config.CameraTieredStorageConfig{AfterDays: &afterLong}},
 	}
-	r := NewRecompressor(global, cameras, db)
+	r := NewRecompressor(global, cameras, db, &sync.Mutex{})
 
 	segsShort, _ := db.GetSegmentsForRecompression("cam_short", now.Add(-time.Duration(1)*24*time.Hour))
 	if len(segsShort) == 0 {
@@ -253,7 +254,7 @@ func TestRecompressorPicksLargestFirst(t *testing.T) {
 		TargetWidth: 640, TargetHeight: 360,
 	}
 	cams := []config.CameraConfig{{Name: "cam_a"}, {Name: "cam_b"}}
-	r := NewRecompressor(cfg, cams, db)
+	r := NewRecompressor(cfg, cams, db, &sync.Mutex{})
 
 	var transcoded []string
 	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {
@@ -303,7 +304,7 @@ func TestRecompressorPicksOldestWhenConfigured(t *testing.T) {
 		TargetWidth: 640, TargetHeight: 360,
 	}
 	cams := []config.CameraConfig{{Name: "cam_a"}, {Name: "cam_b"}}
-	r := NewRecompressor(cfg, cams, db)
+	r := NewRecompressor(cfg, cams, db, &sync.Mutex{})
 
 	var transcoded []string
 	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {

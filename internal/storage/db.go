@@ -247,6 +247,16 @@ func migrate(db *sql.DB) error {
 			enabled      BOOLEAN NOT NULL DEFAULT 1,
 			PRIMARY KEY (username, camera, object_class)
 		);
+
+		CREATE TABLE IF NOT EXISTS storage_audit (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts          TIMESTAMP NOT NULL,
+			actor       TEXT NOT NULL,
+			scope_json  TEXT NOT NULL,
+			bytes_freed INTEGER NOT NULL,
+			file_count  INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_storage_audit_ts ON storage_audit(ts DESC);
 	`)
 	if err != nil {
 		return err
@@ -597,6 +607,12 @@ func (d *DB) DeleteSegment(path string) error {
 	return err
 }
 
+// DeleteSegmentByID removes a segment row by primary key.
+func (d *DB) DeleteSegmentByID(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM segments WHERE id = ?`, id)
+	return err
+}
+
 // GetAllSegments returns all segment records for a given camera.
 func (d *DB) GetAllSegments(cameraName string) ([]SegmentRecord, error) {
 	rows, err := d.db.Query(`
@@ -939,6 +955,90 @@ func (d *DB) GetSegmentsForRecompression(cameraName string, olderThan time.Time)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanSegments(rows)
+}
+
+// SegmentsByCameraOlderThan returns all segments for the given camera whose
+// start_time is before cutoff, ordered oldest first.
+func (d *DB) SegmentsByCameraOlderThan(camera string, cutoff time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ? AND replace(start_time, 'T', ' ') < ?
+		ORDER BY start_time ASC`,
+		camera, utc(cutoff).Format(layout),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// SegmentsByCameraInRange returns all segments for the given camera whose
+// start_time falls in the half-open interval [from, to), ordered oldest first.
+func (d *DB) SegmentsByCameraInRange(camera string, from, to time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ?
+		  AND replace(start_time, 'T', ' ') >= ?
+		  AND replace(start_time, 'T', ' ') < ?
+		ORDER BY start_time ASC`,
+		camera, utc(from).Format(layout), utc(to).Format(layout),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// OldestSegmentsUntilBytes returns the oldest segments across all cameras,
+// accumulating until their combined size_bytes reaches targetBytes. The
+// returned slice is ordered oldest start_time first and always includes the
+// segment that pushed the running total to or past the target, so callers
+// can be sure deleting the returned set frees at least targetBytes.
+// Returns nil when targetBytes <= 0.
+func (d *DB) OldestSegmentsUntilBytes(targetBytes int64) ([]SegmentRecord, error) {
+	if targetBytes <= 0 {
+		return nil, nil
+	}
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		ORDER BY start_time ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SegmentRecord
+	var sum int64
+	for rows.Next() {
+		var seg SegmentRecord
+		var recompressedAt sql.NullTime
+		if err := rows.Scan(
+			&seg.ID, &seg.Camera, &seg.Path,
+			&seg.StartTime, &seg.EndTime, &seg.SizeBytes,
+			&seg.Recompressed, &recompressedAt, &seg.RecompressFailures,
+		); err != nil {
+			return nil, err
+		}
+		if recompressedAt.Valid {
+			seg.RecompressedAt = recompressedAt.Time
+		}
+		out = append(out, seg)
+		sum += seg.SizeBytes
+		if sum >= targetBytes {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ResetStuckRecompressFailures clears the failure counter for any segments
@@ -1811,12 +1911,12 @@ func zoneBounds(points [][]float64) (x1, y1, x2, y2 float64) {
 
 // KnownObject represents a user-defined object to recognize (e.g. "Ruben's car").
 type KnownObject struct {
-	ID             int64    `json:"id"`
-	Name           string   `json:"name"`
-	Label          string   `json:"label"`
-	Centroid       []byte   `json:"-"`
-	CropPath       string   `json:"crop_path,omitempty"`
-	MatchThreshold *float64 `json:"match_threshold,omitempty"`
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	Label          string    `json:"label"`
+	Centroid       []byte    `json:"-"`
+	CropPath       string    `json:"crop_path,omitempty"`
+	MatchThreshold *float64  `json:"match_threshold,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -2421,6 +2521,68 @@ func (d *DB) ListNotificationPrefs(username string) ([]NotificationPref, error) 
 // proxy Remote-User, bearer token), and those usernames do not all appear
 // in auth_users. Iterating push_subscriptions directly also avoids doing
 // pref/mute/cooldown work for users who aren't subscribed.
+
+// eventSelectCols is the fixed column list matched by scanEvents.
+const eventSelectCols = "id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label"
+
+// clipPredicate matches events that have at least one media file attached.
+const clipPredicate = "(clip_path != '' OR snapshot_path != '')"
+
+// ClipsByCameraInRange returns events for cameraName that have media (clip or
+// snapshot) and whose effective time — end_time if set, timestamp otherwise —
+// falls within [from, to).
+func (d *DB) ClipsByCameraInRange(cameraName string, from, to time.Time) ([]camera.Event, error) {
+	rows, err := d.db.Query(`
+		SELECT `+eventSelectCols+`
+		FROM events
+		WHERE camera = ?
+		  AND `+clipPredicate+`
+		  AND COALESCE(end_time, timestamp) >= ?
+		  AND COALESCE(end_time, timestamp) <  ?
+		ORDER BY timestamp ASC`,
+		cameraName, utc(from), utc(to))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEvents(rows)
+}
+
+// ClipsByCameraOlderThan returns events for cameraName that have media and
+// whose effective time — end_time if set, timestamp otherwise — is before
+// cutoff.
+func (d *DB) ClipsByCameraOlderThan(cameraName string, cutoff time.Time) ([]camera.Event, error) {
+	rows, err := d.db.Query(`
+		SELECT `+eventSelectCols+`
+		FROM events
+		WHERE camera = ?
+		  AND `+clipPredicate+`
+		  AND COALESCE(end_time, timestamp) < ?
+		ORDER BY timestamp ASC`,
+		cameraName, utc(cutoff))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEvents(rows)
+}
+
+// ClipsByCamera returns all events for cameraName that have media (clip or
+// snapshot), regardless of time.
+func (d *DB) ClipsByCamera(cameraName string) ([]camera.Event, error) {
+	rows, err := d.db.Query(`
+		SELECT `+eventSelectCols+`
+		FROM events
+		WHERE camera = ?
+		  AND `+clipPredicate+`
+		ORDER BY timestamp ASC`, cameraName)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEvents(rows)
+}
+
 func (d *DB) ListAllUsernames() ([]string, error) {
 	rows, err := d.db.Query(`SELECT DISTINCT username FROM push_subscriptions ORDER BY username`)
 	if err != nil {
@@ -2434,6 +2596,105 @@ func (d *DB) ListAllUsernames() ([]string, error) {
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// StorageAuditEntry is one row of the storage_audit table.
+type StorageAuditEntry struct {
+	ID        int64
+	Timestamp time.Time
+	Actor     string
+	ScopeJSON string
+	Bytes     int64
+	Files     int
+}
+
+// DayBytes is one row of the per-day segment-bytes aggregation.
+type DayBytes struct {
+	Date  string
+	Bytes int64
+}
+
+// PerDayCameraSegmentBytes returns segment-byte totals per day for the
+// last N days, ordered ascending by date.
+func (d *DB) PerDayCameraSegmentBytes(camera string, days int) ([]DayBytes, error) {
+	if days <= 0 {
+		days = 30
+	}
+	rows, err := d.db.Query(`
+		SELECT strftime('%Y-%m-%d', start_time) AS day,
+		       COALESCE(SUM(size_bytes), 0) AS bytes
+		FROM segments
+		WHERE camera = ?
+		  AND start_time >= datetime('now', ?)
+		GROUP BY day
+		ORDER BY day ASC`,
+		camera, fmt.Sprintf("-%d days", days))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayBytes
+	for rows.Next() {
+		var db DayBytes
+		if err := rows.Scan(&db.Date, &db.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, db)
+	}
+	return out, rows.Err()
+}
+
+// AllSnapshotPaths returns every non-empty events.snapshot_path.
+func (d *DB) AllSnapshotPaths() ([]string, error) {
+	rows, err := d.db.Query(`SELECT snapshot_path FROM events WHERE snapshot_path != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// InsertStorageAudit records a manual storage operation.
+func (d *DB) InsertStorageAudit(e StorageAuditEntry) error {
+	_, err := d.db.Exec(`
+		INSERT INTO storage_audit (ts, actor, scope_json, bytes_freed, file_count)
+		VALUES (?, ?, ?, ?, ?)`,
+		utc(e.Timestamp), e.Actor, e.ScopeJSON, e.Bytes, e.Files)
+	return err
+}
+
+// StorageAudit returns the most recent audit entries, newest first.
+func (d *DB) StorageAudit(limit int) ([]StorageAuditEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(`
+		SELECT id, ts, actor, scope_json, bytes_freed, file_count
+		FROM storage_audit
+		ORDER BY ts DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []StorageAuditEntry
+	for rows.Next() {
+		var e StorageAuditEntry
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Actor, &e.ScopeJSON, &e.Bytes, &e.Files); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }

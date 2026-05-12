@@ -176,3 +176,29 @@ func TestCleanSegments_PerCameraRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCleanupHoldsSegmentOpMu(t *testing.T) {
+	r := &Recorder{} // zero-value; subsystems are nil
+
+	done := make(chan struct{})
+	go func() {
+		defer func() {
+			// runCleanupLocked nil-derefs on r.db; recover so the wrapper's
+			// deferred Unlock still fires and the lock is released cleanly.
+			recover()
+			close(done)
+		}()
+		r.runCleanup()
+	}()
+
+	select {
+	case <-done:
+		// runCleanup returned (via recover); lock must now be free.
+		if !r.segmentOpMu.TryLock() {
+			t.Fatal("expected segmentOpMu released after runCleanup")
+		}
+		r.segmentOpMu.Unlock()
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("runCleanup did not return within deadline")
+	}
+}

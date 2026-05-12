@@ -42,27 +42,55 @@ func (r *Recorder) StartRetentionCleanup(ctx context.Context) {
 					"available_mb", avail/(1024*1024),
 					"threshold_mb", threshold/(1024*1024),
 				)
-				r.runCleanup()
-
-				// Re-check after normal cleanup. If still below threshold,
-				// escalate to floor-breaking emergency deletion.
-				if r.segments.DiskAvailable() < threshold && r.config.UrgentCleanup.Enabled {
-					n, err := r.EmergencyDelete(ctx, r.config.UrgentCleanup)
-					if err != nil {
-						slog.Error("emergency cleanup failed", "error", err)
-					} else if n > 0 {
-						slog.Warn("emergency cleanup freed space by dropping segments below retain_days",
-							"segments_deleted", n,
-							"min_retention", r.config.UrgentCleanup.MinRetention,
-						)
-					}
-				}
+				r.runUrgentCleanup(ctx)
 			}
 		}
 	}()
 }
 
+// runCleanup acquires segmentOpMu and runs one retention pass.
+// The periodic loop calls this. Callers that already hold
+// segmentOpMu must call runCleanupLocked directly instead.
 func (r *Recorder) runCleanup() {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+	r.runCleanupLocked()
+}
+
+// runUrgentCleanup holds segmentOpMu for the entire urgent-cleanup sequence:
+// a normal retention pass followed by an optional emergency deletion. Holding
+// a single lock across both calls prevents another goroutine from writing a
+// new segment between the cleanup pass and the disk recheck that determines
+// whether emergency deletion is needed.
+func (r *Recorder) runUrgentCleanup(ctx context.Context) {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+
+	r.runCleanupLocked()
+
+	// Re-check after normal cleanup. If still below threshold,
+	// escalate to floor-breaking emergency deletion.
+	threshold := r.segments.Disk().MinRequired()
+	if r.segments.DiskAvailable() >= threshold || !r.config.UrgentCleanup.Enabled {
+		return
+	}
+
+	n, err := r.emergencyDeleteLocked(ctx, r.config.UrgentCleanup)
+	if err != nil {
+		slog.Error("emergency cleanup failed", "error", err)
+		return
+	}
+	if n > 0 {
+		slog.Warn("emergency cleanup freed space by dropping segments below retain_days",
+			"segments_deleted", n,
+			"min_retention", r.config.UrgentCleanup.MinRetention,
+		)
+	}
+}
+
+// runCleanupLocked is the actual retention body. Caller MUST hold
+// r.segmentOpMu.
+func (r *Recorder) runCleanupLocked() {
 	slog.Debug("running retention cleanup")
 
 	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
@@ -341,4 +369,3 @@ func (r *Recorder) removeEmptyDirsIn(root string) {
 		return nil
 	})
 }
-

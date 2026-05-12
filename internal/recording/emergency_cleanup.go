@@ -8,14 +8,23 @@ import (
 	"github.com/rvben/vedetta/internal/config"
 )
 
-// EmergencyDelete drops the oldest segments in DB order — but never anything
-// younger than cfg.MinRetention — until either cfg.BatchSize segments have
-// been removed or disk free space has crossed 150% of the configured minimum.
+// EmergencyDelete acquires segmentOpMu and drops the oldest segments.
+// Use this from contexts that do NOT already hold segmentOpMu.
 //
 // Unlike runCleanup, this intentionally breaks the retain_days contract when
 // the alternative is silent data loss from a paused recorder. Returns the
 // number of segments actually deleted.
 func (r *Recorder) EmergencyDelete(ctx context.Context, cfg config.UrgentCleanupConfig) (int, error) {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+	return r.emergencyDeleteLocked(ctx, cfg)
+}
+
+// emergencyDeleteLocked drops the oldest segments in DB order — but never anything
+// younger than cfg.MinRetention — until either cfg.BatchSize segments have
+// been removed or disk free space has crossed 150% of the configured minimum.
+// Caller MUST hold r.segmentOpMu.
+func (r *Recorder) emergencyDeleteLocked(ctx context.Context, cfg config.UrgentCleanupConfig) (int, error) {
 	if !cfg.Enabled {
 		return 0, nil
 	}

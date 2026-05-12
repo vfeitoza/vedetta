@@ -1625,3 +1625,197 @@ func TestGetRecompressionCandidatesBySize(t *testing.T) {
 		t.Fatalf("order = %v, want big,mid,small", []string{segs[0].Path, segs[1].Path, segs[2].Path})
 	}
 }
+
+func mustInsertEvent(t *testing.T, db *DB, cam string, ts, end time.Time, clip, snap string) {
+	t.Helper()
+	// Include clip and snap in the ID to keep events unique when timestamp is the same.
+	ev := camera.Event{
+		ID:           fmt.Sprintf("%s-%s-%s-%s", cam, ts.Format("20060102T150405.000"), clip, snap),
+		CameraName:   cam,
+		Label:        "person",
+		Score:        0.9,
+		Timestamp:    ts,
+		ClipPath:     clip,
+		SnapshotPath: snap,
+	}
+	if !end.IsZero() {
+		ev.EndTime = end
+	}
+	if err := db.SaveEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClipsByCameraInRange(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+	// Event with clip_path, end_time inside window.
+	mustInsertEvent(t, db, "cam-a", mid, mid.Add(30*time.Second), "/c/1.mp4", "/s/1.jpg")
+	// Event with NULL end_time but timestamp outside window.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -5), time.Time{}, "/c/2.mp4", "")
+	// Snapshot-only event inside window.
+	mustInsertEvent(t, db, "cam-a", mid, time.Time{}, "", "/s/3.jpg")
+
+	got, err := db.ClipsByCameraInRange("cam-a",
+		mid.AddDate(0, 0, -1),
+		mid.AddDate(0, 0, +1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2 (one with clip, one snapshot-only)", len(got))
+	}
+}
+
+func TestClipsByCamera_NoWindow(t *testing.T) {
+	db := newTestDB(t)
+	mustInsertEvent(t, db, "cam-a", time.Now(), time.Time{}, "/c/1.mp4", "")
+	mustInsertEvent(t, db, "cam-a", time.Now().Add(time.Second), time.Time{}, "", "") // no media
+	mustInsertEvent(t, db, "cam-b", time.Now().Add(2*time.Second), time.Time{}, "/c/2.mp4", "")
+
+	got, err := db.ClipsByCamera("cam-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1 (only events with media for cam-a)", len(got))
+	}
+}
+
+func TestClipsByCameraOlderThan(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+	// cam-a: before cutoff — no end_time, COALESCE falls back to timestamp.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -5), time.Time{}, "/c/before.mp4", "")
+	// cam-a: after cutoff — should be excluded.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, +5), time.Time{}, "/c/after.mp4", "")
+	// cam-b: before cutoff — cross-camera isolation check.
+	mustInsertEvent(t, db, "cam-b", mid.AddDate(0, 0, -5), time.Time{}, "/c/other.mp4", "")
+	// cam-a: before cutoff but no media — media-predicate check.
+	mustInsertEvent(t, db, "cam-a", mid.AddDate(0, 0, -3), time.Time{}, "", "")
+
+	got, err := db.ClipsByCameraOlderThan("cam-a", mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1", len(got))
+	}
+	wantID := fmt.Sprintf("cam-a-%s-%s-%s", mid.AddDate(0, 0, -5).Format("20060102T150405.000"), "/c/before.mp4", "")
+	if got[0].ID != wantID {
+		t.Errorf("got ID %q, want %q", got[0].ID, wantID)
+	}
+}
+
+func mustInsertSegment(t *testing.T, db *DB, camera string, start time.Time, size int64) {
+	t.Helper()
+	if err := db.SaveSegment(SegmentRecord{
+		Camera:    camera,
+		Path:      "/tmp/" + camera + "-" + start.Format("20060102T150405") + ".mp4",
+		StartTime: start,
+		EndTime:   start.Add(time.Minute),
+		SizeBytes: size,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSegmentsByCameraOlderThan(t *testing.T) {
+	db := newTestDB(t)
+	mustInsertSegment(t, db, "cam-a", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), 1<<20)
+	mustInsertSegment(t, db, "cam-a", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), 2<<20)
+	mustInsertSegment(t, db, "cam-b", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), 4<<20)
+
+	got, err := db.SegmentsByCameraOlderThan("cam-a", time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].Camera != "cam-a" || got[0].SizeBytes != 1<<20 {
+		t.Errorf("unexpected segment: %+v", got[0])
+	}
+}
+
+func TestSegmentsByCameraInRange(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	mustInsertSegment(t, db, "cam-a", mid.AddDate(0, 0, -5), 1)
+	mustInsertSegment(t, db, "cam-a", mid, 2)
+	mustInsertSegment(t, db, "cam-a", mid.AddDate(0, 0, +5), 4)
+
+	got, err := db.SegmentsByCameraInRange("cam-a",
+		mid.AddDate(0, 0, -1),
+		mid.AddDate(0, 0, +1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SizeBytes != 2 {
+		t.Errorf("got %v, want exactly the mid segment", got)
+	}
+}
+
+func TestOldestSegmentsUntilBytes(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	mustInsertSegment(t, db, "cam-a", base.AddDate(0, 0, 0), 100)
+	mustInsertSegment(t, db, "cam-a", base.AddDate(0, 0, 1), 200)
+	mustInsertSegment(t, db, "cam-b", base.AddDate(0, 0, 2), 400)
+
+	got, err := db.OldestSegmentsUntilBytes(250)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum int64
+	for _, s := range got {
+		sum += s.SizeBytes
+	}
+	if sum < 250 {
+		t.Errorf("sum %d under target", sum)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].StartTime.Before(got[i-1].StartTime) {
+			t.Errorf("not oldest-first at index %d", i)
+		}
+	}
+}
+
+func TestStorageAudit_InsertAndList(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Now().UTC()
+	if err := db.InsertStorageAudit(StorageAuditEntry{
+		Timestamp: ts,
+		Actor:     "admin",
+		ScopeJSON: `{"camera":"cam-a","older_than_days":3}`,
+		Bytes:     1 << 30,
+		Files:     42,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.StorageAudit(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	e := got[0]
+	if e.Actor != "admin" {
+		t.Errorf("Actor = %q, want %q", e.Actor, "admin")
+	}
+	if e.Bytes != 1<<30 {
+		t.Errorf("Bytes = %d, want %d", e.Bytes, int64(1)<<30)
+	}
+	if e.Files != 42 {
+		t.Errorf("Files = %d, want 42", e.Files)
+	}
+	if e.ScopeJSON != `{"camera":"cam-a","older_than_days":3}` {
+		t.Errorf("ScopeJSON mismatch: %q", e.ScopeJSON)
+	}
+	if !e.Timestamp.UTC().Equal(ts.Truncate(time.Second)) && !e.Timestamp.UTC().Equal(ts) {
+		t.Errorf("Timestamp = %v, want ~%v", e.Timestamp, ts)
+	}
+}
