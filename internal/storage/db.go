@@ -941,6 +941,90 @@ func (d *DB) GetSegmentsForRecompression(cameraName string, olderThan time.Time)
 	return scanSegments(rows)
 }
 
+// SegmentsByCameraOlderThan returns all segments for the given camera whose
+// start_time is before cutoff, ordered oldest first.
+func (d *DB) SegmentsByCameraOlderThan(camera string, cutoff time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ? AND replace(start_time, 'T', ' ') < ?
+		ORDER BY start_time ASC`,
+		camera, utc(cutoff).Format(layout),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// SegmentsByCameraInRange returns all segments for the given camera whose
+// start_time falls in the half-open interval [from, to), ordered oldest first.
+func (d *DB) SegmentsByCameraInRange(camera string, from, to time.Time) ([]SegmentRecord, error) {
+	const layout = "2006-01-02 15:04:05"
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ?
+		  AND replace(start_time, 'T', ' ') >= ?
+		  AND replace(start_time, 'T', ' ') < ?
+		ORDER BY start_time ASC`,
+		camera, utc(from).Format(layout), utc(to).Format(layout),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSegments(rows)
+}
+
+// OldestSegmentsUntilBytes returns the oldest segments across all cameras,
+// accumulating until their combined size_bytes reaches targetBytes. The
+// returned slice is ordered oldest start_time first and always includes the
+// segment that pushed the running total to or past the target, so callers
+// can be sure deleting the returned set frees at least targetBytes.
+// Returns nil when targetBytes <= 0.
+func (d *DB) OldestSegmentsUntilBytes(targetBytes int64) ([]SegmentRecord, error) {
+	if targetBytes <= 0 {
+		return nil, nil
+	}
+	rows, err := d.db.Query(`
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		ORDER BY start_time ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SegmentRecord
+	var sum int64
+	for rows.Next() {
+		var seg SegmentRecord
+		var recompressedAt sql.NullTime
+		if err := rows.Scan(
+			&seg.ID, &seg.Camera, &seg.Path,
+			&seg.StartTime, &seg.EndTime, &seg.SizeBytes,
+			&seg.Recompressed, &recompressedAt, &seg.RecompressFailures,
+		); err != nil {
+			return nil, err
+		}
+		if recompressedAt.Valid {
+			seg.RecompressedAt = recompressedAt.Time
+		}
+		out = append(out, seg)
+		sum += seg.SizeBytes
+		if sum >= targetBytes {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ResetStuckRecompressFailures clears the failure counter for any segments
 // that previously hit the 3-failure cap without being recompressed. Called
 // at recorder startup so transient failures (e.g. a temporarily missing
@@ -1811,12 +1895,12 @@ func zoneBounds(points [][]float64) (x1, y1, x2, y2 float64) {
 
 // KnownObject represents a user-defined object to recognize (e.g. "Ruben's car").
 type KnownObject struct {
-	ID             int64    `json:"id"`
-	Name           string   `json:"name"`
-	Label          string   `json:"label"`
-	Centroid       []byte   `json:"-"`
-	CropPath       string   `json:"crop_path,omitempty"`
-	MatchThreshold *float64 `json:"match_threshold,omitempty"`
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	Label          string    `json:"label"`
+	Centroid       []byte    `json:"-"`
+	CropPath       string    `json:"crop_path,omitempty"`
+	MatchThreshold *float64  `json:"match_threshold,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 

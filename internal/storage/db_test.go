@@ -1625,3 +1625,77 @@ func TestGetRecompressionCandidatesBySize(t *testing.T) {
 		t.Fatalf("order = %v, want big,mid,small", []string{segs[0].Path, segs[1].Path, segs[2].Path})
 	}
 }
+
+func mustInsertSegment(t *testing.T, db *DB, camera string, start time.Time, size int64) {
+	t.Helper()
+	if err := db.SaveSegment(SegmentRecord{
+		Camera:    camera,
+		Path:      "/tmp/" + camera + "-" + start.Format("20060102T150405") + ".mp4",
+		StartTime: start,
+		EndTime:   start.Add(time.Minute),
+		SizeBytes: size,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSegmentsByCameraOlderThan(t *testing.T) {
+	db := newTestDB(t)
+	mustInsertSegment(t, db, "cam-a", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), 1<<20)
+	mustInsertSegment(t, db, "cam-a", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), 2<<20)
+	mustInsertSegment(t, db, "cam-b", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), 4<<20)
+
+	got, err := db.SegmentsByCameraOlderThan("cam-a", time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].Camera != "cam-a" || got[0].SizeBytes != 1<<20 {
+		t.Errorf("unexpected segment: %+v", got[0])
+	}
+}
+
+func TestSegmentsByCameraInRange(t *testing.T) {
+	db := newTestDB(t)
+	mid := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	mustInsertSegment(t, db, "cam-a", mid.AddDate(0, 0, -5), 1)
+	mustInsertSegment(t, db, "cam-a", mid, 2)
+	mustInsertSegment(t, db, "cam-a", mid.AddDate(0, 0, +5), 4)
+
+	got, err := db.SegmentsByCameraInRange("cam-a",
+		mid.AddDate(0, 0, -1),
+		mid.AddDate(0, 0, +1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SizeBytes != 2 {
+		t.Errorf("got %v, want exactly the mid segment", got)
+	}
+}
+
+func TestOldestSegmentsUntilBytes(t *testing.T) {
+	db := newTestDB(t)
+	base := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	mustInsertSegment(t, db, "cam-a", base.AddDate(0, 0, 0), 100)
+	mustInsertSegment(t, db, "cam-a", base.AddDate(0, 0, 1), 200)
+	mustInsertSegment(t, db, "cam-b", base.AddDate(0, 0, 2), 400)
+
+	got, err := db.OldestSegmentsUntilBytes(250)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum int64
+	for _, s := range got {
+		sum += s.SizeBytes
+	}
+	if sum < 250 {
+		t.Errorf("sum %d under target", sum)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].StartTime.Before(got[i-1].StartTime) {
+			t.Errorf("not oldest-first at index %d", i)
+		}
+	}
+}
