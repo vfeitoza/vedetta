@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -591,4 +592,23 @@ func buildCameraRetention(cams []config.CameraConfig) map[string]int {
 		}
 	}
 	return m
+}
+
+// ReextractClip removes the old clip file (if any), clears its
+// availability flag, then re-extracts. The entire sequence runs under
+// a single segmentOpMu acquisition so a concurrent manual delete pass
+// cannot observe a half-renamed state.
+func (r *Recorder) ReextractClip(event camera.Event) error {
+	r.segmentOpMu.Lock()
+	defer r.segmentOpMu.Unlock()
+
+	if event.ClipPath != "" {
+		if err := os.Remove(event.ClipPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("re-extract: remove old clip", "path", event.ClipPath, "error", err)
+		}
+		if err := r.db.UpdateEventClipAvailability(event.ID, false); err != nil {
+			return fmt.Errorf("clear clip availability: %w", err)
+		}
+	}
+	return r.saveClipLocked(event)
 }
