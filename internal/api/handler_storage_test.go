@@ -149,3 +149,41 @@ func TestGetStorageAudit_ReturnsEntries(t *testing.T) {
 		t.Errorf("actor=%v, want admin", out[0]["actor"])
 	}
 }
+
+func TestPostStorageDelete_RequiresWriteScope(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+
+	_, rawToken, err := checker.CreateToken("admin", "read-only", []string{"api:read"}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	body := `{"target":"segments","camera":"cam-a","older_than_days":7}`
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/delete", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("read-only token got status=%d body=%s, want 403", w.Code, w.Body.String())
+	}
+}
+
+func TestGetStorage_AllowsReadScope(t *testing.T) {
+	_, handler, checker := newTestServerWithAuth(t)
+
+	_, rawToken, err := checker.CreateToken("admin", "read-only", []string{"api:read"}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/storage", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("read token denied: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
