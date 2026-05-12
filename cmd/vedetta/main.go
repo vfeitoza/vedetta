@@ -43,22 +43,22 @@ var Version = "dev"
 // subsystems holds all initialized runtime components so both the normal and
 // setup-mode startup paths can share the same initialization logic.
 type subsystems struct {
-	mqttClient      *mqtt.Client
-	detector        *detect.Detector
-	faceRecognizer  *detect.FaceRecognizer
-	objectEmbedder  *detect.ObjectEmbedder
-	hub             *rtsp.Hub
-	recorder        *recording.Recorder
-	manager         *camera.Manager
-	notifier        *notify.NotificationDispatcher
-	snapshotSaver   *snapshot.Saver
-	events          chan camera.Event
-	eventEnds       chan camera.EventEnd
-	presenceEvents  chan camera.PresenceEvent
-	faceEvents      chan camera.FaceEvent
-	motionActivity  chan camera.MotionActivity
-	detections      chan camera.DetectionFrame
-	ptzClients      map[string]*camera.PTZClient
+	mqttClient     *mqtt.Client
+	detector       *detect.Detector
+	faceRecognizer *detect.FaceRecognizer
+	objectEmbedder *detect.ObjectEmbedder
+	hub            *rtsp.Hub
+	recorder       *recording.Recorder
+	manager        *camera.Manager
+	notifier       *notify.NotificationDispatcher
+	snapshotSaver  *snapshot.Saver
+	events         chan camera.Event
+	eventEnds      chan camera.EventEnd
+	presenceEvents chan camera.PresenceEvent
+	faceEvents     chan camera.FaceEvent
+	motionActivity chan camera.MotionActivity
+	detections     chan camera.DetectionFrame
+	ptzClients     map[string]*camera.PTZClient
 }
 
 func main() {
@@ -342,7 +342,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	snapshotFallbackRoot := snapshot.DefaultFallbackRoot()
 	sub.snapshotSaver = snapshot.NewSaver(cfg.Events.SnapshotPath, snapshotFallbackRoot, cfg.Events.SnapshotQuality)
 
-	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath, snapshotFallbackRoot)
+	sub.recorder = recording.New(cfg.Recording, cfg.Events, cfg.Cameras, db, sub.hub, cfg.Events.SnapshotPath, snapshotFallbackRoot, sub.snapshotSaver)
 
 	// Register cameras for recording
 	for _, cam := range cfg.Cameras {
@@ -640,7 +640,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			timer      *time.Timer
 			tempCancel context.CancelFunc // for non-continuous temporary recording
 		}
-		active := make(map[string]*activeEvent) // eventID -> state
+		active := make(map[string]*activeEvent)         // eventID -> state
 		objectCounts := make(map[string]map[string]int) // camera -> label -> count
 		cooldowns := make(map[string]time.Time)
 		maxDur := cfg.Recording.MaxEventDuration

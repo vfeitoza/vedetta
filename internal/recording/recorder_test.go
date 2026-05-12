@@ -30,7 +30,7 @@ func newTestRecorder(t *testing.T) (*Recorder, *storage.DB) {
 		PostCapture:   10 * time.Second,
 		Continuous:    true,
 	}
-	rec := New(cfg, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "")
+	rec := New(cfg, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "", nil)
 	return rec, db
 }
 

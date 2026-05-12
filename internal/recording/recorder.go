@@ -14,6 +14,7 @@ import (
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/safepath"
+	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -93,6 +94,7 @@ type Recorder struct {
 	startTime            time.Time
 	snapshotPath         string
 	snapshotFallbackPath string
+	snapshotSaver        *snapshot.Saver
 	exportProcess        func(inputs []string, outputPath string, start, duration time.Duration) error
 
 	// segmentOpMu serializes every operation that creates, renames, or
@@ -105,7 +107,7 @@ type Recorder struct {
 	cachedStats StorageStats
 }
 
-func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string) *Recorder {
+func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string, snapshotSaver *snapshot.Saver) *Recorder {
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		slog.Error("failed to create recording directory", "path", cfg.Path, "error", err)
 	}
@@ -125,6 +127,7 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 		startTime:            time.Now(),
 		snapshotPath:         snapshotPath,
 		snapshotFallbackPath: snapshotFallbackPath,
+		snapshotSaver:        snapshotSaver,
 		exportProcess: func(inputs []string, outputPath string, start, duration time.Duration) error {
 			if len(inputs) == 1 {
 				return media.TrimMP4(inputs[0], outputPath, start, duration)
