@@ -187,3 +187,43 @@ func TestGetStorage_AllowsReadScope(t *testing.T) {
 		t.Errorf("read token denied: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestStorageDelete_ConcurrentWithCleanup_Returns409(t *testing.T) {
+	s, db := newTestServer(t)
+
+	// Seed 5 segments older than 7 days for cam-a, with real files on disk.
+	// Lock contention should be detected before any of this matters, but we
+	// model a realistic state: a cleanup goroutine is mid-flight while a
+	// user-initiated delete arrives.
+	camDir := filepath.Join(s.recorder.Path(), "cam-a")
+	if err := os.MkdirAll(camDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		start := now.AddDate(0, 0, -10-i)
+		end := start.Add(time.Hour)
+		p := filepath.Join(camDir, fmt.Sprintf("cleanup-seg-%d.mp4", i))
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		seedSegment(t, db, "cam-a", p, start, end, 1024)
+	}
+
+	// Hold the lock as if a periodic cleanup is running.
+	s.recorder.LockForTest()
+	defer s.recorder.UnlockForTest()
+
+	body := `{"target":"segments","camera":"cam-a","older_than_days":7}`
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.PostStorageDelete(w, req, PostStorageDeleteParams{})
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status=%d, want 409", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "5" {
+		t.Errorf("Retry-After=%q, want 5", got)
+	}
+}
