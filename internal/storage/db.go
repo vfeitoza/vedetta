@@ -2604,6 +2604,60 @@ type StorageAuditEntry struct {
 	Files     int
 }
 
+// DayBytes is one row of the per-day segment-bytes aggregation.
+type DayBytes struct {
+	Date  string
+	Bytes int64
+}
+
+// PerDayCameraSegmentBytes returns segment-byte totals per day for the
+// last N days, ordered ascending by date.
+func (d *DB) PerDayCameraSegmentBytes(camera string, days int) ([]DayBytes, error) {
+	if days <= 0 {
+		days = 30
+	}
+	rows, err := d.db.Query(`
+		SELECT strftime('%Y-%m-%d', start_time) AS day,
+		       COALESCE(SUM(size_bytes), 0) AS bytes
+		FROM segments
+		WHERE camera = ?
+		  AND start_time >= datetime('now', ?)
+		GROUP BY day
+		ORDER BY day ASC`,
+		camera, fmt.Sprintf("-%d days", days))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayBytes
+	for rows.Next() {
+		var db DayBytes
+		if err := rows.Scan(&db.Date, &db.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, db)
+	}
+	return out, rows.Err()
+}
+
+// AllSnapshotPaths returns every non-empty events.snapshot_path.
+func (d *DB) AllSnapshotPaths() ([]string, error) {
+	rows, err := d.db.Query(`SELECT snapshot_path FROM events WHERE snapshot_path != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // InsertStorageAudit records a manual storage operation.
 func (d *DB) InsertStorageAudit(e StorageAuditEntry) error {
 	_, err := d.db.Exec(`

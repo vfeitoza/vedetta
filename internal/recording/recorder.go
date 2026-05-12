@@ -106,6 +106,8 @@ type Recorder struct {
 	// Cached storage stats refreshed in background
 	statsMu     sync.RWMutex
 	cachedStats StorageStats
+
+	breakdownCache breakdownCache
 }
 
 func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []config.CameraConfig, db *storage.DB, hub *rtsp.Hub, snapshotPath, snapshotFallbackPath string, snapshotSaver *snapshot.Saver) *Recorder {
