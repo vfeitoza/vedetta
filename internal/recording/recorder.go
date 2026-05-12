@@ -114,13 +114,12 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 	exportDir := filepath.Join(cfg.Path, ".exports")
 	os.RemoveAll(exportDir)
 
-	return &Recorder{
+	r := &Recorder{
 		config:               cfg,
 		eventConfig:          eventCfg,
 		db:                   db,
 		hub:                  hub,
 		segments:             NewSegmentRecorder(cfg, db, hub),
-		recompressor:         NewRecompressor(cfg.TieredStorage, cameras, db),
 		cameraURLs:           make(map[string]string),
 		cameraRetention:      buildCameraRetention(cameras),
 		startTime:            time.Now(),
@@ -133,6 +132,8 @@ func New(cfg config.RecordingConfig, eventCfg config.EventConfig, cameras []conf
 			return media.ConcatMP4(inputs, outputPath, start, duration)
 		},
 	}
+	r.recompressor = NewRecompressor(cfg.TieredStorage, cameras, db, &r.segmentOpMu)
+	return r
 }
 
 // RegisterCamera registers a camera's recording URL for direct-from-stream recording.

@@ -22,6 +22,12 @@ type Recompressor struct {
 	// transcodeFn performs the actual transcoding. Defaults to media.TranscodeSegment.
 	transcodeFn func(path string, targetW, targetH int) (media.TranscodeResult, error)
 
+	// lock is the shared segment-operation mutex from the owning Recorder.
+	// processOne holds it across the transcode+DB-update pair so that
+	// retention cleanup and emergency delete cannot race with an in-flight
+	// recompression.
+	lock *sync.Mutex
+
 	isRunning            atomic.Bool
 	mu                   sync.Mutex
 	lastRun              time.Time
@@ -30,8 +36,9 @@ type Recompressor struct {
 }
 
 // NewRecompressor creates a Recompressor with the given config and camera list.
-func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB) *Recompressor {
-	return &Recompressor{cfg: cfg, cameras: cameras, db: db, transcodeFn: media.TranscodeSegment}
+// lock is the shared segmentOpMu from the owning Recorder and must not be nil.
+func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB, lock *sync.Mutex) *Recompressor {
+	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: media.TranscodeSegment}
 }
 
 // RecompressorStats holds runtime counters for the recompression job.
@@ -205,6 +212,16 @@ func (r *Recompressor) processOne() bool {
 		slog.Debug("recompression: skipping in-use segment", "path", bestSeg.Path)
 		return false
 	}
+
+	// Acquire the shared segment-operation lock before touching the file or
+	// the DB row. TryLock is intentional: the recompressor is a background
+	// optimization and it is preferable to skip a cycle rather than block a
+	// user-initiated delete or urgent cleanup that may be waiting.
+	if !r.lock.TryLock() {
+		slog.Debug("recompression: skipping (another segment operation in flight)", "path", bestSeg.Path)
+		return false
+	}
+	defer r.lock.Unlock()
 
 	start := time.Now()
 	result, err := r.safeTranscode(bestSeg.Path)
