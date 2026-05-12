@@ -1782,3 +1782,40 @@ func TestOldestSegmentsUntilBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestStorageAudit_InsertAndList(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Now().UTC()
+	if err := db.InsertStorageAudit(StorageAuditEntry{
+		Timestamp: ts,
+		Actor:     "admin",
+		ScopeJSON: `{"camera":"cam-a","older_than_days":3}`,
+		Bytes:     1 << 30,
+		Files:     42,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.StorageAudit(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	e := got[0]
+	if e.Actor != "admin" {
+		t.Errorf("Actor = %q, want %q", e.Actor, "admin")
+	}
+	if e.Bytes != 1<<30 {
+		t.Errorf("Bytes = %d, want %d", e.Bytes, int64(1)<<30)
+	}
+	if e.Files != 42 {
+		t.Errorf("Files = %d, want 42", e.Files)
+	}
+	if e.ScopeJSON != `{"camera":"cam-a","older_than_days":3}` {
+		t.Errorf("ScopeJSON mismatch: %q", e.ScopeJSON)
+	}
+	if !e.Timestamp.UTC().Equal(ts.Truncate(time.Second)) && !e.Timestamp.UTC().Equal(ts) {
+		t.Errorf("Timestamp = %v, want ~%v", e.Timestamp, ts)
+	}
+}

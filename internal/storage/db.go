@@ -247,6 +247,16 @@ func migrate(db *sql.DB) error {
 			enabled      BOOLEAN NOT NULL DEFAULT 1,
 			PRIMARY KEY (username, camera, object_class)
 		);
+
+		CREATE TABLE IF NOT EXISTS storage_audit (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts          TIMESTAMP NOT NULL,
+			actor       TEXT NOT NULL,
+			scope_json  TEXT NOT NULL,
+			bytes_freed INTEGER NOT NULL,
+			file_count  INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_storage_audit_ts ON storage_audit(ts DESC);
 	`)
 	if err != nil {
 		return err
@@ -2580,6 +2590,51 @@ func (d *DB) ListAllUsernames() ([]string, error) {
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// StorageAuditEntry is one row of the storage_audit table.
+type StorageAuditEntry struct {
+	ID        int64
+	Timestamp time.Time
+	Actor     string
+	ScopeJSON string
+	Bytes     int64
+	Files     int
+}
+
+// InsertStorageAudit records a manual storage operation.
+func (d *DB) InsertStorageAudit(e StorageAuditEntry) error {
+	_, err := d.db.Exec(`
+		INSERT INTO storage_audit (ts, actor, scope_json, bytes_freed, file_count)
+		VALUES (?, ?, ?, ?, ?)`,
+		utc(e.Timestamp), e.Actor, e.ScopeJSON, e.Bytes, e.Files)
+	return err
+}
+
+// StorageAudit returns the most recent audit entries, newest first.
+func (d *DB) StorageAudit(limit int) ([]StorageAuditEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(`
+		SELECT id, ts, actor, scope_json, bytes_freed, file_count
+		FROM storage_audit
+		ORDER BY ts DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []StorageAuditEntry
+	for rows.Next() {
+		var e StorageAuditEntry
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Actor, &e.ScopeJSON, &e.Bytes, &e.Files); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
