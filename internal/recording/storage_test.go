@@ -2,11 +2,13 @@ package recording
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/storage"
 )
@@ -55,6 +57,66 @@ func mustSaveSegmentRecord(t *testing.T, db *storage.DB, cam, path string, start
 	}
 	if err := db.SaveSegment(rec); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func mustInsertEvent(t *testing.T, db *storage.DB, cam string, start, end time.Time, clipPath, snapshotPath string) {
+	t.Helper()
+	ev := camera.Event{
+		ID:                fmt.Sprintf("ev-%d", time.Now().UnixNano()),
+		CameraName:        cam,
+		Timestamp:         start,
+		EndTime:           end,
+		ClipPath:          clipPath,
+		ClipAvailable:     clipPath != "",
+		SnapshotPath:      snapshotPath,
+		SnapshotAvailable: snapshotPath != "",
+	}
+	if err := db.SaveEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteStorage_Clips_NoWindow(t *testing.T) {
+	tmp := t.TempDir()
+	db := openTestStorageDB(t)
+	clipFile := filepath.Join(tmp, "clip-1.mp4")
+	snapFile := filepath.Join(tmp, "snap-1.jpg")
+	os.WriteFile(clipFile, []byte("c"), 0o644)
+	os.WriteFile(snapFile, []byte("s"), 0o644)
+
+	mustInsertEvent(t, db, "cam-a", time.Now().UTC(), time.Time{}, clipFile, snapFile)
+	r := &Recorder{db: db, segments: &SegmentRecorder{db: db}, config: newTestRecConfig(tmp)}
+
+	res, err := r.DeleteStorage(DeleteRequest{Target: DeleteClips, Camera: "cam-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Clips != 1 || res.Snapshots != 1 {
+		t.Errorf("got %+v, want 1 clip + 1 snapshot", res)
+	}
+}
+
+func TestDeleteStorage_FreeBytes_OldestFirst(t *testing.T) {
+	tmp := t.TempDir()
+	db := openTestStorageDB(t)
+	old := time.Now().UTC().AddDate(0, 0, -10)
+	mid := time.Now().UTC().AddDate(0, 0, -5)
+	oldF := writeDummySegment(t, tmp, "cam-a", old, 1000)
+	midF := writeDummySegment(t, tmp, "cam-a", mid, 2000)
+	mustSaveSegmentRecord(t, db, "cam-a", oldF, old, 1000)
+	mustSaveSegmentRecord(t, db, "cam-a", midF, mid, 2000)
+
+	r := &Recorder{db: db, segments: &SegmentRecorder{db: db}, config: newTestRecConfig(tmp)}
+	res, err := r.DeleteStorage(DeleteRequest{Target: DeleteFreeBytes, FreeBytesTarget: 1500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Bytes < 1500 {
+		t.Errorf("freed %d, want >= 1500", res.Bytes)
+	}
+	if _, err := os.Stat(oldF); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("oldest should be deleted first")
 	}
 }
 

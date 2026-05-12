@@ -10,6 +10,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/rvben/vedetta/internal/camera"
 )
 
 // ErrStorageBusy is returned when segmentOpMu cannot be acquired
@@ -434,13 +436,131 @@ func (r *Recorder) removeSegmentFile(path string) error {
 	return nil
 }
 
-// Stubs — implemented in Task 19.
-func (r *Recorder) deleteClipsScoped(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
-	return nil, errors.New("deleteClipsScoped: not implemented")
+func (r *Recorder) deleteClipsScoped(req DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
+	events, err := r.fetchEventsForDelete(req)
+	if err != nil {
+		return nil, err
+	}
+	res := &DeleteResult{Cameras: []string{req.Camera}}
+	for _, ev := range events {
+		clipBytes := statSize(ev.ClipPath)
+		snapBytes := statSize(ev.SnapshotPath)
+		if req.DryRun {
+			if ev.ClipPath != "" {
+				res.Clips++
+				res.Bytes += clipBytes
+			}
+			if ev.SnapshotPath != "" {
+				res.Snapshots++
+				res.Bytes += snapBytes
+			}
+			continue
+		}
+		if ev.ClipPath != "" {
+			if err := os.Remove(ev.ClipPath); err == nil || errors.Is(err, os.ErrNotExist) {
+				_ = r.db.UpdateEventClipPath(ev.ID, "")
+				_ = r.db.UpdateEventClipAvailability(ev.ID, false)
+				res.Clips++
+				res.Bytes += clipBytes
+			}
+		}
+		if ev.SnapshotPath != "" {
+			if err := os.Remove(ev.SnapshotPath); err == nil || errors.Is(err, os.ErrNotExist) {
+				_ = r.db.UpdateEventSnapshotPath(ev.ID, "")
+				_ = r.db.UpdateEventSnapshotAvailability(ev.ID, false)
+				res.Snapshots++
+				res.Bytes += snapBytes
+			}
+		}
+	}
+	return res, nil
 }
-func (r *Recorder) deleteAllScoped(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
-	return nil, errors.New("deleteAllScoped: not implemented")
+
+// fetchEventsForDelete returns the events matching the delete request's
+// camera and optional time window. When no window is specified, all events
+// for the camera are returned.
+func (r *Recorder) fetchEventsForDelete(req DeleteRequest) ([]camera.Event, error) {
+	if req.OlderThanDays == 0 && req.From == "" && req.To == "" {
+		return r.db.ClipsByCamera(req.Camera)
+	}
+	from, to, err := resolveWindow(req)
+	if err != nil {
+		return nil, err
+	}
+	if req.OlderThanDays > 0 {
+		return r.db.ClipsByCameraOlderThan(req.Camera, to)
+	}
+	return r.db.ClipsByCameraInRange(req.Camera, from, to)
 }
-func (r *Recorder) deleteFreeBytes(_ DeleteRequest, _ map[string]struct{}) (*DeleteResult, error) {
-	return nil, errors.New("deleteFreeBytes: not implemented")
+
+// statSize returns the size of the file at path, or 0 if the file does not
+// exist or cannot be stat'd.
+func statSize(path string) int64 {
+	if path == "" {
+		return 0
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+func (r *Recorder) deleteAllScoped(req DeleteRequest, openPaths map[string]struct{}) (*DeleteResult, error) {
+	segReq := req
+	segReq.Target = DeleteSegments
+	segRes, err := r.deleteSegmentsScoped(segReq, openPaths)
+	if err != nil && !errors.As(err, new(*ErrOpenSegmentProtected)) {
+		return nil, err
+	}
+	if segRes == nil {
+		segRes = &DeleteResult{Cameras: []string{req.Camera}}
+	}
+
+	clipReq := req
+	clipReq.Target = DeleteClips
+	clipRes, err := r.deleteClipsScoped(clipReq, openPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DeleteResult{
+		Segments:  segRes.Segments,
+		Clips:     clipRes.Clips,
+		Snapshots: clipRes.Snapshots,
+		Bytes:     segRes.Bytes + clipRes.Bytes,
+		Cameras:   []string{req.Camera},
+	}, nil
+}
+
+func (r *Recorder) deleteFreeBytes(req DeleteRequest, openPaths map[string]struct{}) (*DeleteResult, error) {
+	segs, err := r.db.OldestSegmentsUntilBytes(req.FreeBytesTarget)
+	if err != nil {
+		return nil, err
+	}
+	res := &DeleteResult{}
+	cameras := make(map[string]struct{})
+	for _, s := range segs {
+		if _, isOpen := openPaths[s.Path]; isOpen {
+			continue
+		}
+		if req.DryRun {
+			res.Segments++
+			res.Bytes += s.SizeBytes
+			cameras[s.Camera] = struct{}{}
+			continue
+		}
+		if err := r.removeSegmentFile(s.Path); err == nil {
+			if err := r.db.DeleteSegmentByID(s.ID); err == nil {
+				res.Segments++
+				res.Bytes += s.SizeBytes
+				cameras[s.Camera] = struct{}{}
+			}
+		}
+	}
+	for c := range cameras {
+		res.Cameras = append(res.Cameras, c)
+	}
+	sort.Strings(res.Cameras)
+	return res, nil
 }
