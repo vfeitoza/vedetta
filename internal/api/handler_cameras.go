@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -616,13 +615,12 @@ func (s *Server) TriggerDoorbell(cameraName string) {
 
 	eventID := fmt.Sprintf("%s-doorbell-%d", cameraName, time.Now().UnixMilli())
 	ev := camera.Event{
-		ID:                eventID,
-		CameraName:        cameraName,
-		Label:             "doorbell",
-		Score:             1.0,
-		Box:               [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()},
-		Timestamp:         time.Now(),
-		SnapshotAvailable: true,
+		ID:         eventID,
+		CameraName: cameraName,
+		Label:      "doorbell",
+		Score:      1.0,
+		Box:        [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()},
+		Timestamp:  time.Now(),
 	}
 
 	snapDir, err := safepath.Join(s.snapshotPath, cameraName)
@@ -631,21 +629,17 @@ func (s *Server) TriggerDoorbell(cameraName string) {
 		slog.Error("invalid doorbell snapshot path", "camera", cameraName, "error", err)
 	} else {
 		snapPath, err = safepath.Join(snapDir, safepath.FileComponent(eventID)+".jpg")
-	}
-	if err == nil && os.MkdirAll(snapDir, 0o755) == nil {
-		var buf bytes.Buffer
-		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil {
-			if err := os.WriteFile(snapPath, buf.Bytes(), 0o644); err == nil {
-				ev.SnapshotPath = snapPath
-				if s.mqttClient != nil {
-					s.mqttClient.PublishSnapshot(cameraName, "doorbell", buf.Bytes())
-					s.mqttClient.PublishDoorbell(cameraName, "", buf.Bytes())
-				}
-			}
+		if err != nil {
+			slog.Error("invalid doorbell snapshot path", "camera", cameraName, "error", err)
+			snapPath = ""
 		}
 	}
 
-	// Face recognition
+	// Persist the event first so SaveEventSnapshot's UPDATE has a row to hit.
+	if err := s.db.SaveEvent(ev); err != nil {
+		slog.Error("failed to save doorbell event", "error", err)
+	}
+
 	if s.faceRecognizer != nil {
 		fullBox := [4]int{0, 0, img.Bounds().Dx(), img.Bounds().Dy()}
 		results := s.faceRecognizer.DetectAndEmbed(img, fullBox, s.faceCropDir)
@@ -654,27 +648,32 @@ func (s *Server) TriggerDoorbell(cameraName string) {
 			if personID > 0 {
 				if p, err := s.db.GetPerson(personID); err == nil && p != nil && p.Name != "" {
 					ev.SubLabel = p.Name
-					// Re-publish doorbell with person name
-					if s.mqttClient != nil {
-						var jpegData []byte
-						if ev.SnapshotPath != "" {
-							jpegData, _ = os.ReadFile(ev.SnapshotPath)
-						}
-						s.mqttClient.PublishDoorbell(cameraName, p.Name, jpegData)
-					}
+					_ = s.db.UpdateEventSubLabel(ev.ID, p.Name)
 				}
 			}
 		}
 	}
 
-	if err := s.db.SaveEvent(ev); err != nil {
-		slog.Error("failed to save doorbell event", "error", err)
+	if snapPath != "" {
+		rgba := toRGBA(img)
+		resolved, err := s.recorder.SaveEventSnapshot(ev, rgba, snapPath)
+		if err != nil {
+			slog.Error("save doorbell snapshot failed", "event", ev.ID, "error", err)
+		} else {
+			ev.SnapshotPath = resolved
+			ev.SnapshotAvailable = true
+		}
 	}
-	if ev.SnapshotPath != "" {
-		_ = s.db.UpdateEventSnapshotPath(ev.ID, ev.SnapshotPath)
-	}
-	if ev.SubLabel != "" {
-		_ = s.db.UpdateEventSubLabel(ev.ID, ev.SubLabel)
+
+	if s.mqttClient != nil {
+		var jpegData []byte
+		if ev.SnapshotPath != "" {
+			jpegData, _ = os.ReadFile(ev.SnapshotPath)
+		}
+		if len(jpegData) > 0 {
+			s.mqttClient.PublishSnapshot(cameraName, "doorbell", jpegData)
+		}
+		s.mqttClient.PublishDoorbell(cameraName, ev.SubLabel, jpegData)
 	}
 
 	slog.Info("doorbell event created", "camera", cameraName, "event", eventID, "person", ev.SubLabel)
