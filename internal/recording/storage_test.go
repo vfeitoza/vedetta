@@ -214,6 +214,58 @@ func TestStorageBreakdown_SameFilesystemDetection(t *testing.T) {
 	}
 }
 
+func TestDeleteStorage_All_PropagatesOpenSegmentProtection(t *testing.T) {
+	tmp := t.TempDir()
+	db := openTestStorageDB(t)
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	old := today.AddDate(0, 0, -5)
+	todayStr := today.Format("2006-01-02")
+
+	// Seed an older closed segment.
+	oldFile := writeDummySegment(t, tmp, "cam-a", old, 1024)
+	mustSaveSegmentRecord(t, db, "cam-a", oldFile, old, 1024)
+
+	// Seed today's open segment (the one that should be protected).
+	openFile := writeDummySegment(t, tmp, "cam-a", today, 512)
+	mustSaveSegmentRecord(t, db, "cam-a", openFile, today, 512)
+
+	// Seed a clip so the deleteAllScoped clip path is exercised.
+	clipFile := filepath.Join(tmp, "clip.mp4")
+	os.WriteFile(clipFile, []byte("clip"), 0o644)
+	mustInsertEvent(t, db, "cam-a", today, today.Add(time.Minute), clipFile, "")
+
+	r := &Recorder{
+		db:       db,
+		segments: &SegmentRecorder{db: db},
+		config:   newTestRecConfig(tmp),
+	}
+	// Register the open consumer so openFile appears in CurrentSegmentPaths.
+	r.RegisterFakeOpenConsumer("cam-a", openFile)
+
+	_, err := r.DeleteStorage(DeleteRequest{
+		Target: DeleteAll,
+		Camera: "cam-a",
+		From:   todayStr,
+		To:     todayStr,
+	})
+
+	// Must return a protection error, not nil.
+	var protErr *ErrOpenSegmentProtected
+	if !errors.As(err, &protErr) {
+		t.Fatalf("got err=%v, want *ErrOpenSegmentProtected", err)
+	}
+	found := false
+	for _, p := range protErr.Paths {
+		if p == openFile {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("protected Paths %v does not contain open segment %s", protErr.Paths, openFile)
+	}
+}
+
 func TestTryRunCleanupAsync_BusyReturnsError(t *testing.T) {
 	r := &Recorder{}
 	r.segmentOpMu.Lock() // simulate in-flight

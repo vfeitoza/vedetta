@@ -511,11 +511,8 @@ func (r *Recorder) deleteAllScoped(req DeleteRequest, openPaths map[string]struc
 	segReq := req
 	segReq.Target = DeleteSegments
 	segRes, err := r.deleteSegmentsScoped(segReq, openPaths)
-	if err != nil && !errors.As(err, new(*ErrOpenSegmentProtected)) {
+	if err != nil {
 		return nil, err
-	}
-	if segRes == nil {
-		segRes = &DeleteResult{Cameras: []string{req.Camera}}
 	}
 
 	clipReq := req
