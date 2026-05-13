@@ -18,6 +18,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.3.0](https://github.com/rvben/vedetta/compare/v0.2.14...v0.3.0) - 2026-05-13
+
+### Added
+
+- **storage**: add storage-management API, UI, and serialized file-op lock ([c918733](https://github.com/rvben/vedetta/commit/c91873375bc58e51cdf0886b38ef3f8896a75773))
+- **api**: link /storage.html from top + bottom navs ([9d4002a](https://github.com/rvben/vedetta/commit/9d4002a62108ae972c91b32b42695c77ec129add))
+- **api**: add storage page logic ([5cdbcf1](https://github.com/rvben/vedetta/commit/5cdbcf13b7866508aae580ca750aca94caa2bf0c))
+- **api**: add /storage.html scaffold ([db8ec61](https://github.com/rvben/vedetta/commit/db8ec613ae006941db741a0bedad44703a0f2a3e))
+- **api**: implement POST /api/storage/cleanup and GET /api/storage/audit ([508bd94](https://github.com/rvben/vedetta/commit/508bd946e90e2644ec17839c636ea80ca64a6df4))
+- **api**: implement POST /api/storage/delete with audit + lock contention handling ([8165a8d](https://github.com/rvben/vedetta/commit/8165a8d1d55ca31b9b9f4d66e346611b00eff2e7))
+- **api**: implement GET /api/storage ([c68c04b](https://github.com/rvben/vedetta/commit/c68c04be61256115c555956a38da37307ec9dbe7))
+- **api**: add /api/storage routes to OpenAPI schema ([2460661](https://github.com/rvben/vedetta/commit/24606616e326a706b40ebffd5cd2093711162b1a))
+- **recording**: add TryRunCleanupAsync and audit helpers ([b018ac5](https://github.com/rvben/vedetta/commit/b018ac595ea2d260a100256678c1293963ca77ac))
+- **recording**: implement clips, all, and free_bytes delete targets ([1a62bc7](https://github.com/rvben/vedetta/commit/1a62bc7dd6dd64cc22c374778b8dd11b766d4273))
+- **recording**: implement DeleteStorage for segments target ([1828c41](https://github.com/rvben/vedetta/commit/1828c41308a3046515f535d16fc29dd0ae681544))
+- **recording**: add StorageBreakdown with per-FS accounting ([812fe39](https://github.com/rvben/vedetta/commit/812fe396701303d1b27d3609d4491af99f52873b))
+- **recording**: declare storage management types ([d17465b](https://github.com/rvben/vedetta/commit/d17465b9d5e096928c0b65df023137f57a2d35a0))
+- **storage**: add storage_audit table for tracking manual deletions ([87dd13f](https://github.com/rvben/vedetta/commit/87dd13f555b3bdb44cae3ac5159ef1fa980fdbcf))
+- **recording**: add SaveEventSnapshot serialized via segmentOpMu ([6738852](https://github.com/rvben/vedetta/commit/673885240055a45e5664def64758dd973c167ee8))
+- **storage**: add clip query helpers with COALESCE for nullable end_time ([20d9a46](https://github.com/rvben/vedetta/commit/20d9a4670f8d93af34da9314b733a6bcec707da1))
+- **storage**: add segment query helpers for scoped deletion ([487d88c](https://github.com/rvben/vedetta/commit/487d88c01b521fca379dd310a92f559fd96e25e4))
+- **recording**: add CurrentSegmentPaths exposing active writers ([7845c85](https://github.com/rvben/vedetta/commit/7845c855310f38757061e4671c2ce87d62035e83))
+- **media**: expose Camera() and CurrentSegmentPath() on RecordingConsumer ([943c436](https://github.com/rvben/vedetta/commit/943c436e0508244298ecd010076a6f797f64dc96))
+
+### Fixed
+
+- **recording**: propagate open-segment protection in target=all deletes ([c981bf1](https://github.com/rvben/vedetta/commit/c981bf12dfa973730c1e0062d8f1b18f09420a21))
+
 ## [0.2.14](https://github.com/rvben/vedetta/compare/v0.2.13...v0.2.14) - 2026-05-11
 
 ### Fixed
