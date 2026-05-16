@@ -1,16 +1,25 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/stream"
 
 	"github.com/pion/webrtc/v4"
 )
+
+// hlsWarmupWait bounds how long GetLiveHLS holds a playlist request while
+// the muxer waits for the camera's first keyframe. It must exceed the
+// observed cold-start (~1s sub-stream, up to ~7s main) so a native HLS
+// client receives a 200 instead of a fatal 503, but stay under the client
+// stall watchdog so a genuinely dead camera still falls back promptly.
+const hlsWarmupWait = 8 * time.Second
 
 func optStr(v string) *string {
 	if v == "" {
@@ -135,11 +144,19 @@ func (s *Server) GetLiveHLS(w http.ResponseWriter, r *http.Request, name string)
 	}
 
 	rtspURL := s.hlsRTSPURL(r, cam)
-	playlist, ok := s.hls.Playlist(rtspURL)
+
+	// Hold the request through the cold warmup window instead of answering
+	// 503: iOS native HLS (AVPlayer) treats a 503 on the playlist as a
+	// fatal, non-recoverable error and never retries, cascading the camera
+	// page to ~1fps snapshots. Bounded by the request context so a client
+	// that gives up (or the deadline) releases the wait.
+	ctx, cancel := context.WithTimeout(r.Context(), hlsWarmupWait)
+	defer cancel()
+	playlist, ok := s.hls.PlaylistWait(ctx, rtspURL)
 	if !ok {
-		// The consumer is attached but no segment has been cut yet (waiting
-		// for the first keyframe). Tell the client to retry shortly.
-		slog.Info("HLS playlist not ready (warming up)",
+		// The stream never warmed within the window (camera offline / no
+		// keyframe). Only now is a 503 honest.
+		slog.Info("HLS playlist not ready (warmup timed out)",
 			"camera", name, "quality", r.URL.Query().Get("quality"))
 		w.Header().Set("Retry-After", "1")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stream warming up"})

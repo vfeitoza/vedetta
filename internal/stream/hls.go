@@ -2,6 +2,7 @@ package stream
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"math"
@@ -96,6 +97,13 @@ type hlsConsumer struct {
 	ring      []hlsSegment
 	nextSegID uint64
 
+	// ready is closed exactly once, when the first segment is cut. A native
+	// HLS client (AVPlayer) treats an HTTP 503 on the playlist as a fatal,
+	// non-recoverable error, so the handler must hold the cold-window
+	// request on this channel instead of answering 503 while warming up.
+	ready       chan struct{}
+	readyClosed bool
+
 	// label is a sanitized RTSP URL used purely for diagnostic logging so
 	// the warmup path (init built → first keyframe → first segment) is
 	// traceable per camera/stream without leaking credentials.
@@ -105,7 +113,7 @@ type hlsConsumer struct {
 }
 
 func newHLSConsumer(video, audio *rtsp.TrackInfo) *hlsConsumer {
-	c := &hlsConsumer{audioTimeScale: 90000}
+	c := &hlsConsumer{audioTimeScale: 90000, ready: make(chan struct{})}
 	c.lastAccess.Store(time.Now().UnixNano())
 
 	if video != nil && video.Codec == "H264" {
@@ -370,6 +378,10 @@ func (c *hlsConsumer) closeSegmentLocked() {
 	if len(c.ring) > hlsWindowSegments {
 		c.ring = c.ring[len(c.ring)-hlsWindowSegments:]
 	}
+	if !c.readyClosed {
+		c.readyClosed = true
+		close(c.ready)
+	}
 
 	c.nextSegID++
 	c.moofSeq++
@@ -421,6 +433,22 @@ func (c *hlsConsumer) playlist() (string, bool) {
 		fmt.Fprintf(&b, "live/%d\n", c.ring[i].id)
 	}
 	return b.String(), true
+}
+
+// waitPlaylist returns the live playlist, holding the caller until the
+// first segment is cut or ctx is done. The cold warmup window must never
+// surface to a native HLS client as an HTTP 503: AVPlayer treats that as a
+// fatal, non-recoverable error and never retries.
+func (c *hlsConsumer) waitPlaylist(ctx context.Context) (string, bool) {
+	if pl, ok := c.playlist(); ok {
+		return pl, true
+	}
+	select {
+	case <-c.ready:
+		return c.playlist()
+	case <-ctx.Done():
+		return "", false
+	}
 }
 
 func (c *hlsConsumer) initSeg() ([]byte, bool) {
@@ -521,6 +549,15 @@ func (m *HLSManager) getOrCreate(rtspURL string) *hlsConsumer {
 func (m *HLSManager) Playlist(rtspURL string) (string, bool) {
 	c := m.getOrCreate(rtspURL)
 	return c.playlist()
+}
+
+// PlaylistWait serves the live playlist, holding the request until the
+// first segment is cut or ctx is done. Native HLS clients (AVPlayer) treat
+// an HTTP 503 on the playlist as fatal, so callers must wait out the cold
+// warmup window rather than 503 a client that would never retry.
+func (m *HLSManager) PlaylistWait(ctx context.Context, rtspURL string) (string, bool) {
+	c := m.getOrCreate(rtspURL)
+	return c.waitPlaylist(ctx)
 }
 
 // InitSegment serves the fMP4 init segment.

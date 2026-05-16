@@ -1,8 +1,10 @@
 package stream
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4"
 )
@@ -24,6 +26,71 @@ func addVideoSample(c *hlsConsumer, durTicks uint32) {
 func closeOneSecondSegment(c *hlsConsumer) {
 	addVideoSample(c, hlsTargetSegmentTicks)
 	c.closeSegmentLocked()
+}
+
+// A cold HLS consumer has no segment yet because the muxer is still
+// waiting for the camera's first keyframe (~1-7s). iOS native HLS
+// (AVPlayer) treats an HTTP 503 on the playlist as a FATAL, non-recoverable
+// error (CoreMediaError -16849) and never retries, cascading the camera
+// page to ~1fps snapshots. The handler must therefore NOT answer the cold
+// window with an immediate 503: waitPlaylist must hold the request until
+// the first segment is cut and then return the real playlist, so AVPlayer
+// only ever sees a 200.
+func TestHLSWaitPlaylistBlocksUntilReady(t *testing.T) {
+	c := newHLSConsumer(nil, nil)
+
+	// The first segment is not ready yet; it lands shortly after the
+	// request arrives (mirrors first-keyframe warmup).
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		c.mu.Lock()
+		addVideoSample(c, hlsTargetSegmentTicks)
+		c.closeSegmentLocked()
+		c.mu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	pl, ok := c.waitPlaylist(ctx)
+	elapsed := time.Since(start)
+
+	if !ok {
+		t.Fatal("waitPlaylist must return the playlist once the first " +
+			"segment is cut, not give up while warming")
+	}
+	if !strings.Contains(pl, "#EXTM3U") {
+		t.Fatalf("waitPlaylist returned a non-playlist body:\n%s", pl)
+	}
+	if elapsed < 120*time.Millisecond {
+		t.Fatalf("waitPlaylist returned in %v: it answered the cold "+
+			"window immediately instead of holding the request until "+
+			"the segment was ready", elapsed)
+	}
+}
+
+// When the stream never warms (camera offline / no keyframe), waitPlaylist
+// must give up at the deadline so the handler can finally 503 - but it must
+// have actually waited, not failed instantly.
+func TestHLSWaitPlaylistTimesOut(t *testing.T) {
+	c := newHLSConsumer(nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, ok := c.waitPlaylist(ctx)
+	elapsed := time.Since(start)
+
+	if ok {
+		t.Fatal("waitPlaylist must report not-ready when no segment is " +
+			"ever produced")
+	}
+	if elapsed < 180*time.Millisecond {
+		t.Fatalf("waitPlaylist gave up after %v without waiting for the "+
+			"deadline; AVPlayer would get an immediate fatal 503", elapsed)
+	}
 }
 
 func TestHLSPlaylistEmptyUntilFirstSegment(t *testing.T) {
