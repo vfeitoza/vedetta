@@ -878,16 +878,31 @@ function startMJPEG() {
   stopStream();
   showStreamConnecting('MJPEG');
 
+  // Paint the last decoded frame instantly as a viewport background while the
+  // MJPEG multipart stream warms up. The snapshot endpoint serves an
+  // already-decoded in-memory frame, so a real image appears in well under a
+  // second instead of a black void. It is cleared the moment the first live
+  // frame arrives, giving a seamless cutover to the live stream.
+  var viewport = el('live-viewport');
+  if (viewport) {
+    viewport.style.backgroundImage = 'url(/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now() + ')';
+    viewport.classList.add('live-snapshot-fallback');
+  }
+  function clearSnapshotBackground() {
+    if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+  }
+
   const mjpeg = el('live-mjpeg');
-  if (!mjpeg) { hideStreamConnecting(); return; }
+  if (!mjpeg) { hideStreamConnecting(); clearSnapshotBackground(); return; }
   mjpeg.onerror = function () {
     if (currentStream !== 'mjpeg') return;
     hideStreamConnecting();
+    clearSnapshotBackground();
     stopStreamStats();
     mjpeg.classList.add('hidden');
-    toast('MJPEG stream failed — check that the camera is online', 'error');
+    toast('MJPEG stream failed, check that the camera is online', 'error');
   };
-  mjpeg.onload = function () { hideStreamConnecting(); };
+  mjpeg.onload = function () { hideStreamConnecting(); clearSnapshotBackground(); };
   mjpeg.src = '/api/cameras/' + encodeURIComponent(name) + '/mjpeg';
   mjpeg.classList.remove('hidden');
   hide('live-snapshot');
