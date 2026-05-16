@@ -19,6 +19,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.4.0](https://github.com/rvben/vedetta/compare/v0.3.0...v0.4.0) - 2026-05-16
+
+### Added
+
+- **watchdog**: add liveness watchdog and bound crash traceback ([17ec340](https://github.com/rvben/vedetta/commit/17ec340a0194cd7fb811d1e38d5af9fae7fcb615))
+- **media**: recover per-packet panics in recording consumer ([48ffb31](https://github.com/rvben/vedetta/commit/48ffb318756b25f0cc16693a9ed22ab3420566ae))
+
+### Fixed
+
+- **rtsp**: clone gortsplib packets before async fan-out ([09355b2](https://github.com/rvben/vedetta/commit/09355b2c2c7357d45546c955e604b45247557a31))
+
 ## [0.3.0](https://github.com/rvben/vedetta/compare/v0.2.14...v0.3.0) - 2026-05-13
 
 ### Added
