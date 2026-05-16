@@ -10,6 +10,7 @@ let mseMediaSource = null;
 let mseBlobURL = null;
 let mseWatchdogTimer = null; // detects a silently-black MSE stream (iPhone Safari)
 let webrtcWatchdogTimer = null; // detects WebRTC that signals OK but never delivers frames
+let mjpegWatchdogTimer = null; // polls for the first decoded MJPEG frame (load event is unreliable)
 let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
 let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
@@ -433,6 +434,8 @@ var mseOfflineTimer = null;
 var MSE_OFFLINE_TIMEOUT_MS = 10000;
 var MSE_WATCHDOG_TIMEOUT_MS = 6000;
 var WEBRTC_WATCHDOG_TIMEOUT_MS = 4000;
+var MJPEG_FRAME_POLL_MS = 200;
+var MJPEG_WATCHDOG_TIMEOUT_MS = 8000;
 
 function clearMSEOfflineTimer() {
   if (mseOfflineTimer) {
@@ -452,6 +455,13 @@ function clearWebRTCWatchdog() {
   if (webrtcWatchdogTimer) {
     clearTimeout(webrtcWatchdogTimer);
     webrtcWatchdogTimer = null;
+  }
+}
+
+function clearMJPEGWatchdog() {
+  if (mjpegWatchdogTimer) {
+    clearInterval(mjpegWatchdogTimer);
+    mjpegWatchdogTimer = null;
   }
 }
 
@@ -894,19 +904,54 @@ function startMJPEG() {
 
   const mjpeg = el('live-mjpeg');
   if (!mjpeg) { hideStreamConnecting(); clearSnapshotBackground(); return; }
-  mjpeg.onerror = function () {
-    if (currentStream !== 'mjpeg') return;
+
+  // Cut over from the snapshot to the live stream once real pixels are
+  // decoded. Idempotent: whichever signal arrives first wins.
+  var cutoverDone = false;
+  function goLiveMJPEG() {
+    if (cutoverDone) return;
+    cutoverDone = true;
+    clearMJPEGWatchdog();
+    hideStreamConnecting();
+    clearSnapshotBackground();
+  }
+  function failMJPEG(message) {
+    clearMJPEGWatchdog();
     hideStreamConnecting();
     clearSnapshotBackground();
     stopStreamStats();
     mjpeg.classList.add('hidden');
-    toast('MJPEG stream failed, check that the camera is online', 'error');
+    if (message) toast(message, 'error'); else showLiveOffline(name);
+  }
+
+  mjpeg.onerror = function () {
+    if (currentStream !== 'mjpeg') return;
+    failMJPEG('MJPEG stream failed, check that the camera is online');
   };
-  mjpeg.onload = function () { hideStreamConnecting(); clearSnapshotBackground(); };
+  // The `load` event is unreliable for multipart/x-mixed-replace (some
+  // browsers, notably iOS Safari, never fire it for the stream). Treat it
+  // only as an opportunistic fast path; real cutover is driven by the
+  // pixel-decode poll below.
+  mjpeg.onload = goLiveMJPEG;
   mjpeg.src = '/api/cameras/' + encodeURIComponent(name) + '/mjpeg';
   mjpeg.classList.remove('hidden');
   hide('live-snapshot');
   hide('live-video');
+
+  // Reliable, browser-independent cutover: an <img> reports a non-zero
+  // naturalWidth as soon as the first multipart frame is decoded, even when
+  // no `load` event fires. If no frame decodes within the timeout, surface
+  // the offline state instead of a perpetual connecting spinner over a
+  // frozen snapshot.
+  clearMJPEGWatchdog();
+  var mjpegWaitStart = Date.now();
+  mjpegWatchdogTimer = setInterval(function () {
+    if (currentStream !== 'mjpeg') { clearMJPEGWatchdog(); return; }
+    if (mjpeg.naturalWidth > 0) { goLiveMJPEG(); return; }
+    if (Date.now() - mjpegWaitStart >= MJPEG_WATCHDOG_TIMEOUT_MS) {
+      failMJPEG('');
+    }
+  }, MJPEG_FRAME_POLL_MS);
 
   currentStream = 'mjpeg';
   updateStreamButtons();
@@ -1109,6 +1154,7 @@ function stopStream() {
   }
 
   clearWebRTCWatchdog();
+  clearMJPEGWatchdog();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
