@@ -3,6 +3,7 @@ package stream
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"sync"
@@ -63,6 +64,13 @@ type hlsConsumer struct {
 	aacConfig      *mpeg4audio.AudioSpecificConfig
 	audioTimeScale uint32
 
+	// G.711->AAC transcode path. Cameras that emit PCMA/PCMU instead of
+	// AAC get a libfdk-aac encoder so iOS native HLS (which cannot decode
+	// G.711) still receives audio. aacEnc is nil for native-AAC cameras,
+	// which keep the zero-transcode passthrough.
+	aacEnc   aacEncoder
+	g711Alaw bool
+
 	initSegment      []byte
 	videoReady       bool
 	hasFirstKeyframe bool
@@ -88,6 +96,11 @@ type hlsConsumer struct {
 	ring      []hlsSegment
 	nextSegID uint64
 
+	// label is a sanitized RTSP URL used purely for diagnostic logging so
+	// the warmup path (init built → first keyframe → first segment) is
+	// traceable per camera/stream without leaking credentials.
+	label string
+
 	lastAccess atomic.Int64 // unix nanos; bumped on every HTTP serve
 }
 
@@ -105,14 +118,54 @@ func newHLSConsumer(video, audio *rtsp.TrackInfo) *hlsConsumer {
 		c.h264Decoder = dec
 	}
 
-	if setup, err := newAACSetup(audio); err == nil && setup != nil {
+	if setup, err := newAACSetup(audio); err != nil {
+		slog.Warn("HLS AAC setup failed, serving video only",
+			"codec", audio.Codec, "rate", audio.ClockRate, "error", err)
+	} else if setup != nil {
 		c.hasAudio = true
 		c.aacDecoder = setup.decoder
 		c.aacConfig = setup.config
 		c.audioTimeScale = setup.timeScale
+	} else if audio != nil && (audio.Codec == "PCMA" || audio.Codec == "PCMU") {
+		c.setupG711Transcode(audio)
+	} else if audio != nil {
+		slog.Info("HLS audio track present but not AAC, serving video only",
+			"codec", audio.Codec, "rate", audio.ClockRate)
 	}
 
 	return c
+}
+
+// setupG711Transcode attaches a libfdk-aac encoder so a G.711 (PCMA/PCMU)
+// camera still delivers audio over iOS native HLS, which cannot decode
+// G.711. If no AAC encoder is available the stream stays video-only.
+func (c *hlsConsumer) setupG711Transcode(audio *rtsp.TrackInfo) {
+	channels := audio.ChannelCount
+	if channels <= 0 {
+		channels = 1
+	}
+	enc, err := newAACEncoder(audio.ClockRate, channels)
+	if err != nil {
+		slog.Warn("HLS G.711->AAC encoder unavailable, serving video only",
+			"codec", audio.Codec, "rate", audio.ClockRate, "error", err)
+		return
+	}
+
+	channelConfig := uint8(channels)
+	if channels == 8 {
+		channelConfig = 7
+	}
+	c.hasAudio = true
+	c.aacEnc = enc
+	c.g711Alaw = g711IsALaw(audio.Codec)
+	c.aacConfig = &mpeg4audio.AudioSpecificConfig{
+		Type:          mpeg4audio.ObjectTypeAACLC,
+		SampleRate:    audio.ClockRate,
+		ChannelConfig: channelConfig,
+	}
+	c.audioTimeScale = uint32(audio.ClockRate)
+	slog.Info("HLS G.711->AAC transcode enabled",
+		"codec", audio.Codec, "rate", audio.ClockRate, "channels", channels)
 }
 
 func (c *hlsConsumer) touch() {
@@ -159,13 +212,19 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	}
 
 	if c.initSegment == nil || spsChanged {
+		firstInit := c.initSegment == nil
 		initSeg, err := buildFMP4Init(c.videoSPS, c.videoPPS, c.aacConfigForInit(), c.audioTimeScale)
 		if err != nil {
+			slog.Error("HLS init build failed", "stream", c.label, "error", err)
 			return
 		}
 		c.initSegment = initSeg
 		c.videoReady = true
+		if firstInit {
+			slog.Info("HLS init segment built", "stream", c.label, "audio", c.hasAudio)
+		}
 		if spsChanged {
+			slog.Info("HLS SPS changed, restarting segmentation", "stream", c.label)
 			// Restart segmentation; keep nextSegID/moofSeq monotonic and
 			// flag the next segment as a discontinuity so the player
 			// re-reads the (now updated) init segment cleanly.
@@ -190,6 +249,7 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 			return
 		}
 		c.hasFirstKeyframe = true
+		slog.Info("HLS first keyframe received", "stream", c.label)
 	}
 
 	newSample := &fmp4.Sample{}
@@ -222,11 +282,30 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 }
 
 func (c *hlsConsumer) OnAudioRTP(pkt *rtp.Packet) {
-	if c.aacDecoder == nil {
+	var aus [][]byte
+	switch {
+	case c.aacEnc != nil:
+		// G.711 camera: decode the payload to PCM and transcode to AAC-LC.
+		pcm := decodeG711ToPCM(pkt.Payload, c.g711Alaw)
+		if len(pcm) == 0 {
+			return
+		}
+		encoded, err := c.aacEnc.Encode(pcm)
+		if err != nil {
+			return
+		}
+		aus = encoded
+	case c.aacDecoder != nil:
+		// Native AAC camera: depacketize straight through, no transcode.
+		decoded, err := c.aacDecoder.Decode(pkt)
+		if err != nil {
+			return
+		}
+		aus = decoded
+	default:
 		return
 	}
-	aus, err := c.aacDecoder.Decode(pkt)
-	if err != nil {
+	if len(aus) == 0 {
 		return
 	}
 
@@ -282,6 +361,10 @@ func (c *hlsConsumer) closeSegmentLocked() {
 		data:     data,
 		duration: float64(c.segVideoTicks) / 90000.0,
 		disc:     c.pendingDisc,
+	}
+	if c.nextSegID == 0 {
+		slog.Info("HLS first segment cut", "stream", c.label,
+			"duration", seg.duration, "bytes", len(data), "audio", c.hasAudio && len(c.segAudio) > 0)
 	}
 	c.ring = append(c.ring, seg)
 	if len(c.ring) > hlsWindowSegments {
@@ -419,7 +502,16 @@ func (m *HLSManager) getOrCreate(rtspURL string) *hlsConsumer {
 		return c
 	}
 	source := m.hub.GetOrCreate(rtspURL)
-	c := newHLSConsumer(source.VideoTrack(), source.AudioTrack())
+	video, audio := source.VideoTrack(), source.AudioTrack()
+	c := newHLSConsumer(video, audio)
+	c.label = rtsp.SanitizeURL(rtspURL)
+	audioCodec, audioRate := "none", 0
+	if audio != nil {
+		audioCodec, audioRate = audio.Codec, audio.ClockRate
+	}
+	slog.Info("HLS consumer attached", "stream", c.label,
+		"hasVideoTrack", video != nil, "hasAudioTrack", audio != nil,
+		"audioCodec", audioCodec, "audioRate", audioRate, "hlsAudioUsable", c.hasAudio)
 	m.consumers[rtspURL] = c
 	source.AddConsumer(c)
 	return c
