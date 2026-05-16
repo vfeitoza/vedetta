@@ -2,7 +2,6 @@ package stream
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,13 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/bluenviron/gortsplib/v5/pkg/format/rtpmpeg4audio"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/mpeg4audio"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4"
-	"github.com/bluenviron/mediacommon/v2/pkg/formats/mp4/codecs"
 	"github.com/gorilla/websocket"
 	"github.com/pion/rtp"
 
@@ -207,13 +204,7 @@ func newMSEConsumer(video, audio *rtsp.TrackInfo) *mseConsumer {
 		mc.videoSPS = video.SPS
 		mc.videoPPS = video.PPS
 
-		h264Format := &format.H264{
-			PayloadTyp:        96,
-			PacketizationMode: 1,
-			SPS:               video.SPS,
-			PPS:               video.PPS,
-		}
-		dec, err := h264Format.CreateDecoder()
+		dec, err := newH264Decoder(video.SPS, video.PPS)
 		if err != nil {
 			slog.Error("MSE: failed to create H264 depacketizer", "error", err)
 			return mc
@@ -221,103 +212,30 @@ func newMSEConsumer(video, audio *rtsp.TrackInfo) *mseConsumer {
 		mc.h264Decoder = dec
 	}
 
-	if audio != nil && audio.Codec == "AAC" {
+	if setup, err := newAACSetup(audio); err != nil {
+		slog.Error("MSE: failed to create AAC depacketizer", "error", err)
+	} else if setup != nil {
 		mc.hasAudio = true
-		mc.audioTimeScale = uint32(audio.ClockRate)
-
-		channels := audio.ChannelCount
-		if channels <= 0 {
-			channels = 1
-		}
-		channelConfig := uint8(channels)
-		if channels == 8 {
-			channelConfig = 7
-		}
-
-		mc.aacConfig = &mpeg4audio.AudioSpecificConfig{
-			Type:          mpeg4audio.ObjectTypeAACLC,
-			SampleRate:    audio.ClockRate,
-			ChannelConfig: channelConfig,
-		}
-
-		aacFormat := &format.MPEG4Audio{
-			PayloadTyp: 97,
-			Config: &mpeg4audio.AudioSpecificConfig{
-				Type:          mpeg4audio.ObjectTypeAACLC,
-				SampleRate:    audio.ClockRate,
-				ChannelConfig: channelConfig,
-			},
-			SizeLength:       13,
-			IndexLength:      3,
-			IndexDeltaLength: 3,
-		}
-		dec, err := aacFormat.CreateDecoder()
-		if err != nil {
-			slog.Error("MSE: failed to create AAC depacketizer", "error", err)
-			mc.hasAudio = false
-			mc.aacConfig = nil
-		} else {
-			mc.aacDecoder = dec
-		}
+		mc.aacConfig = setup.config
+		mc.audioTimeScale = setup.timeScale
+		mc.aacDecoder = setup.decoder
 	}
 
 	return mc
 }
 
 func (mc *mseConsumer) codecString() string {
-	var videoCodec, audioCodec string
-
-	if len(mc.videoSPS) >= 4 {
-		videoCodec = "avc1." + hex.EncodeToString(mc.videoSPS[1:4])
-	} else {
-		videoCodec = "avc1.42001f"
+	if mc.hasAudio {
+		return fmp4CodecString(mc.videoSPS, mc.aacConfig)
 	}
-
-	if mc.hasAudio && mc.aacConfig != nil {
-		audioCodec = "mp4a.40.2"
-	}
-
-	if audioCodec != "" {
-		return fmt.Sprintf(`video/mp4; codecs="%s, %s"`, videoCodec, audioCodec)
-	}
-	return fmt.Sprintf(`video/mp4; codecs="%s"`, videoCodec)
+	return fmp4CodecString(mc.videoSPS, nil)
 }
 
 func (mc *mseConsumer) buildInitSegment() ([]byte, error) {
-	if mc.videoSPS == nil || mc.videoPPS == nil {
-		return nil, fmt.Errorf("no SPS/PPS available")
+	if mc.hasAudio {
+		return buildFMP4Init(mc.videoSPS, mc.videoPPS, mc.aacConfig, mc.audioTimeScale)
 	}
-
-	init := fmp4.Init{
-		Tracks: []*fmp4.InitTrack{
-			{
-				ID:        1,
-				TimeScale: 90000,
-				Codec: &codecs.H264{
-					SPS: mc.videoSPS,
-					PPS: mc.videoPPS,
-				},
-			},
-		},
-	}
-
-	if mc.hasAudio && mc.aacConfig != nil {
-		init.Tracks = append(init.Tracks, &fmp4.InitTrack{
-			ID:        2,
-			TimeScale: mc.audioTimeScale,
-			Codec: &codecs.MPEG4Audio{
-				Config: *mc.aacConfig,
-			},
-		})
-	}
-
-	var buf seekableBuffer
-	if err := init.Marshal(&buf); err != nil {
-		return nil, fmt.Errorf("marshal init segment: %w", err)
-	}
-	out := make([]byte, len(buf.Bytes()))
-	copy(out, buf.Bytes())
-	return out, nil
+	return buildFMP4Init(mc.videoSPS, mc.videoPPS, nil, mc.audioTimeScale)
 }
 
 func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
