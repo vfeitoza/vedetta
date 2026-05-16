@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -133,19 +134,55 @@ func (rc *RecordingConsumer) processLoop() {
 	defer close(rc.done)
 
 	for msg := range rc.pktCh {
-		rc.mu.Lock()
-		if rc.paused {
-			rc.handlePaused()
-			rc.mu.Unlock()
-			continue
-		}
-		if msg.video {
-			rc.processVideo(msg.pkt)
-		} else {
-			rc.processAudio(msg.pkt)
-		}
-		rc.mu.Unlock()
+		rc.dispatch(msg)
 	}
+}
+
+// dispatch processes a single packet. A corrupt or malformed stream can make
+// the H264 depacketize/decode/mux path panic; recovering per-packet keeps the
+// processLoop goroutine alive so one bad packet degrades this camera's
+// recording instead of taking the whole process down. The recover runs while
+// rc.mu is still held (its deferred Unlock is registered first, so it runs
+// last), allowing the poisoned segment writer to be discarded safely; the next
+// packet then starts a fresh segment.
+func (rc *RecordingConsumer) dispatch(msg rtpMsg) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recovered from panic while processing packet",
+				"camera", rc.camera,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
+			rc.discardWriterAfterPanic()
+		}
+	}()
+
+	if rc.paused {
+		rc.handlePaused()
+		return
+	}
+	if msg.video {
+		rc.processVideo(msg.pkt)
+	} else {
+		rc.processAudio(msg.pkt)
+	}
+}
+
+// discardWriterAfterPanic drops the current segment writer after a panic so a
+// half-updated GOP buffer can't trigger repeated panics. Called with rc.mu
+// held. The partial segment file is best-effort closed and removed.
+func (rc *RecordingConsumer) discardWriterAfterPanic() {
+	if rc.writer == nil {
+		return
+	}
+	_, _ = rc.writer.Close()
+	if rc.segPath != "" {
+		_ = os.Remove(rc.segPath)
+	}
+	rc.writer = nil
+	rc.currentPath = ""
 }
 
 // handlePaused checks if disk space has recovered. Called with mu held.
