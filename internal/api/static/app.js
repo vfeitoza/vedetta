@@ -3240,16 +3240,24 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // ─── Grid Snapshot Refresh ───
-// Update only the <img> src attributes with a cache-busting timestamp so the
-// full grid DOM is never replaced (avoids flash).  Slow 30s cadence is enough
-// for a static preview — live stream starts on hover.
+// Motion-adaptive cadence: a single driver ticks at GRID_TICK_MS. Every
+// tick polls the (tiny) /api/cameras JSON and updates the LIVE/OFFLINE
+// badges, but the expensive per-camera JPEG snapshot is only re-pulled
+// fast for cameras that report has_motion; idle cameras refresh at the
+// slow GRID_IDLE_MS cadence. This keeps bandwidth proportional to where
+// something is actually happening rather than linear in camera count.
+// Only <img> src attributes change (cache-busted) so the grid DOM is
+// never replaced (no flash); the live stream still starts on hover.
+const GRID_TICK_MS = 4000;   // driver tick = motion-camera snapshot cadence
+const GRID_IDLE_MS = 30000;  // idle-camera snapshot cadence
 let gridSnapshotInterval = null;
+let gridLastSnap = {};       // camera name -> last snapshot pull (ms epoch)
 
 function startGridSnapshotRefresh() {
   stopGridSnapshotRefresh();
-  // Eagerly load snapshots immediately on mount, then refresh every 30s.
+  // Eagerly load snapshots immediately on mount, then tick adaptively.
   initGridSnapshotStates();
-  gridSnapshotInterval = setInterval(refreshGridSnapshots, 30000);
+  gridSnapshotInterval = setInterval(refreshGridSnapshots, GRID_TICK_MS);
 }
 
 function stopGridSnapshotRefresh() {
@@ -3257,11 +3265,12 @@ function stopGridSnapshotRefresh() {
     clearInterval(gridSnapshotInterval);
     gridSnapshotInterval = null;
   }
+  gridLastSnap = {};
 }
 
 // ensureGridSnapshotRefresh arms the refresh exactly once for the visible,
 // populated grid. It is idempotent: if the interval is already running it
-// returns immediately and never resets the 30s timer. This matters because
+// returns immediately and never resets the timer. This matters because
 // htmx:load also fires for the system-status partial every 10s — an
 // unguarded restart on every htmx:load would clear and recreate the timer
 // before it ever fires, so snapshots would never refresh.
@@ -3291,6 +3300,11 @@ function initGridSnapshotStates() {
 
     var name = img.alt;
     if (!name) return;
+
+    // Seed the per-camera clock so idle cameras wait a full GRID_IDLE_MS
+    // and motion cameras refresh on the next tick instead of immediately
+    // re-pulling everything one tick after the eager initial load.
+    gridLastSnap[name] = Date.now();
 
     var snapUrl = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
 
@@ -3342,18 +3356,28 @@ function refreshGridSnapshots() {
           if (label) label.textContent = cam.online ? 'LIVE' : 'OFFLINE';
         }
 
-        // Refresh snapshot for online cameras; clear error state on success.
+        // Refresh snapshot for online cameras, but only when due: cameras
+        // reporting motion refresh every tick; idle cameras only every
+        // GRID_IDLE_MS. The expensive JPEG pull is thus spent where
+        // something is happening, not linearly across all cameras.
         if (cam.online) {
-          var newUrl = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + t;
-          var probe = new Image();
-          probe.onload = function() {
-            img.src = newUrl;
-            if (preview) preview.classList.remove('cam-preview--error');
-          };
-          probe.onerror = function() {
-            if (preview) preview.classList.add('cam-preview--error');
-          };
-          probe.src = newUrl;
+          var last = gridLastSnap[name] || 0;
+          var due = cam.has_motion || (t - last >= GRID_IDLE_MS);
+          if (due) {
+            // Stamp before the load so a slow fetch can't stack duplicate
+            // in-flight pulls on subsequent ticks.
+            gridLastSnap[name] = t;
+            var newUrl = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + t;
+            var probe = new Image();
+            probe.onload = function() {
+              img.src = newUrl;
+              if (preview) preview.classList.remove('cam-preview--error');
+            };
+            probe.onerror = function() {
+              if (preview) preview.classList.add('cam-preview--error');
+            };
+            probe.src = newUrl;
+          }
         }
       });
     })

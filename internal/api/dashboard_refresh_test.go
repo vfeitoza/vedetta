@@ -63,6 +63,42 @@ func TestGridRefreshGuardIsIdempotent(t *testing.T) {
 	if !fn.MatchString(js) {
 		t.Fatal("ensureGridSnapshotRefresh() must check gridSnapshotInterval and " +
 			"early-return when already running, or the 10s system-status htmx:load " +
-			"will keep resetting the 30s grid timer")
+			"will keep resetting the grid timer")
+	}
+}
+
+// TestGridRefreshIsMotionAdaptive locks the bandwidth-smart cadence: the
+// expensive per-camera JPEG snapshot must be pulled fast only for cameras
+// whose /api/cameras status reports has_motion, and slowly for idle ones.
+// A single fixed interval that pulls every online camera every tick would
+// scale bandwidth linearly with camera count for no perceptual gain.
+func TestGridRefreshIsMotionAdaptive(t *testing.T) {
+	js := appJS(t)
+
+	for _, id := range []string{"GRID_TICK_MS", "GRID_IDLE_MS"} {
+		if !strings.Contains(js, id) {
+			t.Fatalf("expected motion-adaptive cadence constant %s "+
+				"(fast tick for motion cameras, slow cadence for idle ones)", id)
+		}
+	}
+
+	// The driver interval must run at the fast tick, not a fixed 30000.
+	tick := regexp.MustCompile(`setInterval\(\s*refreshGridSnapshots\s*,\s*GRID_TICK_MS\s*\)`)
+	if !tick.MatchString(js) {
+		t.Fatal("grid driver must tick at GRID_TICK_MS so motion cameras can " +
+			"refresh quickly; idle cameras are gated inside the tick")
+	}
+
+	// The snapshot pull must be gated per camera on has_motion plus a
+	// per-camera last-refresh timestamp, so idle cameras are skipped on
+	// most ticks instead of being fetched every GRID_TICK_MS.
+	gate := regexp.MustCompile(`has_motion[\s\S]{0,400}?GRID_IDLE_MS`)
+	if !gate.MatchString(js) {
+		t.Fatal("snapshot refresh must be gated on has_motion and GRID_IDLE_MS " +
+			"per camera; idle cameras must not be pulled every tick")
+	}
+	if !strings.Contains(js, "gridLastSnap") {
+		t.Fatal("expected a per-camera last-snapshot timestamp map " +
+			"(gridLastSnap) to gate idle cameras across ticks")
 	}
 }
