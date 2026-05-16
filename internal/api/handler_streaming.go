@@ -108,14 +108,23 @@ func (s *Server) GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name st
 	s.mse.HandleWebSocket(w, r, name, rtspURL)
 }
 
-// hlsRTSPURL mirrors GetMSEWebSocket: the high-res record stream by default
-// (best quality, and the track that carries AAC audio), with ?quality=low
-// routing to the detect substream for bandwidth-constrained clients.
-func (s *Server) hlsRTSPURL(r *http.Request, cam *camera.Camera) string {
-	if r.URL.Query().Get("quality") == "low" {
-		return cam.DetectURL()
+// pickHLSRTSPURL chooses which RTSP source vedetta muxes for live HLS. The
+// default is the sub-stream, mirroring pickWebRTCRTSPURL: iOS Safari's
+// native HLS engine (AVFoundation) cold-warms the sub-stream in ~1s and
+// plays it with zero stalls, whereas the main/record stream warms in ~7s
+// and flaps (server logs "buffer length exceeds 255") - AVFoundation
+// cannot recover from that flap and the client cascades to ~1fps
+// snapshots. ?quality=high opts back into the full-res record stream for
+// clients that explicitly want it.
+func pickHLSRTSPURL(detectURL, recordURL, quality string) string {
+	if quality == "high" {
+		return recordURL
 	}
-	return cam.RecordURL()
+	return detectURL
+}
+
+func (s *Server) hlsRTSPURL(r *http.Request, cam *camera.Camera) string {
+	return pickHLSRTSPURL(cam.DetectURL(), cam.RecordURL(), r.URL.Query().Get("quality"))
 }
 
 func (s *Server) GetLiveHLS(w http.ResponseWriter, r *http.Request, name string) {
