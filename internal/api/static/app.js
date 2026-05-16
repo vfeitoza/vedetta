@@ -8,6 +8,8 @@ let peerConnection = null;
 let mseWebSocket = null;
 let mseMediaSource = null;
 let mseBlobURL = null;
+let mseWatchdogTimer = null; // detects a silently-black MSE stream (iPhone Safari)
+let webrtcWatchdogTimer = null; // detects WebRTC that signals OK but never delivers frames
 let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
 let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
@@ -429,12 +431,37 @@ document.body.addEventListener('htmx:afterRequest', function(event) {
 // Watchdog timer: fires if no MSE data arrives within the timeout.
 var mseOfflineTimer = null;
 var MSE_OFFLINE_TIMEOUT_MS = 10000;
+var MSE_WATCHDOG_TIMEOUT_MS = 6000;
+var WEBRTC_WATCHDOG_TIMEOUT_MS = 4000;
 
 function clearMSEOfflineTimer() {
   if (mseOfflineTimer) {
     clearTimeout(mseOfflineTimer);
     mseOfflineTimer = null;
   }
+}
+
+function clearMSEWatchdog() {
+  if (mseWatchdogTimer) {
+    clearTimeout(mseWatchdogTimer);
+    mseWatchdogTimer = null;
+  }
+}
+
+function clearWebRTCWatchdog() {
+  if (webrtcWatchdogTimer) {
+    clearTimeout(webrtcWatchdogTimer);
+    webrtcWatchdogTimer = null;
+  }
+}
+
+// iPhone Safari has no usable MSE: window.MediaSource is undefined in normal
+// mode, and in "Request Desktop Website" mode it is defined but renders a
+// silent black frame. iPad and macOS Safari MSE work, so scope this to
+// iPhone/iPod only. Desktop-mode iPhone (UA spoofed as Mac) is caught by the
+// MSE frame watchdog instead.
+function isIPhoneSafari() {
+  return /iPhone|iPod/.test(navigator.userAgent || '');
 }
 
 function showLiveOffline(name) {
@@ -471,9 +498,24 @@ function hideLiveOffline() {
   if (viewport) viewport.classList.remove('live-snapshot-fallback');
 }
 
+// Picks the best live transport for this platform. iPhone Safari has no
+// usable MediaSource, and WebRTC there silently fails on remote networks
+// without a TURN server, leaving a black screen. MJPEG always works, so
+// iPhone goes straight to it for an instant, reliable picture. Every other
+// client starts with MSE and cascades (MSE -> WebRTC -> MJPEG) guarded by
+// the frame watchdogs. Manual transport buttons still let LAN users opt
+// into WebRTC for higher quality.
+function startLiveStream() {
+  if (isIPhoneSafari()) {
+    startMJPEG();
+    return;
+  }
+  startMSE();
+}
+
 function retryStream() {
   hideLiveOffline();
-  startMSE();
+  startLiveStream();
 }
 
 function startMSE() {
@@ -491,8 +533,11 @@ function startMSE() {
     viewport.classList.add('live-snapshot-fallback');
   }
 
-  if (typeof MediaSource === 'undefined') {
-    console.warn('MSE not supported, falling back to WebRTC');
+  // iPhone Safari either lacks MediaSource entirely (normal mode) or exposes
+  // it but only ever produces black frames (desktop-website mode). Either way
+  // MSE is unusable there, so skip straight to the fallback chain.
+  if (typeof MediaSource === 'undefined' || isIPhoneSafari()) {
+    console.warn('MSE unavailable (unsupported or iPhone Safari), falling back to WebRTC');
     if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
     startWebRTC();
     return;
@@ -592,6 +637,21 @@ function startMSE() {
       startMSEStats();
       attachAutoplayBlockedDetector(video);
       toast('MSE stream connected');
+
+      // Some browsers (notably iPhone Safari in desktop-website mode) accept
+      // the MSE pipeline but never decode a frame, leaving a silently-black
+      // video. If no real frame dimensions appear within the timeout, treat
+      // MSE as failed and fall through to WebRTC.
+      clearMSEWatchdog();
+      mseWatchdogTimer = setTimeout(function() {
+        var v = el('live-video');
+        if (currentStream === 'mse' && v && v.videoWidth === 0 && v.videoHeight === 0) {
+          console.warn('MSE produced no video frames, falling back to WebRTC');
+          cleanupMSE();
+          if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+          startWebRTC();
+        }
+      }, MSE_WATCHDOG_TIMEOUT_MS);
       return;
     }
 
@@ -653,6 +713,7 @@ function startMSE() {
 
 function cleanupMSE() {
   clearMSEOfflineTimer();
+  clearMSEWatchdog();
   if (mseWebSocket) {
     mseWebSocket.onclose = null;
     mseWebSocket.close();
@@ -743,10 +804,20 @@ async function startWebRTC() {
     peerConnection.oniceconnectionstatechange = function() {
       const state = peerConnection.iceConnectionState;
       if (state === 'failed' || state === 'disconnected') {
+        // iPhone has no usable TURN-less WebRTC path on remote networks, so
+        // reconnect attempts only prolong the black screen. Switch straight
+        // to the reliable MJPEG transport instead.
+        if (isIPhoneSafari()) {
+          toast('WebRTC unavailable, switching to MJPEG', 'error');
+          stopStream();
+          startMJPEG();
+          return;
+        }
         toast('WebRTC connection lost', 'error');
         stopStream();
         webrtcAutoReconnect();
       } else if (state === 'connected') {
+        clearWebRTCWatchdog();
         webrtcReconnectAttempts = 0;
       }
     };
@@ -780,10 +851,24 @@ async function startWebRTC() {
     }
     updateMuteButton(hasAudio);
     toast('WebRTC connected');
+
+    // Signaling succeeded, but ICE can still silently fail (STUN-only across
+    // networks), leaving a connected-but-frameless black video. If no real
+    // frame dimensions appear within the timeout, fall back to MJPEG.
+    clearWebRTCWatchdog();
+    webrtcWatchdogTimer = setTimeout(function() {
+      var v = el('live-video');
+      if (currentStream === 'webrtc' && v && v.videoWidth === 0 && v.videoHeight === 0) {
+        console.warn('WebRTC produced no video frames, falling back to MJPEG');
+        stopStream();
+        startMJPEG();
+      }
+    }, WEBRTC_WATCHDOG_TIMEOUT_MS);
   } catch (err) {
     console.error('WebRTC error:', err);
-    toast('WebRTC failed: ' + err.message, 'error');
+    toast('WebRTC failed, falling back to MJPEG', 'error');
     stopStream();
+    startMJPEG();
   }
 }
 
@@ -1008,6 +1093,7 @@ function stopStream() {
     viewport.classList.remove('live-snapshot-fallback');
   }
 
+  clearWebRTCWatchdog();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -3951,8 +4037,9 @@ var webrtcReconnectTimer = null;
 
 function webrtcAutoReconnect() {
   if (webrtcReconnectAttempts >= webrtcMaxReconnect) {
-    toast('WebRTC reconnect failed after ' + webrtcMaxReconnect + ' attempts', 'error');
+    toast('WebRTC unavailable, falling back to MJPEG', 'error');
     webrtcReconnectAttempts = 0;
+    startMJPEG();
     return;
   }
 

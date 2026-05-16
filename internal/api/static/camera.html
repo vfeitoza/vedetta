@@ -643,8 +643,8 @@
             setTimeout(function() { startPlayback(ts); }, 500);
           }
         } else {
-          // Auto-start live stream (MSE with WebRTC fallback)
-          startMSE();
+          // Auto-start live stream (platform picks the best transport)
+          startLiveStream();
         }
       }
     })();
