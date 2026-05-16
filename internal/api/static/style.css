@@ -919,6 +919,17 @@ input, select { font-family: inherit; }
   cursor: pointer;
   background: rgba(0,0,0,0.3);
   transition: background 0.2s;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.play-overlay:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -4px;
 }
 .play-overlay:hover {
   background: rgba(0,0,0,0.5);

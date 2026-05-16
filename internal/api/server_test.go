@@ -736,6 +736,48 @@ func TestHandleEventDetailPartial(t *testing.T) {
 	})
 }
 
+// TestHandleEventDetailPartial_PlayControlIsAccessibleButton guards the event
+// clip play control's accessibility. On iOS Safari (and for VoiceOver/keyboard
+// users) a bare <div> with a click handler is not focusable, not announced,
+// and not operable by Enter/Space. The control must be a real <button> with an
+// aria-label, matching the pattern used by every other interactive control in
+// this codebase.
+func TestHandleEventDetailPartial_PlayControlIsAccessibleButton(t *testing.T) {
+	srv, db := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := db.SaveEvent(camera.Event{
+		ID:            "play-1",
+		CameraName:    "garage",
+		Label:         "person",
+		Score:         0.81,
+		Box:           [4]int{10, 20, 100, 200},
+		Timestamp:     now,
+		ClipPath:      "/tmp/play-1.mp4",
+		ClipAvailable: true,
+	}); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partials/event/play-1", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+
+	if !contains(body, `<button type="button" class="play-overlay"`) {
+		t.Error("play control must be a <button type=\"button\"> element")
+	}
+	if !contains(body, `aria-label="Play clip"`) {
+		t.Error("play control must expose an accessible name via aria-label")
+	}
+	if contains(body, `<div class="play-overlay"`) {
+		t.Error("play control regressed to a non-semantic <div>")
+	}
+}
+
 func TestHandleSystemStatusPartial(t *testing.T) {
 	srv, _ := newTestServer(t)
 

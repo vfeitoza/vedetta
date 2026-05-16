@@ -320,11 +320,11 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			// rejects with a silent black-frame failure. For longer
 			// scrub-through-history viewing, the sidebar still offers
 			// "View in Recording" which opens the camera playback page.
-			`{{if .ClipAvailable}}<div class="play-overlay" id="play-overlay" data-action-click="playEventClip(this, '{{.ID}}')">` +
-			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
-			`</div>{{else if .HasRecording}}<div class="play-overlay" id="play-overlay" data-action-click="playEventRecording(this, '{{.CameraName}}', '{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}')">` +
-			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
-			`</div>{{end}}` +
+			`{{if .ClipAvailable}}<button type="button" class="play-overlay" id="play-overlay" aria-label="Play clip" data-action-click="playEventClip(this, '{{.ID}}')">` +
+			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
+			`</button>{{else if .HasRecording}}<button type="button" class="play-overlay" id="play-overlay" aria-label="Play recording" data-action-click="playEventRecording(this, '{{.CameraName}}', '{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}')">` +
+			`<svg viewBox="0 0 24 24" fill="white" width="64" height="64" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>` +
+			`</button>{{end}}` +
 			`</div>` +
 			`<div class="event-sidebar">` +
 			`<div class="meta-card">` +
