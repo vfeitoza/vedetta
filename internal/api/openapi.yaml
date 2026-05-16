@@ -1711,6 +1711,95 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/cameras/{name}/live.m3u8:
+    get:
+      operationId: getLiveHLS
+      summary: Live HLS playlist (low-latency fMP4/CMAF)
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Live HLS media playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema:
+                type: string
+        "404":
+          description: Camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Live stream not ready yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/live/init.mp4:
+    get:
+      operationId: getLiveHLSInit
+      summary: Serve the fMP4 init segment for the live HLS stream
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: fMP4 init segment
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Camera not found or stream not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/cameras/{name}/live/{segNum}:
+    get:
+      operationId: getLiveHLSSegment
+      summary: Serve a live fMP4 media segment
+      tags: [streaming]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: segNum
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: fMP4 media segment
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Segment expired from the live window or camera not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /api/objects:
     get:
       operationId: listObjects

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/stream"
 
 	"github.com/pion/webrtc/v4"
@@ -61,6 +62,77 @@ func (s *Server) GetMSEWebSocket(w http.ResponseWriter, r *http.Request, name st
 		rtspURL = cam.DetectURL()
 	}
 	s.mse.HandleWebSocket(w, r, name, rtspURL)
+}
+
+// hlsRTSPURL mirrors GetMSEWebSocket: the high-res record stream by default
+// (best quality, and the track that carries AAC audio), with ?quality=low
+// routing to the detect substream for bandwidth-constrained clients.
+func (s *Server) hlsRTSPURL(r *http.Request, cam *camera.Camera) string {
+	if r.URL.Query().Get("quality") == "low" {
+		return cam.DetectURL()
+	}
+	return cam.RecordURL()
+}
+
+func (s *Server) GetLiveHLS(w http.ResponseWriter, r *http.Request, name string) {
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	playlist, ok := s.hls.Playlist(s.hlsRTSPURL(r, cam))
+	if !ok {
+		// The consumer is attached but no segment has been cut yet (waiting
+		// for the first keyframe). Tell the client to retry shortly.
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stream warming up"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(playlist))
+}
+
+func (s *Server) GetLiveHLSInit(w http.ResponseWriter, r *http.Request, name string) {
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	init, ok := s.hls.InitSegment(s.hlsRTSPURL(r, cam))
+	if !ok {
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stream warming up"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(init)
+}
+
+func (s *Server) GetLiveHLSSegment(w http.ResponseWriter, r *http.Request, name string, segNum int64) {
+	cam := s.cameras.GetCamera(name)
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	seg, ok := s.hls.Segment(s.hlsRTSPURL(r, cam), uint64(segNum))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "segment not found"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(seg)
 }
 
 func (s *Server) GetMJPEG(w http.ResponseWriter, r *http.Request, name string) {

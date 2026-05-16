@@ -50,6 +50,7 @@ type Server struct {
 	hub                  *rtsp.Hub
 	streams              *stream.StreamManager
 	mse                  *stream.MSEManager
+	hls                  *stream.HLSManager
 	faceRecognizer       *detect.FaceRecognizer
 	objectEmbedder       objectEmbedder
 	ObjectMatchThreshold float64
@@ -375,6 +376,9 @@ func (s *Server) SetCameraNames(names []string) {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.hls != nil {
+		s.hls.Close()
+	}
 	if s.httpSrv == nil {
 		return nil
 	}
@@ -403,6 +407,7 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 	s.hub = hub
 	s.streams = stream.NewStreamManager(hub)
 	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins, s.config.TrustedProxies)
+	s.hls = stream.NewHLSManager(hub)
 	s.faceRecognizer = faceRecognizer
 	if objectEmbedder != nil {
 		// Avoid the typed-nil-in-interface trap when callers pass a
