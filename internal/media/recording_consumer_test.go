@@ -112,6 +112,44 @@ func TestRecordingConsumer_Accessors(t *testing.T) {
 	}
 }
 
+// TestRecordingConsumer_PanicDuringDecodeKeepsConsumerAlive proves that a
+// panic while processing one packet (the malformed-input class that wedged
+// production: a corrupt/garbage packet making the H264 decode path panic) is
+// recovered per-packet, so the processLoop goroutine survives and keeps
+// draining the camera instead of taking the whole process down. A nil packet
+// reaches h264Decoder.Decode(nil) inside WriteVideo and panics with a nil
+// pointer dereference - a real code path, no mocks.
+func TestRecordingConsumer_PanicDuringDecodeKeepsConsumerAlive(t *testing.T) {
+	dir := t.TempDir()
+	video := &rtsp.TrackInfo{
+		Codec:     "H264",
+		ClockRate: 90000,
+		IsVideo:   true,
+		SPS:       []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2},
+		PPS:       []byte{0x68, 0xce, 0x38, 0x80},
+	}
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, video, nil, testDisk(t), nil)
+
+	// Three poison packets: each panics inside the real decode path.
+	for i := 0; i < 3; i++ {
+		rc.pktCh <- rtpMsg{pkt: nil, video: true}
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	if n := len(rc.pktCh); n != 0 {
+		t.Fatalf("processLoop stopped draining after a packet panic: %d packets stuck", n)
+	}
+
+	// It must still accept and consume new work after recovering.
+	rc.pktCh <- rtpMsg{pkt: nil, video: true}
+	time.Sleep(120 * time.Millisecond)
+	if n := len(rc.pktCh); n != 0 {
+		t.Fatalf("processLoop not consuming after recovery: %d packets stuck", n)
+	}
+
+	rc.Close()
+}
+
 func TestRecordingConsumer_EnsureSegmentError_PausesAfterRepeatedFailures(t *testing.T) {
 	// Use a read-only directory so segment file creation fails
 	dir := t.TempDir()

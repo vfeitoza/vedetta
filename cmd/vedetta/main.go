@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -33,8 +34,13 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 	"github.com/rvben/vedetta/internal/stream"
 	"github.com/rvben/vedetta/internal/update"
+	"github.com/rvben/vedetta/internal/watchdog"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// livenessTimeout is how long the process may go without a successful
+// heartbeat before the watchdog terminates it for a supervisor restart.
+const livenessTimeout = 2 * time.Minute
 
 // Version is injected at build time via -ldflags="-X main.Version=<tag>".
 // Falls back to "dev" when building without ldflags (local development).
@@ -81,6 +87,14 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
+	// Bound the fatal-crash dump. The default ("all") makes the runtime walk
+	// every goroutine's stack on a fatal error; when a crash is caused by
+	// memory corruption that walk can fail to terminate, pegging a core and
+	// never exiting, so the supervisor never restarts the process. "single"
+	// prints only the crashing goroutine and exits promptly, so launchd
+	// KeepAlive recovers within seconds.
+	debug.SetTraceback("single")
+
 	cfg, setupMode, err := config.LoadOrDefault(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
@@ -96,6 +110,27 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = db.Close() }()
+
+	// Liveness guard: a heartbeat goroutine pings the database on an
+	// interval; if the process stalls (deadlock or a stuck loop that keeps
+	// the heartbeat from running) the watchdog terminates it so launchd
+	// KeepAlive restarts it instead of leaving it grey-failed.
+	wd := watchdog.NewProcessGuard(livenessTimeout)
+	go wd.Run(ctx)
+	go func() {
+		ticker := time.NewTicker(livenessTimeout / 6)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := db.Ping(); err == nil {
+					wd.Kick()
+				}
+			}
+		}
+	}()
 
 	if setupMode {
 		slog.Info("no config file found, starting in setup mode", "config", *configPath)

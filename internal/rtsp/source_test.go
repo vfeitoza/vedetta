@@ -1,6 +1,7 @@
 package rtsp
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -106,6 +107,86 @@ func TestSourceFanOutVideo(t *testing.T) {
 		t.Errorf("c1 got seq %d, want 42", c1.lastVideoPkt.SequenceNumber)
 	}
 }
+
+// TestFanOutVideo_IsolatesPacketFromGortsplibBufferReuse proves the fan-out
+// hands each consumer a packet that is independent of the gortsplib-owned
+// buffer. gortsplib reuses the *rtp.Packet and its Payload backing array for
+// the next packet, so any consumer that processes asynchronously (the
+// recording/snapshot/detection consumers all enqueue and decode later on
+// another goroutine) would otherwise read bytes that have since been
+// overwritten - a data race and use-after-free that corrupts the Go heap.
+func TestFanOutVideo_IsolatesPacketFromGortsplibBufferReuse(t *testing.T) {
+	s := NewSource("rtsp://test:554/stream")
+	c := &mockConsumer{}
+	s.AddConsumer(c)
+
+	pkt := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 7},
+		Payload: []byte{0xDE, 0xAD, 0xBE, 0xEF},
+	}
+	s.fanOutVideo(pkt)
+
+	// Simulate gortsplib reusing the same packet + payload buffer for the
+	// next inbound packet while the async consumer has not decoded yet.
+	pkt.SequenceNumber = 999
+	pkt.Payload[0], pkt.Payload[1] = 0x00, 0x00
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	got := c.lastVideoPkt
+	if got == pkt {
+		t.Fatal("consumer received the gortsplib-owned packet pointer; async decode is a data race / use-after-free")
+	}
+	if got.SequenceNumber != 7 {
+		t.Errorf("header not isolated: seq=%d want 7", got.SequenceNumber)
+	}
+	if want := []byte{0xDE, 0xAD, 0xBE, 0xEF}; !bytes.Equal(got.Payload, want) {
+		t.Errorf("payload not isolated from buffer reuse: got %x want %x", got.Payload, want)
+	}
+}
+
+// TestFanOutAudio_IsolatesPacketFromGortsplibBufferReuse is the audio
+// equivalent: RecordingConsumer.OnAudioRTP also enqueues for async decode.
+func TestFanOutAudio_IsolatesPacketFromGortsplibBufferReuse(t *testing.T) {
+	s := NewSource("rtsp://test:554/stream")
+	c := &capturingAudioConsumer{}
+	s.AddConsumer(c)
+
+	pkt := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 11},
+		Payload: []byte{0x01, 0x02, 0x03},
+	}
+	s.fanOutAudio(pkt)
+
+	pkt.SequenceNumber = 999
+	pkt.Payload[0] = 0xFF
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == pkt {
+		t.Fatal("consumer received the gortsplib-owned audio packet pointer")
+	}
+	if c.last.SequenceNumber != 11 {
+		t.Errorf("header not isolated: seq=%d want 11", c.last.SequenceNumber)
+	}
+	if want := []byte{0x01, 0x02, 0x03}; !bytes.Equal(c.last.Payload, want) {
+		t.Errorf("audio payload not isolated: got %x want %x", c.last.Payload, want)
+	}
+}
+
+// capturingAudioConsumer retains the last audio packet pointer it was given.
+type capturingAudioConsumer struct {
+	mu   sync.Mutex
+	last *rtp.Packet
+}
+
+func (c *capturingAudioConsumer) OnVideoRTP(_ *rtp.Packet) {}
+func (c *capturingAudioConsumer) OnAudioRTP(pkt *rtp.Packet) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = pkt
+}
+func (c *capturingAudioConsumer) OnDisconnect() {}
 
 func TestSourceFanOutAudio(t *testing.T) {
 	s := NewSource("rtsp://test:554/stream")
