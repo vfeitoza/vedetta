@@ -423,7 +423,7 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 // endpoints until subsystems are initialized.
 func (s *Server) readyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.ready.Load() && (strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/partials/")) {
+		if !s.ready.Load() && !isHealthProbePath(r) && (strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/partials/")) {
 			// Return JSON for API, HTML for partials
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "application/json")

@@ -78,13 +78,25 @@ func applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy())
 }
 
+// isHealthProbePath reports whether r targets a health probe endpoint that
+// must always reach its own handler regardless of authentication state or
+// readiness. Both authMiddleware (via isPublicPath) and readyMiddleware
+// consult this single definition: liveness must answer "is the process
+// alive", never "is it finished initializing", and readiness must return its
+// own structured payload rather than a generic gate placeholder. Keeping the
+// carve-out in one place stops the two middlewares from drifting apart.
+func isHealthProbePath(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		(r.URL.Path == "/api/health/live" || r.URL.Path == "/api/health/ready")
+}
+
 func isPublicPath(r *http.Request) bool {
 	switch {
 	case r.URL.Path == "/favicon.svg":
 		return true
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/login":
 		return true
-	case r.Method == http.MethodGet && (r.URL.Path == "/api/health/live" || r.URL.Path == "/api/health/ready"):
+	case isHealthProbePath(r):
 		return true
 	case r.Method == http.MethodGet && r.URL.Path == "/api/openapi.json":
 		return true
