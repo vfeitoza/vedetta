@@ -79,7 +79,7 @@ func TestHLSPlaylistFormat(t *testing.T) {
 	discIdx := strings.Index(pl, "#EXT-X-DISCONTINUITY")
 	seg5Idx := strings.Index(pl, "live/5")
 	seg4Idx := strings.Index(pl, "live/4")
-	if !(seg4Idx < discIdx && discIdx < seg5Idx) {
+	if seg4Idx >= discIdx || discIdx >= seg5Idx {
 		t.Errorf("discontinuity tag is not positioned before segment 5\n---\n%s", pl)
 	}
 }
