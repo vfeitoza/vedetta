@@ -601,6 +601,13 @@ function startNativeHLS() {
   const seq = ++hlsSeq;
   var started = false;
   var warmupAttempts = 0;
+  // Quality cascade. 'high' is the main/record stream (1080p, AAC audio) but
+  // it can flap; if it never produces a playable segment within the warmup
+  // budget (or stalls after starting) we step down to 'low' (the detect
+  // substream, which stays connected) before giving up on video entirely and
+  // dropping to the snapshot loop. This keeps moving video on screen instead
+  // of falling straight to static frames when only the main stream is sick.
+  var qualityTier = 'high';
 
   hide('live-snapshot');
   hide('live-mjpeg');
@@ -614,9 +621,9 @@ function startNativeHLS() {
 
   currentStream = 'hls';
   updateStreamButtons();
-  // The default live stream is the record substream, which carries AAC audio.
-  // Advertise audio so the mute button is tappable; unmuting a silent camera
-  // is harmless.
+  // The high-quality tier is the main/record stream, which carries AAC audio
+  // (the low fallback tier may be silent). Advertise audio so the mute button
+  // is tappable; unmuting a silent camera is harmless.
   updateMuteButton(true);
   attachAutoplayBlockedDetector(video);
 
@@ -627,12 +634,33 @@ function startNativeHLS() {
     startSnapshotStream();
   }
 
+  // Step the quality cascade down one level before resorting to snapshots.
+  // From 'high' we retry the whole warmup on the stable 'low' substream;
+  // from 'low' there is nowhere left to go, so fall back to snapshots.
+  function escalateOrFallback() {
+    if (seq !== hlsSeq) return;
+    if (qualityTier !== 'high') {
+      fallback();
+      return;
+    }
+    qualityTier = 'low';
+    started = false;
+    warmupAttempts = 0;
+    if (hlsWarmupTimer) { clearTimeout(hlsWarmupTimer); hlsWarmupTimer = null; }
+    if (hlsStallTimer) { clearTimeout(hlsStallTimer); hlsStallTimer = null; }
+    showStreamConnecting('Live');
+    // Reset the element so a prior error state does not poison the retry.
+    try { video.removeAttribute('src'); video.load(); } catch (e) { /* best effort */ }
+    hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+  }
+
   function armStallWatchdog() {
     if (hlsStallTimer) clearTimeout(hlsStallTimer);
     hlsStallTimer = setTimeout(function () {
       if (seq !== hlsSeq) return;
-      // Still connecting, or playing but frozen: drop to snapshots.
-      fallback();
+      // Still connecting, or playing but frozen: step the quality cascade
+      // down before resorting to snapshots.
+      escalateOrFallback();
     }, HLS_STALL_TIMEOUT_MS);
   }
 
@@ -656,7 +684,7 @@ function startNativeHLS() {
         return;
       }
     }
-    fallback();
+    escalateOrFallback();
   }
 
   video._hlsHandlers = { playing: onPlaying, timeupdate: armStallWatchdog, error: onError };
@@ -670,7 +698,8 @@ function startNativeHLS() {
   // state on iOS.
   function attempt() {
     if (seq !== hlsSeq) return;
-    var url = '/api/cameras/' + encodeURIComponent(name) + '/live.m3u8';
+    var url = '/api/cameras/' + encodeURIComponent(name) + '/live.m3u8'
+      + (qualityTier === 'low' ? '?quality=low' : '');
     fetch(url, { cache: 'no-store' })
       .then(function (r) {
         if (seq !== hlsSeq) return;
@@ -688,7 +717,7 @@ function startNativeHLS() {
           hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
           return;
         }
-        fallback();
+        escalateOrFallback();
       })
       .catch(function () {
         if (seq !== hlsSeq) return;
@@ -697,7 +726,7 @@ function startNativeHLS() {
           hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
           return;
         }
-        fallback();
+        escalateOrFallback();
       });
   }
 

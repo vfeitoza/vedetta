@@ -81,14 +81,19 @@ func (s *Server) GetLiveHLS(w http.ResponseWriter, r *http.Request, name string)
 		return
 	}
 
-	playlist, ok := s.hls.Playlist(s.hlsRTSPURL(r, cam))
+	rtspURL := s.hlsRTSPURL(r, cam)
+	playlist, ok := s.hls.Playlist(rtspURL)
 	if !ok {
 		// The consumer is attached but no segment has been cut yet (waiting
 		// for the first keyframe). Tell the client to retry shortly.
+		slog.Info("HLS playlist not ready (warming up)",
+			"camera", name, "quality", r.URL.Query().Get("quality"))
 		w.Header().Set("Retry-After", "1")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stream warming up"})
 		return
 	}
+	slog.Debug("HLS playlist served", "camera", name,
+		"quality", r.URL.Query().Get("quality"), "bytes", len(playlist))
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
