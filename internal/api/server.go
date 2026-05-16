@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -11,6 +13,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -530,9 +533,56 @@ func staticFileHandler(fsys fs.FS, fileServer http.Handler) http.Handler {
 				w.Header().Add(k, v)
 			}
 		}
+
+		// Embedded FS files all have a zero ModTime, so the standard file
+		// server emits no Last-Modified or ETag and no caching middleware
+		// runs. iOS WebKit then falls back to heuristic freshness and serves
+		// a stale app.js indefinitely, so a deploy never reaches the device.
+		// Derive a content ETag from the buffered body and force revalidation.
+		if rr.code == http.StatusOK && len(rr.body) > 0 {
+			sum := sha256.Sum256(rr.body)
+			etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+			w.Header().Set("ETag", etag)
+			w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path))
+			if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+
 		w.WriteHeader(rr.code)
 		_, _ = w.Write(rr.body)
 	})
+}
+
+// staticCacheControl picks a caching policy by asset. Vendored libraries are
+// content-stable and safe to cache for a year; everything else (app.js, the
+// HTML shells, style.css, sw.js) must be revalidated on every load so a deploy
+// is picked up immediately. The ETag keeps revalidation cheap via 304.
+func staticCacheControl(urlPath string) string {
+	switch path.Base(urlPath) {
+	case "hls.min.js", "htmx.min.js":
+		return "public, max-age=31536000, immutable"
+	default:
+		return "no-cache"
+	}
+}
+
+// etagMatches reports whether an If-None-Match header value satisfies the
+// current ETag. It handles comma-separated lists, the "*" wildcard, and a
+// weak-validator ("W/") prefix on either side.
+func etagMatches(ifNoneMatch, etag string) bool {
+	strip := func(s string) string {
+		return strings.TrimPrefix(strings.TrimSpace(s), "W/")
+	}
+	want := strip(etag)
+	for _, tok := range strings.Split(ifNoneMatch, ",") {
+		tok = strip(tok)
+		if tok == "*" || tok == want {
+			return true
+		}
+	}
+	return false
 }
 
 // bufferedResponseWriter captures the entire response (status + body) so the
