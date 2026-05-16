@@ -303,6 +303,12 @@ func (s *Source) extractTracks(desc *description.Session) {
 
 func (s *Source) fanOutVideo(pkt *rtp.Packet) {
 	s.maybeLearnParameterSets(pkt)
+	// gortsplib reuses pkt and its Payload backing array for the next
+	// inbound packet. Every consumer (recording, snapshot, detection)
+	// decodes asynchronously on its own goroutine, so they must not retain
+	// the library-owned buffer. Hand them one immutable deep copy; consumers
+	// only read it, so a single shared clone is safe.
+	pkt = pkt.Clone()
 	start := time.Now()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -372,6 +378,9 @@ func (s *Source) maybeLearnParameterSets(pkt *rtp.Packet) {
 }
 
 func (s *Source) fanOutAudio(pkt *rtp.Packet) {
+	// See fanOutVideo: audio consumers also decode asynchronously, so the
+	// gortsplib-owned packet must be cloned before hand-off.
+	pkt = pkt.Clone()
 	start := time.Now()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
