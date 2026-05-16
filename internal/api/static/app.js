@@ -14,7 +14,9 @@ let mjpegWatchdogTimer = null; // polls for the first decoded MJPEG frame (load 
 let snapshotStreamTimer = null; // chained timer for the snapshot-refresh loop (iPhone live transport)
 let snapshotStreamStartupTimer = null; // offline watchdog until the first snapshot frame
 let snapshotStreamSeq = 0; // bumped to invalidate in-flight snapshot loaders on teardown
-let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
+let snapshotFrameTimeoutTimer = null; // per-frame timeout so a hung Image cannot freeze the loop
+let snapshotStallInterval = null; // post-startup stall watchdog (auto-recovery + offline)
+let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | 'hls' | null
 let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
 let playbackOffset = 0; // offset into segment where playback begins
@@ -441,6 +443,9 @@ var MJPEG_FRAME_POLL_MS = 200;
 var MJPEG_WATCHDOG_TIMEOUT_MS = 8000;
 var SNAPSHOT_STREAM_INTERVAL_MS = 150; // ~6-7 fps target; self-throttles to network speed
 var SNAPSHOT_STREAM_FAIL_LIMIT = 5; // consecutive snapshot errors before declaring offline
+var SNAPSHOT_FRAME_TIMEOUT_MS = 4000; // abandon a single Image() that neither loads nor errors
+var SNAPSHOT_STALL_RECOVER_MS = 3000; // no decoded frame this long -> kick the loop back to life
+var SNAPSHOT_STALL_OFFLINE_MS = 12000; // no decoded frame this long -> declare offline
 
 function clearMSEOfflineTimer() {
   if (mseOfflineTimer) {
@@ -481,14 +486,24 @@ function clearSnapshotStream() {
     clearTimeout(snapshotStreamStartupTimer);
     snapshotStreamStartupTimer = null;
   }
+  if (snapshotFrameTimeoutTimer) {
+    clearTimeout(snapshotFrameTimeoutTimer);
+    snapshotFrameTimeoutTimer = null;
+  }
+  if (snapshotStallInterval) {
+    clearInterval(snapshotStallInterval);
+    snapshotStallInterval = null;
+  }
 }
 
-// iPhone Safari has no usable MSE: window.MediaSource is undefined in normal
-// mode, and in "Request Desktop Website" mode it is defined but renders a
-// silent black frame. iPad and macOS Safari MSE work, so scope this to
-// iPhone/iPod only. Desktop-mode iPhone (UA spoofed as Mac) is caught by the
-// MSE frame watchdog instead.
-function isIPhoneSafari() {
+// Every browser on iPhone/iPod is WebKit (Apple forbids other engines), so
+// Chrome, Firefox and Safari on iOS all share the same constraints: no usable
+// MSE (MediaSource is undefined normally, and renders a silent black frame in
+// "Request Desktop Website" mode) and no WebRTC over WAN without a TURN
+// server. They do, however, all play HLS natively in a <video> element. iPad
+// and macOS Safari MSE work, so this is scoped to iPhone/iPod only.
+// Desktop-mode iPhone (UA spoofed as Mac) is caught by the MSE frame watchdog.
+function isIOSWebKit() {
   return /iPhone|iPod/.test(navigator.userAgent || '');
 }
 
@@ -526,19 +541,176 @@ function hideLiveOffline() {
   if (viewport) viewport.classList.remove('live-snapshot-fallback');
 }
 
-// Picks the best live transport for this platform. iPhone Safari has no
-// usable MediaSource, and WebRTC there silently fails on remote networks
-// without a TURN server, leaving a black screen. MJPEG always works, so
-// iPhone goes straight to it for an instant, reliable picture. Every other
-// client starts with MSE and cascades (MSE -> WebRTC -> MJPEG) guarded by
-// the frame watchdogs. Manual transport buttons still let LAN users opt
-// into WebRTC for higher quality.
+// Picks the best live transport for this platform. iOS WebKit has no usable
+// MediaSource and WebRTC there silently fails over WAN without a TURN server,
+// but it plays HLS natively in a <video> with real H.264 + AAC audio. So iOS
+// goes to native HLS, falling back to the snapshot loop if the playlist never
+// produces a playable segment. Every other client starts with MSE and
+// cascades (MSE -> WebRTC -> MJPEG) guarded by the frame watchdogs. Manual
+// transport buttons still let LAN users opt into WebRTC for higher quality.
 function startLiveStream() {
-  if (isIPhoneSafari()) {
-    startMJPEG();
+  if (isIOSWebKit()) {
+    startNativeHLS();
     return;
   }
   startMSE();
+}
+
+// HLS_WARMUP_RETRY_MS / HLS_MAX_WARMUP_RETRIES bound how long we wait for the
+// server to cut its first segment (it 503s with Retry-After until the first
+// keyframe arrives). HLS_STALL_TIMEOUT_MS is the post-playing watchdog: if
+// playback freezes for this long we fall back to the snapshot loop.
+var HLS_WARMUP_RETRY_MS = 1000;
+var HLS_MAX_WARMUP_RETRIES = 15;
+var HLS_STALL_TIMEOUT_MS = 12000;
+var hlsWarmupTimer = null;
+var hlsStallTimer = null;
+var hlsSeq = 0;
+
+function clearNativeHLS() {
+  hlsSeq++;
+  if (hlsWarmupTimer) { clearTimeout(hlsWarmupTimer); hlsWarmupTimer = null; }
+  if (hlsStallTimer) { clearTimeout(hlsStallTimer); hlsStallTimer = null; }
+}
+
+// Native HLS playback for iOS WebKit. The <video> element plays the live
+// .m3u8 directly (no MediaSource, no JS muxing). iOS blocks autoplay with
+// sound, so we start muted and expose the mute button so the user can enable
+// the camera's AAC audio with one tap. A warmup loop tolerates the initial
+// 503s while the server waits for a keyframe; a stall watchdog falls back to
+// the snapshot loop if playback freezes.
+function startNativeHLS() {
+  const name = getCameraName();
+  if (!name) return;
+  stopStream();
+  hideLiveOffline();
+  showStreamConnecting('Live');
+
+  const video = el('live-video');
+  if (!video) { hideStreamConnecting(); startSnapshotStream(); return; }
+
+  // Detach handlers from any prior startNativeHLS run so listeners do not
+  // accumulate across transport restarts.
+  if (video._hlsHandlers) {
+    video.removeEventListener('playing', video._hlsHandlers.playing);
+    video.removeEventListener('timeupdate', video._hlsHandlers.timeupdate);
+    video.removeEventListener('error', video._hlsHandlers.error);
+    video._hlsHandlers = null;
+  }
+
+  const seq = ++hlsSeq;
+  var started = false;
+  var warmupAttempts = 0;
+
+  hide('live-snapshot');
+  hide('live-mjpeg');
+  video.classList.remove('hidden');
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.muted = true;
+  video.autoplay = true;
+  video.controls = false;
+
+  currentStream = 'hls';
+  updateStreamButtons();
+  // The default live stream is the record substream, which carries AAC audio.
+  // Advertise audio so the mute button is tappable; unmuting a silent camera
+  // is harmless.
+  updateMuteButton(true);
+  attachAutoplayBlockedDetector(video);
+
+  function fallback() {
+    if (seq !== hlsSeq) return;
+    clearNativeHLS();
+    // Leave currentStream so stopStream() in startSnapshotStream() cleans up.
+    startSnapshotStream();
+  }
+
+  function armStallWatchdog() {
+    if (hlsStallTimer) clearTimeout(hlsStallTimer);
+    hlsStallTimer = setTimeout(function () {
+      if (seq !== hlsSeq) return;
+      // Still connecting, or playing but frozen: drop to snapshots.
+      fallback();
+    }, HLS_STALL_TIMEOUT_MS);
+  }
+
+  function onPlaying() {
+    if (seq !== hlsSeq) return;
+    if (!started) {
+      started = true;
+      hideStreamConnecting();
+      var viewport = el('live-viewport');
+      if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+    }
+    armStallWatchdog();
+  }
+
+  function onError() {
+    if (seq !== hlsSeq || !started) {
+      // Pre-playback error: keep trying within the warmup budget.
+      if (seq === hlsSeq && warmupAttempts < HLS_MAX_WARMUP_RETRIES) {
+        warmupAttempts++;
+        hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+        return;
+      }
+    }
+    fallback();
+  }
+
+  video._hlsHandlers = { playing: onPlaying, timeupdate: armStallWatchdog, error: onError };
+  video.addEventListener('playing', onPlaying);
+  video.addEventListener('timeupdate', armStallWatchdog);
+  video.addEventListener('error', onError);
+
+  // The server returns 503 + Retry-After until the first segment exists.
+  // Poll the playlist ourselves before handing the URL to the <video> so a
+  // single early error does not put the element into a permanent failed
+  // state on iOS.
+  function attempt() {
+    if (seq !== hlsSeq) return;
+    var url = '/api/cameras/' + encodeURIComponent(name) + '/live.m3u8';
+    fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        if (seq !== hlsSeq) return;
+        if (r.ok) {
+          video.src = url;
+          var p = video.play();
+          if (p && typeof p.catch === 'function') {
+            p.catch(function () { /* autoplay overlay handles this */ });
+          }
+          armStallWatchdog();
+          return;
+        }
+        if (r.status === 503 && warmupAttempts < HLS_MAX_WARMUP_RETRIES) {
+          warmupAttempts++;
+          hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+          return;
+        }
+        fallback();
+      })
+      .catch(function () {
+        if (seq !== hlsSeq) return;
+        if (warmupAttempts < HLS_MAX_WARMUP_RETRIES) {
+          warmupAttempts++;
+          hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+          return;
+        }
+        fallback();
+      });
+  }
+
+  attempt();
+
+  stopStreamStats();
+  streamStatsInterval = setInterval(function () {
+    var statsEl = el('stream-stats');
+    if (!statsEl) return;
+    if (video.videoWidth && video.videoHeight) {
+      statsEl.innerHTML = '<span>Live HLS</span><span>' + video.videoWidth + '×' + video.videoHeight + '</span>';
+    }
+  }, 2000);
 }
 
 function retryStream() {
@@ -564,7 +736,7 @@ function startMSE() {
   // iPhone Safari either lacks MediaSource entirely (normal mode) or exposes
   // it but only ever produces black frames (desktop-website mode). Either way
   // MSE is unusable there, so skip straight to the fallback chain.
-  if (typeof MediaSource === 'undefined' || isIPhoneSafari()) {
+  if (typeof MediaSource === 'undefined' || isIOSWebKit()) {
     console.warn('MSE unavailable (unsupported or iPhone Safari), falling back to WebRTC');
     if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
     startWebRTC();
@@ -835,7 +1007,7 @@ async function startWebRTC() {
         // iPhone has no usable TURN-less WebRTC path on remote networks, so
         // reconnect attempts only prolong the black screen. Switch straight
         // to the reliable MJPEG transport instead.
-        if (isIPhoneSafari()) {
+        if (isIOSWebKit()) {
           toast('WebRTC unavailable, switching to MJPEG', 'error');
           stopStream();
           startMJPEG();
@@ -907,7 +1079,7 @@ async function startWebRTC() {
 // the native multipart stream everywhere else. Single decision point keeps
 // every caller, the action allowlist, and the manual button correct.
 function startMJPEG() {
-  if (isIPhoneSafari()) {
+  if (isIOSWebKit()) {
     startSnapshotStream();
     return;
   }
@@ -935,6 +1107,8 @@ function startSnapshotStream() {
   const seq = ++snapshotStreamSeq;
   var firstFrame = false;
   var failCount = 0;
+  var lastFrameAt = Date.now();
+  var loopArmed = false; // true while a loader or its timeout is outstanding
 
   function goOffline() {
     clearSnapshotStream();
@@ -945,15 +1119,33 @@ function startSnapshotStream() {
   }
 
   function scheduleNext() {
+    loopArmed = false;
     snapshotStreamTimer = setTimeout(loadFrame, SNAPSHOT_STREAM_INTERVAL_MS);
   }
 
   function loadFrame() {
     if (seq !== snapshotStreamSeq || currentStream !== 'mjpeg') return;
+    loopArmed = true;
     var loader = new Image();
-    loader.onload = function () {
-      if (seq !== snapshotStreamSeq) return;
+    var settled = false;
+
+    function settle(fn) {
+      // First of onload/onerror/timeout wins; the rest become no-ops so a
+      // late callback cannot double-schedule the loop.
+      return function () {
+        if (settled || seq !== snapshotStreamSeq) return;
+        settled = true;
+        if (snapshotFrameTimeoutTimer) {
+          clearTimeout(snapshotFrameTimeoutTimer);
+          snapshotFrameTimeoutTimer = null;
+        }
+        fn();
+      };
+    }
+
+    loader.onload = settle(function () {
       failCount = 0;
+      lastFrameAt = Date.now();
       // The URL is already decoded in cache, so this swap is instant.
       displayImg.src = loader.src;
       if (!firstFrame) {
@@ -965,13 +1157,25 @@ function startSnapshotStream() {
         hideStreamConnecting();
       }
       scheduleNext();
-    };
-    loader.onerror = function () {
-      if (seq !== snapshotStreamSeq) return;
+    });
+
+    loader.onerror = settle(function () {
       failCount++;
       if (failCount >= SNAPSHOT_STREAM_FAIL_LIMIT) { goOffline(); return; }
       scheduleNext();
-    };
+    });
+
+    // Per-frame timeout: a hung request that never fires onload/onerror would
+    // otherwise freeze the loop forever. Treat it as a soft failure, abandon
+    // the loader, and keep going.
+    snapshotFrameTimeoutTimer = setTimeout(settle(function () {
+      loader.onload = loader.onerror = null;
+      loader.src = '';
+      failCount++;
+      if (failCount >= SNAPSHOT_STREAM_FAIL_LIMIT) { goOffline(); return; }
+      scheduleNext();
+    }), SNAPSHOT_FRAME_TIMEOUT_MS);
+
     loader.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
   }
 
@@ -986,6 +1190,20 @@ function startSnapshotStream() {
   }, MJPEG_WATCHDOG_TIMEOUT_MS);
 
   loadFrame();
+
+  // Post-startup stall watchdog: even with the per-frame timeout, a wedged
+  // event loop or a chain of soft failures can leave the picture frozen.
+  // After the first frame, if nothing fresh has decoded for a while, kick the
+  // loop back to life; if it stays dead, declare the camera offline.
+  snapshotStallInterval = setInterval(function () {
+    if (seq !== snapshotStreamSeq || !firstFrame) return;
+    var stalledFor = Date.now() - lastFrameAt;
+    if (stalledFor >= SNAPSHOT_STALL_OFFLINE_MS) { goOffline(); return; }
+    if (stalledFor >= SNAPSHOT_STALL_RECOVER_MS && !loopArmed) {
+      if (snapshotStreamTimer) { clearTimeout(snapshotStreamTimer); snapshotStreamTimer = null; }
+      loadFrame();
+    }
+  }, 1000);
 
   stopStreamStats();
   streamStatsInterval = setInterval(function () {
@@ -1271,6 +1489,7 @@ function stopStream() {
   clearWebRTCWatchdog();
   clearMJPEGWatchdog();
   clearSnapshotStream();
+  clearNativeHLS();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
