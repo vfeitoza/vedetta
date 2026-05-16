@@ -11,6 +11,9 @@ let mseBlobURL = null;
 let mseWatchdogTimer = null; // detects a silently-black MSE stream (iPhone Safari)
 let webrtcWatchdogTimer = null; // detects WebRTC that signals OK but never delivers frames
 let mjpegWatchdogTimer = null; // polls for the first decoded MJPEG frame (load event is unreliable)
+let snapshotStreamTimer = null; // chained timer for the snapshot-refresh loop (iPhone live transport)
+let snapshotStreamStartupTimer = null; // offline watchdog until the first snapshot frame
+let snapshotStreamSeq = 0; // bumped to invalidate in-flight snapshot loaders on teardown
 let currentStream = null; // 'mse' | 'webrtc' | 'mjpeg' | null
 let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
@@ -436,6 +439,8 @@ var MSE_WATCHDOG_TIMEOUT_MS = 6000;
 var WEBRTC_WATCHDOG_TIMEOUT_MS = 4000;
 var MJPEG_FRAME_POLL_MS = 200;
 var MJPEG_WATCHDOG_TIMEOUT_MS = 8000;
+var SNAPSHOT_STREAM_INTERVAL_MS = 150; // ~6-7 fps target; self-throttles to network speed
+var SNAPSHOT_STREAM_FAIL_LIMIT = 5; // consecutive snapshot errors before declaring offline
 
 function clearMSEOfflineTimer() {
   if (mseOfflineTimer) {
@@ -462,6 +467,19 @@ function clearMJPEGWatchdog() {
   if (mjpegWatchdogTimer) {
     clearInterval(mjpegWatchdogTimer);
     mjpegWatchdogTimer = null;
+  }
+}
+
+function clearSnapshotStream() {
+  // Bump the sequence so any in-flight Image loader callbacks become no-ops.
+  snapshotStreamSeq++;
+  if (snapshotStreamTimer) {
+    clearTimeout(snapshotStreamTimer);
+    snapshotStreamTimer = null;
+  }
+  if (snapshotStreamStartupTimer) {
+    clearTimeout(snapshotStreamStartupTimer);
+    snapshotStreamStartupTimer = null;
   }
 }
 
@@ -882,7 +900,104 @@ async function startWebRTC() {
   }
 }
 
+// iPhone Safari does not continuously refresh an <img> from a
+// multipart/x-mixed-replace stream: it renders only the first frame, so the
+// true MJPEG transport looks like a frozen snapshot there. Use a JS
+// snapshot-refresh loop on iPhone (works on every browser, low latency) and
+// the native multipart stream everywhere else. Single decision point keeps
+// every caller, the action allowlist, and the manual button correct.
 function startMJPEG() {
+  if (isIPhoneSafari()) {
+    startSnapshotStream();
+    return;
+  }
+  startMjpegMultipart();
+}
+
+// Live-ish transport built from sequential single JPEGs. Each frame is the
+// camera's latest decoded in-memory frame (served by the snapshot endpoint
+// with no transcode), preloaded into an off-screen Image and swapped in on
+// decode so there is no flicker or half-drawn frame. The loop reschedules
+// only after a frame resolves, so it self-throttles to network speed
+// instead of piling up requests.
+function startSnapshotStream() {
+  const name = getCameraName();
+  if (!name) return;
+  stopStream();
+  showStreamConnecting('Live');
+
+  const displayImg = el('live-mjpeg');
+  if (!displayImg) { hideStreamConnecting(); return; }
+  displayImg.classList.remove('hidden');
+  hide('live-snapshot');
+  hide('live-video');
+
+  const seq = ++snapshotStreamSeq;
+  var firstFrame = false;
+  var failCount = 0;
+
+  function goOffline() {
+    clearSnapshotStream();
+    hideStreamConnecting();
+    stopStreamStats();
+    displayImg.classList.add('hidden');
+    showLiveOffline(name);
+  }
+
+  function scheduleNext() {
+    snapshotStreamTimer = setTimeout(loadFrame, SNAPSHOT_STREAM_INTERVAL_MS);
+  }
+
+  function loadFrame() {
+    if (seq !== snapshotStreamSeq || currentStream !== 'mjpeg') return;
+    var loader = new Image();
+    loader.onload = function () {
+      if (seq !== snapshotStreamSeq) return;
+      failCount = 0;
+      // The URL is already decoded in cache, so this swap is instant.
+      displayImg.src = loader.src;
+      if (!firstFrame) {
+        firstFrame = true;
+        if (snapshotStreamStartupTimer) {
+          clearTimeout(snapshotStreamStartupTimer);
+          snapshotStreamStartupTimer = null;
+        }
+        hideStreamConnecting();
+      }
+      scheduleNext();
+    };
+    loader.onerror = function () {
+      if (seq !== snapshotStreamSeq) return;
+      failCount++;
+      if (failCount >= SNAPSHOT_STREAM_FAIL_LIMIT) { goOffline(); return; }
+      scheduleNext();
+    };
+    loader.src = '/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now();
+  }
+
+  currentStream = 'mjpeg';
+  updateStreamButtons();
+  toast('Live stream started');
+
+  // Wall-clock offline watchdog: independent of loader callbacks in case the
+  // snapshot endpoint hangs without ever resolving or erroring.
+  snapshotStreamStartupTimer = setTimeout(function () {
+    if (seq === snapshotStreamSeq && !firstFrame) goOffline();
+  }, MJPEG_WATCHDOG_TIMEOUT_MS);
+
+  loadFrame();
+
+  stopStreamStats();
+  streamStatsInterval = setInterval(function () {
+    var statsEl = el('stream-stats');
+    if (!statsEl || !displayImg) return;
+    if (displayImg.naturalWidth && displayImg.naturalHeight) {
+      statsEl.innerHTML = '<span>Live</span><span>' + displayImg.naturalWidth + '×' + displayImg.naturalHeight + '</span>';
+    }
+  }, 2000);
+}
+
+function startMjpegMultipart() {
   const name = getCameraName();
   if (!name) return;
   stopStream();
@@ -1155,6 +1270,7 @@ function stopStream() {
 
   clearWebRTCWatchdog();
   clearMJPEGWatchdog();
+  clearSnapshotStream();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
