@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/rvben/vedetta/internal/camera"
@@ -10,6 +11,49 @@ import (
 
 	"github.com/pion/webrtc/v4"
 )
+
+func optStr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// GetStreamingCapabilities returns the agent-readable inventory of every
+// consumable stream URL per camera. RTSP URLs use the request host so the
+// value is dialable by the same client that reached the API.
+func (s *Server) GetStreamingCapabilities(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	sets := stream.CameraStreamCapabilities(s.cameraConfigs, s.rtspServerConfig, host)
+
+	resp := StreamingCapabilities{
+		AuthRequired: s.auth.Enabled(),
+		Cameras:      make([]CameraStreamCapabilities, 0, len(sets)),
+	}
+	resp.RtspServer.Enabled = s.rtspServerConfig.Enabled
+	resp.RtspServer.Port = s.rtspServerConfig.Port
+
+	for _, st := range sets {
+		resp.Cameras = append(resp.Cameras, CameraStreamCapabilities{
+			Name: st.Name,
+			Streams: CameraStreamURLs{
+				RtspMain: optStr(st.Streams.RTSPMain),
+				RtspSub:  optStr(st.Streams.RTSPSub),
+				Webrtc:   optStr(st.Streams.WebRTC),
+				Hls:      optStr(st.Streams.HLS),
+				Mjpeg:    optStr(st.Streams.MJPEG),
+				Mse:      optStr(st.Streams.MSE),
+				Snapshot: optStr(st.Streams.Snapshot),
+			},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
 
 // pickWebRTCRTSPURL chooses which RTSP source vedetta will negotiate over
 // WebRTC. The default is the sub-stream because browser offers advertise

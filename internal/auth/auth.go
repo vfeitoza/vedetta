@@ -211,6 +211,13 @@ func (c *Checker) ProxyAuthEnabled() bool {
 	return c.proxyHeader != ""
 }
 
+// Enabled reports whether authentication is active. A nil Checker means no
+// auth users were configured, so the API and RTSP republish are open. This
+// matches the gate used by the RTSP republish server (auth == nil => open).
+func (c *Checker) Enabled() bool {
+	return c != nil
+}
+
 // UpdatePassword updates the in-memory password hash for a user.
 func (c *Checker) UpdatePassword(username string, hash []byte) {
 	c.mu.Lock()

@@ -143,6 +143,58 @@ func TestContract_GetSystem(t *testing.T) {
 	cv.validate(req, rec)
 }
 
+func TestContract_GetStreamingCapabilities(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cv := newContractValidator(t)
+
+	disabled := false
+	srv.cameraConfigs = []config.CameraConfig{
+		{Name: "front_door", URL: "rtsp://cam/sub", RecordURL: "rtsp://cam/main"},
+		{Name: "old_cam", URL: "rtsp://cam/x", Enabled: &disabled},
+	}
+	srv.SetRTSPServerConfig(config.RTSPServerConfig{Enabled: true, Port: 8554})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/streaming/capabilities", nil)
+	req.Host = "vedetta.lan:5050"
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cv.validate(req, rec)
+
+	var resp StreamingCapabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.AuthRequired {
+		t.Errorf("auth_required = true, want false (newTestServer has no auth)")
+	}
+	if !resp.RtspServer.Enabled || resp.RtspServer.Port != 8554 {
+		t.Errorf("rtsp_server = %+v, want {enabled:true port:8554}", resp.RtspServer)
+	}
+	if len(resp.Cameras) != 1 {
+		t.Fatalf("expected 1 enabled camera (disabled excluded), got %d: %+v",
+			len(resp.Cameras), resp.Cameras)
+	}
+
+	cam := resp.Cameras[0]
+	if cam.Name != "front_door" {
+		t.Fatalf("camera name = %q, want front_door", cam.Name)
+	}
+	if cam.Streams.RtspMain == nil || *cam.Streams.RtspMain != "rtsp://vedetta.lan:8554/front_door" {
+		t.Errorf("rtsp_main = %v", cam.Streams.RtspMain)
+	}
+	if cam.Streams.RtspSub == nil || *cam.Streams.RtspSub != "rtsp://vedetta.lan:8554/front_door_sub" {
+		t.Errorf("rtsp_sub = %v", cam.Streams.RtspSub)
+	}
+	if cam.Streams.Webrtc == nil || *cam.Streams.Webrtc != "/api/cameras/front_door/webrtc/offer" {
+		t.Errorf("webrtc = %v", cam.Streams.Webrtc)
+	}
+}
+
 // newTestServerWithAuth creates a Server with auth enabled, a mux, and routes registered.
 // It returns the server, its handler (mux wrapped in auth middleware), and the auth checker.
 func newTestServerWithAuth(t *testing.T) (*Server, http.Handler, *auth.Checker) {

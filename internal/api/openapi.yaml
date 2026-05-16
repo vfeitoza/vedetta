@@ -1627,6 +1627,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/streaming/capabilities:
+    get:
+      operationId: getStreamingCapabilities
+      summary: List every consumable stream URL per camera across all protocols
+      description: >
+        Agent-readable inventory of all live-stream surfaces Vedetta exposes.
+        For each enabled camera it returns the RTSP republish URLs (when the
+        rtsp_server is enabled) and the HTTP streaming endpoints (WebRTC, HLS,
+        MJPEG, MSE, snapshot). RTSP URLs are absolute, derived from the request
+        host; HTTP entries are paths relative to the API base. Use this instead
+        of reading source to discover how to consume a camera.
+      tags: [streaming]
+      responses:
+        "200":
+          description: Streaming capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamingCapabilities"
+
   /api/cameras/{name}/webrtc/offer:
     post:
       operationId: postWebRTCOffer
@@ -3482,3 +3502,47 @@ components:
         scope: { type: object }
         bytes: { type: integer, format: int64 }
         files: { type: integer }
+
+    StreamingCapabilities:
+      type: object
+      required: [auth_required, rtsp_server, cameras]
+      properties:
+        auth_required:
+          type: boolean
+          description: >
+            Whether the RTSP republish and HTTP streaming endpoints require
+            Basic Auth credentials (true when auth.users is configured).
+        rtsp_server:
+          type: object
+          required: [enabled, port]
+          properties:
+            enabled: { type: boolean }
+            port: { type: integer }
+        cameras:
+          type: array
+          items: { $ref: "#/components/schemas/CameraStreamCapabilities" }
+
+    CameraStreamCapabilities:
+      type: object
+      required: [name, streams]
+      properties:
+        name: { type: string }
+        streams:
+          $ref: "#/components/schemas/CameraStreamURLs"
+
+    CameraStreamURLs:
+      type: object
+      description: >
+        Consumable stream URLs by protocol. RTSP URLs are absolute (host taken
+        from the request); HTTP entries are paths relative to the API base. A
+        field is omitted when that protocol is unavailable for the camera
+        (e.g. rtsp_main/rtsp_sub absent when rtsp_server is disabled, rtsp_sub
+        absent when the camera has no distinct sub-stream).
+      properties:
+        rtsp_main: { type: string }
+        rtsp_sub: { type: string }
+        webrtc: { type: string }
+        hls: { type: string }
+        mjpeg: { type: string }
+        mse: { type: string }
+        snapshot: { type: string }

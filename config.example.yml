@@ -103,6 +103,23 @@ api:
   # tls_cert: /etc/vedetta/tls.crt
   # tls_key: /etc/vedetta/tls.key
 
+# RTSP republish server. When enabled, Vedetta re-publishes every enabled
+# camera as a clean RTSP stream that downstream consumers (go2rtc, Frigate,
+# VLC, WebRTC gateways) can pull without each one hammering the camera.
+#
+# Published paths (per camera `name`):
+#   rtsp://<host>:<port>/<name>        main stream (record_url, high-res)
+#   rtsp://<host>:<port>/<name>_sub    sub stream  (url, low-res; published
+#                                      only when url differs from record_url)
+#
+# The _sub suffix (not a /sub path segment) matches the go2rtc ecosystem
+# convention. Auth: when auth.users is configured, RTSP clients must send
+# Basic Auth with the same credentials; otherwise the republish is open on
+# the LAN. Default port 8554 is the IANA-registered RTSP alternate.
+rtsp_server:
+  enabled: false
+  port: 8554
+
 auth:
   users:
     - username: admin

@@ -74,6 +74,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "streams" {
+		runStreams()
+		return
+	}
+
 	if len(os.Args) > 2 && os.Args[1] == "auth" && os.Args[2] == "hash-password" {
 		runHashPassword(os.Args[3:])
 		return
@@ -210,6 +215,7 @@ func main() {
 		server.SetMQTTConfig(cfg.MQTT)
 		server.SetDetector(sub.detector)
 		server.SetRecordingConfig(cfg.Recording)
+		server.SetRTSPServerConfig(cfg.RTSPServer)
 		if cfg.Updates.CheckEnabled {
 			checker := update.New(Version, cfg.Updates.CheckInterval, db)
 			checker.Start(ctx)
@@ -256,6 +262,7 @@ func main() {
 	server.SetConfigPath(*configPath)
 	server.SetMQTTConfig(cfg.MQTT)
 	server.SetRecordingConfig(cfg.Recording)
+	server.SetRTSPServerConfig(cfg.RTSPServer)
 	if cfg.Updates.CheckEnabled {
 		checker := update.New(Version, cfg.Updates.CheckInterval, db)
 		checker.Start(ctx)

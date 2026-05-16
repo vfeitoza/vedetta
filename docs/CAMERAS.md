@@ -52,6 +52,53 @@ rtsp://<username>:<password>@<ip>:554/h264Preview_01_sub
 rtsp://<username>:<password>@<ip>:554//Preview_01_main
 ```
 
+## Restreaming (Vedetta's own RTSP output)
+
+Vedetta can re-publish every enabled camera as a clean RTSP stream so that
+downstream consumers (go2rtc, Frigate, VLC, WebRTC gateways) pull from
+Vedetta instead of each one connecting to the camera directly. Enable it in
+`config.yml`:
+
+```yaml
+rtsp_server:
+  enabled: true
+  port: 8554
+```
+
+### Published paths
+
+For a camera named `front_door`:
+
+| Path | Source | Notes |
+|------|--------|-------|
+| `rtsp://<vedetta-host>:8554/front_door` | `record_url` (high-res) | Always published |
+| `rtsp://<vedetta-host>:8554/front_door_sub` | `url` (low-res) | Published only when `url` differs from `record_url` |
+
+The `_sub` suffix (not a `/sub` path segment) matches the go2rtc ecosystem
+convention, so a single config entry can address both substreams.
+
+### Authentication
+
+When `auth.users` is configured, RTSP clients must send Basic Auth with the
+same username/password (`rtsp://user:pass@<host>:8554/front_door`). With no
+auth users configured, the republish is open on the LAN.
+
+### Example: go2rtc consumer
+
+```yaml
+streams:
+  front_door: rtsp://user:pass@vedetta.lan:8554/front_door
+  front_door_sub: rtsp://user:pass@vedetta.lan:8554/front_door_sub
+```
+
+### Querying available streams
+
+- `GET /api/streaming/capabilities` returns, per camera, every consumable
+  URL across all protocols (RTSP main/sub, WebRTC, HLS, MJPEG, MSE, snapshot)
+  plus whether auth is required. This is the agent-readable source of truth.
+- `vedetta streams` prints the same table from config without a running
+  server.
+
 ## Testing Configuration
 
 To test with real cameras, create `config.yml`:

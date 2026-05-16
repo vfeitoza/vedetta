@@ -63,6 +63,7 @@ type Server struct {
 	mqttConfig           config.MQTTConfig
 	detector             *detect.Detector
 	recordingConfig      config.RecordingConfig
+	rtspServerConfig     config.RTSPServerConfig
 	restartRequired      bool
 	hlsSegmentCache      sync.Map // map[string][]media.HLSSegmentRef — keyed by "camera:segID"
 	snapshotPath         string
@@ -362,6 +363,10 @@ func (s *Server) SetDetector(d *detect.Detector) {
 
 func (s *Server) SetRecordingConfig(cfg config.RecordingConfig) {
 	s.recordingConfig = cfg
+}
+
+func (s *Server) SetRTSPServerConfig(cfg config.RTSPServerConfig) {
+	s.rtspServerConfig = cfg
 }
 
 // SetNotifier wires the push notification dispatcher. May be called with nil
