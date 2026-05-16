@@ -3259,6 +3259,20 @@ function stopGridSnapshotRefresh() {
   }
 }
 
+// ensureGridSnapshotRefresh arms the refresh exactly once for the visible,
+// populated grid. It is idempotent: if the interval is already running it
+// returns immediately and never resets the 30s timer. This matters because
+// htmx:load also fires for the system-status partial every 10s — an
+// unguarded restart on every htmx:load would clear and recreate the timer
+// before it ever fires, so snapshots would never refresh.
+function ensureGridSnapshotRefresh() {
+  if (gridSnapshotInterval) return;
+  var grid = el('camera-grid');
+  if (!grid || grid.style.display === 'none') return;
+  if (!grid.querySelector('.cam-card')) return;
+  startGridSnapshotRefresh();
+}
+
 // Set loading state on each tile and load its snapshot, transitioning to
 // a loaded or error state once the fetch completes.
 function initGridSnapshotStates() {
@@ -3358,11 +3372,26 @@ function toggleCamera(name, isStopped) {
     });
 }
 
-// Start refresh after htmx loads the grid initially.
+// The vendored htmx 2.0.4 does NOT deliver htmx:afterSwap to a document
+// listener for the initial declarative hx-trigger="load" grid swap; it
+// only fires for later programmatic htmx.ajax() swaps. htmx:load does fire
+// for the initial swap, so the refresh is bootstrapped from both:
+//
+//   htmx:load     - arms the refresh on the initial declarative load
+//                   (idempotent guard; safe when other partials also load)
+//   htmx:afterSwap - a programmatic grid reload (e.g. camera start/stop)
+//                   gets a full restart so the new tiles are re-initialised
+//   DOMContentLoaded - final safety net for any non-htmx render path
+document.addEventListener('htmx:load', function() {
+  ensureGridSnapshotRefresh();
+});
 document.addEventListener('htmx:afterSwap', function(e) {
-  if (e.detail.target && e.detail.target.id === 'camera-grid') {
+  if (e.detail && e.detail.target && e.detail.target.id === 'camera-grid') {
     startGridSnapshotRefresh();
   }
+});
+document.addEventListener('DOMContentLoaded', function() {
+  ensureGridSnapshotRefresh();
 });
 
 /* ─── Dashboard grid (W2.2) ─── */
