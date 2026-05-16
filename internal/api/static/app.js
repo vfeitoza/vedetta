@@ -585,6 +585,9 @@ function startNativeHLS() {
   stopStream();
   hideLiveOffline();
   showStreamConnecting('Live');
+  // Show the snapshot the user just tapped while HLS warms up (~1-2s+)
+  // instead of a black void; cleared on the first live frame (onPlaying).
+  showSnapshotBackdrop(name);
 
   const video = el('live-video');
   if (!video) { hideStreamConnecting(); startSnapshotStream(); return; }
@@ -754,13 +757,10 @@ function startMSE() {
   hideLiveOffline();
   showStreamConnecting('MSE');
 
-  // Show the latest snapshot as a background image behind the connecting overlay
+  // Show the latest snapshot as a backdrop behind the connecting overlay
   // so the user sees something meaningful rather than a black void.
+  showSnapshotBackdrop(name);
   var viewport = el('live-viewport');
-  if (viewport) {
-    viewport.style.backgroundImage = 'url(/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now() + ')';
-    viewport.classList.add('live-snapshot-fallback');
-  }
 
   // iPhone Safari either lacks MediaSource entirely (normal mode) or exposes
   // it but only ever produces black frames (desktop-website mode). Either way
@@ -1479,6 +1479,17 @@ function initViewportPause() {
   });
   // Periodically check if behind live edge
   setInterval(function() { updatePauseUI(); }, 2000);
+}
+
+// Paint the latest camera snapshot as a backdrop behind the connecting
+// overlay so the user sees the same image they tapped in the grid rather
+// than a black void while the live transport warms up. Cleared on the
+// first live frame (onPlaying) and by stopStream().
+function showSnapshotBackdrop(name) {
+  var viewport = el('live-viewport');
+  if (!viewport) return;
+  viewport.style.backgroundImage = 'url(/api/cameras/' + encodeURIComponent(name) + '/snapshot?t=' + Date.now() + ')';
+  viewport.classList.add('live-snapshot-fallback');
 }
 
 function showStreamConnecting(label) {
