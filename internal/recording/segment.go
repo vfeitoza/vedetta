@@ -61,11 +61,9 @@ func NewSegmentRecorder(cfg config.RecordingConfig, db *storage.DB, hub *rtsp.Hu
 func (sr *SegmentRecorder) StartRecording(ctx context.Context, cameraName, rtspURL string) {
 	segDir, err := safepath.Join(sr.baseDir, cameraName, "segments")
 	if err != nil {
+		// Invalid path is a permanent config error, not a transient I/O
+		// condition: nothing to retry.
 		slog.Error("invalid segment directory", "camera", cameraName, "error", err)
-		return
-	}
-	if err := os.MkdirAll(segDir, 0o755); err != nil {
-		slog.Error("failed to create segment directory", "camera", cameraName, "error", err)
 		return
 	}
 
@@ -153,7 +151,40 @@ func (sr *SegmentRecorder) CurrentSegmentPaths() []CurrentSegment {
 	return out
 }
 
+// ensureSegmentDir creates segDir, retrying on failure until it succeeds or
+// ctx is cancelled. Returns false only if cancelled before success.
+func (sr *SegmentRecorder) ensureSegmentDir(ctx context.Context, cameraName, segDir string) bool {
+	const retryInterval = 5 * time.Second
+	loggedFailure := false
+	for {
+		if err := os.MkdirAll(segDir, 0o755); err == nil {
+			if loggedFailure {
+				slog.Info("segment directory created, recording resuming", "camera", cameraName)
+			}
+			return true
+		} else if !loggedFailure {
+			slog.Error("failed to create segment directory, will retry",
+				"camera", cameraName, "error", err)
+			loggedFailure = true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(retryInterval):
+		}
+	}
+}
+
 func (sr *SegmentRecorder) recordLoop(ctx context.Context, cameraName, rtspURL, segDir string) {
+	// Creating the segment directory can fail transiently when the recording
+	// volume is briefly unavailable (just after a reboot or a USB stall).
+	// Retry until it succeeds rather than abandoning the camera permanently -
+	// the same self-healing philosophy as RTSP reconnect and the consumer's
+	// disk-full pause/resume.
+	if !sr.ensureSegmentDir(ctx, cameraName, segDir) {
+		return // context cancelled before the volume came back
+	}
+
 	source := sr.hub.GetOrCreate(rtspURL)
 
 	// Wait for connection and track info
