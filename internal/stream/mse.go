@@ -185,9 +185,11 @@ type mseConsumer struct {
 	// fMP4 fragment.
 	pendingVideo     []*fmp4.Sample
 	pendingVideoTicks uint32
-	inFlightVideo    *fmp4.Sample
-	inFlightVideoPTS uint32
-	hasInFlightVideo bool
+
+	// vtimer turns the decode-order AU stream into fMP4 samples with
+	// DTS-based durations and PTS-DTS composition offsets so B-frame
+	// streams reorder correctly (built lazily on first video AU).
+	vtimer *h264SampleTimer
 
 	// Audio batching. AAC samples have a fixed 1024-sample duration so
 	// no in-flight handling is needed.
@@ -285,7 +287,12 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 			mc.hasFirstVideo = false
 			mc.pendingVideo = nil
 			mc.pendingVideoTicks = 0
-			mc.hasInFlightVideo = false
+			if mc.vtimer != nil {
+				mc.vtimer.reset()
+				// videoSPS/videoPPS were just updated from the in-band
+				// change; keep the timer's out-of-band fallback in sync.
+				mc.vtimer.setParameterSets(mc.videoSPS, mc.videoPPS)
+			}
 			mc.pendingAudio = nil
 			mc.pendingAudioTicks = 0
 		}
@@ -309,28 +316,21 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		mc.hasFirstVideo = true
 	}
 
-	newSample := &fmp4.Sample{}
-	if err := newSample.FillH264(0, au); err != nil {
-		return
+	if mc.vtimer == nil {
+		mc.vtimer = newH264SampleTimer("mse")
+		// Seed the timer with the current parameter sets so DTS extraction
+		// works for cameras that advertise SPS/PPS only in the SDP.
+		mc.vtimer.setParameterSets(mc.videoSPS, mc.videoPPS)
 	}
-
-	// Finalize the previous in-flight sample's duration as the gap to the
-	// current packet. This is the correct MP4 semantic: sample N's duration
-	// is PTS[N+1] - PTS[N], not PTS[N] - PTS[N-1] (the prior implementation
-	// was off by one frame, accumulating drift over time).
-	if mc.hasInFlightVideo {
-		delta := pkt.Timestamp - mc.inFlightVideoPTS
-		if delta == 0 || delta > 90000*2 {
-			delta = 90000 / 30
-		}
-		mc.inFlightVideo.Duration = delta
-		mc.pendingVideo = append(mc.pendingVideo, mc.inFlightVideo)
-		mc.pendingVideoTicks += delta
+	// The timer holds the newest AU in flight and hands back the previous
+	// one finalized with its decode-order duration and PTS-DTS offset, so
+	// B-frame (High profile) streams reorder correctly instead of
+	// rendering only keyframes.
+	finalized, durTicks, haveFinalized := mc.vtimer.push(au, pkt.Timestamp)
+	if haveFinalized {
+		mc.pendingVideo = append(mc.pendingVideo, finalized)
+		mc.pendingVideoTicks += durTicks
 	}
-
-	mc.inFlightVideo = newSample
-	mc.inFlightVideoPTS = pkt.Timestamp
-	mc.hasInFlightVideo = true
 
 	if mc.pendingVideoTicks >= videoBatchTicks {
 		mc.flushVideoLocked()
@@ -348,7 +348,21 @@ func (mc *mseConsumer) flushVideoLocked() {
 	// renders frames at evenly-spaced intervals even when RTP timestamps
 	// arrive jittered (network or capture-side). The fragment's total
 	// duration is preserved by absorbing the remainder into the last sample.
-	if n := uint32(len(mc.pendingVideo)); n >= 2 {
+	//
+	// This is only safe for B-frame-free streams (PTS == DTS, all
+	// composition offsets zero). When any sample carries a non-zero
+	// PTSOffset the durations ARE the decode-order DTS deltas the offsets
+	// were computed against; rewriting them desynchronizes the implied DTS
+	// timeline from the offsets and corrupts presentation timing. Leave
+	// reordered streams exactly as the sample timer produced them.
+	hasCompositionOffset := false
+	for _, s := range mc.pendingVideo {
+		if s.PTSOffset != 0 {
+			hasCompositionOffset = true
+			break
+		}
+	}
+	if n := uint32(len(mc.pendingVideo)); n >= 2 && !hasCompositionOffset {
 		target := mc.pendingVideoTicks / n
 		last := n - 1
 		for i := uint32(0); i < last; i++ {

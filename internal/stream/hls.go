@@ -90,11 +90,11 @@ type hlsConsumer struct {
 	segAudio      []*fmp4.Sample
 	segAudioTicks uint32
 
-	// The newest video sample is held until the next packet arrives so its
-	// duration (PTS[N+1]-PTS[N]) can be filled in correctly.
-	inFlightVideo    *fmp4.Sample
-	inFlightVideoPTS uint32
-	hasInFlight      bool
+	// vtimer turns the decode-order AU stream into fMP4 samples with
+	// DTS-based durations and PTS-DTS composition offsets so B-frame
+	// streams reorder correctly. Built lazily so it captures the
+	// resolved diagnostic label.
+	vtimer *h264SampleTimer
 
 	// Per-track running DTS across all emitted segments (fragment BaseTime).
 	videoDTS uint64
@@ -264,7 +264,12 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 			// flag the next segment as a discontinuity so the player
 			// re-reads the (now updated) init segment cleanly.
 			c.hasFirstKeyframe = false
-			c.hasInFlight = false
+			if c.vtimer != nil {
+				c.vtimer.reset()
+				// videoSPS/videoPPS were just updated from the in-band
+				// change; keep the timer's out-of-band fallback in sync.
+				c.vtimer.setParameterSets(c.videoSPS, c.videoPPS)
+			}
 			c.segVideo = nil
 			c.segVideoTicks = 0
 			c.segAudio = nil
@@ -287,22 +292,20 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		slog.Info("HLS first keyframe received", "stream", c.label)
 	}
 
-	newSample := &fmp4.Sample{}
-	if err := newSample.FillH264(0, au); err != nil {
-		return
+	if c.vtimer == nil {
+		c.vtimer = newH264SampleTimer(c.label)
+		// Seed the timer with the current parameter sets so DTS extraction
+		// works for cameras that advertise SPS/PPS only in the SDP.
+		c.vtimer.setParameterSets(c.videoSPS, c.videoPPS)
 	}
+	// The timer holds the newest AU in flight and hands back the previous
+	// one finalized with its decode-order duration and PTS-DTS offset.
+	finalized, durTicks, haveFinalized := c.vtimer.push(au, pkt.Timestamp)
 	isKeyframe := h264.IsRandomAccess(au)
 
-	// Finalize the previous in-flight sample now that its successor's PTS
-	// is known, then append it to the current segment.
-	if c.hasInFlight {
-		delta := pkt.Timestamp - c.inFlightVideoPTS
-		if delta == 0 || delta > 90000*2 {
-			delta = 90000 / 30
-		}
-		c.inFlightVideo.Duration = delta
-		c.segVideo = append(c.segVideo, c.inFlightVideo)
-		c.segVideoTicks += delta
+	if haveFinalized {
+		c.segVideo = append(c.segVideo, finalized)
+		c.segVideoTicks += durTicks
 	}
 
 	// A keyframe at or past the target length starts a new segment; the
@@ -310,10 +313,6 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	if isKeyframe && c.segVideoTicks >= hlsTargetSegmentTicks && len(c.segVideo) > 0 {
 		c.closeSegmentLocked()
 	}
-
-	c.inFlightVideo = newSample
-	c.inFlightVideoPTS = pkt.Timestamp
-	c.hasInFlight = true
 }
 
 func (c *hlsConsumer) OnAudioRTP(pkt *rtp.Packet) {
