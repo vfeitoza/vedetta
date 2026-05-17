@@ -1,0 +1,125 @@
+package stream
+
+import (
+	"context"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/rtsp"
+)
+
+// TestLiveHLSPipelineProducesVideo drives the exact production live-HLS path -
+// rtsp.Hub dialing a real camera, HLSManager muxing RTP into fMP4 - and
+// asserts it yields a playable live playlist with a fetchable init segment
+// and media segments. This is what a camera page consumes; if it passes, the
+// page serves live video, not the snapshot fallback. It deliberately skips
+// only the authenticated HTTP wrapper (irrelevant to "is video produced").
+//
+// Skipped unless VEDETTA_LIVE_CONFIG (path to a real config.yml) and
+// VEDETTA_LIVE_CAMERA (a streaming camera's name) are set, so make test / CI
+// (no live camera) are unaffected. The RTSP URL with credentials is never
+// logged - only its SanitizeURL form.
+func TestLiveHLSPipelineProducesVideo(t *testing.T) {
+	cfgPath := os.Getenv("VEDETTA_LIVE_CONFIG")
+	camName := os.Getenv("VEDETTA_LIVE_CAMERA")
+	if cfgPath == "" || camName == "" {
+		t.Skip("set VEDETTA_LIVE_CONFIG and VEDETTA_LIVE_CAMERA to run the live HLS pipeline check")
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config %s: %v", cfgPath, err)
+	}
+
+	var rtspURL string
+	for _, c := range cfg.Cameras {
+		if c.Name == camName {
+			rtspURL = c.URL // exactly what Camera.DetectURL() / the page uses
+			break
+		}
+	}
+	if rtspURL == "" {
+		t.Fatalf("camera %q not found in %s", camName, cfgPath)
+	}
+	safe := rtsp.SanitizeURL(rtspURL)
+	t.Logf("driving live HLS pipeline for camera %q (%s)", camName, safe)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	hub := rtsp.NewHub(ctx)
+
+	// Mirror production: recording/detection subscribe to this source and keep
+	// it warm (track negotiated, RTP flowing) long before a camera page asks
+	// for HLS. A cold hub where HLS is the first subscriber is not the real
+	// condition. Pre-warm by creating the source and waiting until the video
+	// track is known, exactly as the always-on consumers would have.
+	src := hub.GetOrCreate(rtspURL)
+	warmDeadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(warmDeadline) {
+		if vt := src.VideoTrack(); vt != nil {
+			t.Logf("source warm: video codec=%q clockRate=%d (audio=%v)",
+				vt.Codec, vt.ClockRate, src.AudioTrack() != nil)
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if vt := src.VideoTrack(); vt == nil {
+		t.Fatalf("source never negotiated a video track within 25s for %s "+
+			"(camera not delivering a decodable video stream)", safe)
+	} else if !strings.EqualFold(vt.Codec, "H264") {
+		t.Fatalf("video codec is %q, not H264: the live HLS muxer only handles "+
+			"H264, so this camera's page would be snapshot-only by design (%s)", vt.Codec, safe)
+	}
+
+	m := NewHLSManager(hub)
+	defer m.Close()
+
+	pl, ok := m.PlaylistWait(ctx, rtspURL)
+	if !ok {
+		t.Fatalf("PlaylistWait returned not-ready for %s within the warmup window: "+
+			"the camera page would fall back to snapshot-only here", safe)
+	}
+	if !strings.Contains(pl, "#EXTM3U") {
+		t.Fatalf("playlist is not a valid HLS playlist:\n%s", pl)
+	}
+
+	// The reaped/rebuilt-init fix: the MAP URI must be content-versioned so a
+	// resuming AVPlayer refetches instead of decoding against a stale init.
+	mapRe := regexp.MustCompile(`#EXT-X-MAP:URI="live/init\.mp4\?v=[^"]+"`)
+	if !mapRe.MatchString(pl) {
+		t.Fatalf("playlist MAP URI is not content-versioned (the iOS reap fix):\n%s", pl)
+	}
+
+	segRe := regexp.MustCompile(`(?m)^live/(\d+)\s*$`)
+	matches := segRe.FindAllStringSubmatch(pl, -1)
+	if len(matches) == 0 {
+		t.Fatalf("playlist advertises no media segments (no live video produced):\n%s", pl)
+	}
+	t.Logf("playlist OK: %d live segments advertised", len(matches))
+
+	init, ver, ok := m.InitSegment(rtspURL)
+	if !ok || len(init) == 0 || ver == "" {
+		t.Fatalf("init segment not served: ok=%v len=%d ver=%q", ok, len(init), ver)
+	}
+
+	// Newest advertised segment must resolve to real fMP4 bytes - that is the
+	// frame data a player decodes for live video.
+	newest := matches[len(matches)-1][1]
+	id, err := strconv.ParseUint(newest, 10, 64)
+	if err != nil {
+		t.Fatalf("unparseable segment id %q: %v", newest, err)
+	}
+	seg, ok := m.Segment(rtspURL, id)
+	if !ok || len(seg) == 0 {
+		t.Fatalf("media segment %d not served: ok=%v len=%d", id, ok, len(seg))
+	}
+
+	t.Logf("LIVE HLS VERIFIED: init=%d bytes (v=%s), segment %d=%d bytes - "+
+		"camera %q serves live video, not snapshot-only", len(init), ver, id, len(seg), camName)
+}
