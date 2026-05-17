@@ -46,6 +46,36 @@ func TestStopCamera(t *testing.T) {
 	}
 }
 
+// Manager.Start calls cam.Start sequentially inside initSubsystems before
+// the API is marked ready. A snapshot path on a stalled volume must not
+// block the loop, or one camera bricks the entire NVR at HTTP 503.
+func TestManagerStartNotGatedByBlockingSnapshot(t *testing.T) {
+	cam0 := newTestCamera(config.CameraConfig{Name: "cam0", URL: "rtsp://localhost/0"}, nil)
+	cam0.latestSnapshotPath = blockingSnapshotFIFO(t)
+	cam1 := newTestCamera(config.CameraConfig{Name: "cam1", URL: "rtsp://localhost/1"}, nil)
+
+	m := &Manager{
+		cameras:     map[string]*Camera{"cam0": cam0, "cam1": cam1},
+		cancelFuncs: make(map[string]context.CancelFunc),
+		order:       []string{"cam0", "cam1"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.Start(ctx, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Manager.Start did not return: one camera's stalled snapshot disk blocked all camera startup and NVR readiness")
+	}
+}
+
 func TestIsStopped(t *testing.T) {
 	m := &Manager{
 		cameras:     make(map[string]*Camera),

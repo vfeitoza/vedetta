@@ -2,6 +2,8 @@ package camera
 
 import (
 	"context"
+	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -94,6 +96,58 @@ func TestSnapshotRGB24_DstTooSmall(t *testing.T) {
 	_, _, ok := cam.SnapshotRGB24(dst)
 	if ok {
 		t.Fatal("expected ok=false when dst too small")
+	}
+}
+
+// A FIFO with no writer makes os.Open block in the open syscall
+// indefinitely - the same unbounded hang a stalled recordings volume
+// produces in production. loadCachedSnapshot ran synchronously inside
+// Camera.Start, which Manager.Start calls synchronously inside
+// initSubsystems before the API is marked ready. One camera's snapshot
+// path on a stalled disk therefore bricked the entire NVR at HTTP 503.
+func blockingSnapshotFIFO(t *testing.T) string {
+	t.Helper()
+	fifo := filepath.Join(t.TempDir(), "latest.jpg")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	return fifo
+}
+
+func TestStartReturnsPromptlyWhenCachedSnapshotReadBlocks(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test", URL: "rtsp://localhost/test"}, nil)
+	cam.latestSnapshotPath = blockingSnapshotFIFO(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		cam.Start(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Camera.Start did not return while the cached snapshot read blocked: NVR readiness is gated on unbounded disk I/O")
+	}
+}
+
+func TestLoadCachedSnapshotIsBoundedWhenReadBlocks(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "test", URL: "rtsp://localhost/test"}, nil)
+	cam.latestSnapshotPath = blockingSnapshotFIFO(t)
+
+	done := make(chan struct{})
+	go func() {
+		cam.loadCachedSnapshot()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(cachedSnapshotLoadTimeout + 2*time.Second):
+		t.Fatal("loadCachedSnapshot did not return within its timeout while the read blocked")
 	}
 }
 

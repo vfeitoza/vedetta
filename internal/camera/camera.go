@@ -304,37 +304,51 @@ func (c *Camera) loadCachedSnapshot() {
 	if path == "" {
 		return
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
 
-	img, err := jpeg.Decode(f)
-	if err != nil {
-		slog.Warn("failed to decode cached snapshot", "camera", c.config.Name, "error", err)
-		return
+	type loaded struct {
+		rgb  []byte
+		w, h int
 	}
-
-	bounds := img.Bounds()
-	w, h := bounds.Dx(), bounds.Dy()
-	rgb := make([]byte, w*h*3)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, _ := img.At(x, y).RGBA()
-			off := ((y-bounds.Min.Y)*w + (x - bounds.Min.X)) * 3
-			rgb[off] = byte(r >> 8)
-			rgb[off+1] = byte(g >> 8)
-			rgb[off+2] = byte(b >> 8)
+	result := make(chan loaded, 1)
+	go func() {
+		f, err := os.Open(path)
+		if err != nil {
+			return
 		}
-	}
+		defer f.Close()
 
-	c.mu.Lock()
-	c.rawFrame = rgb
-	c.frameW = w
-	c.frameH = h
-	c.mu.Unlock()
-	slog.Info("loaded cached snapshot", "camera", c.config.Name)
+		img, err := jpeg.Decode(f)
+		if err != nil {
+			slog.Warn("failed to decode cached snapshot", "camera", c.config.Name, "error", err)
+			return
+		}
+
+		bounds := img.Bounds()
+		w, h := bounds.Dx(), bounds.Dy()
+		rgb := make([]byte, w*h*3)
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				r, g, b, _ := img.At(x, y).RGBA()
+				off := ((y-bounds.Min.Y)*w + (x - bounds.Min.X)) * 3
+				rgb[off] = byte(r >> 8)
+				rgb[off+1] = byte(g >> 8)
+				rgb[off+2] = byte(b >> 8)
+			}
+		}
+		result <- loaded{rgb, w, h}
+	}()
+
+	select {
+	case res := <-result:
+		c.mu.Lock()
+		c.rawFrame = res.rgb
+		c.frameW = res.w
+		c.frameH = res.h
+		c.mu.Unlock()
+		slog.Info("loaded cached snapshot", "camera", c.config.Name)
+	case <-time.After(cachedSnapshotLoadTimeout):
+		slog.Warn("cached snapshot load timed out", "camera", c.config.Name, "path", path)
+	}
 }
 
 // saveCachedSnapshot writes the current frame to disk (throttled to every 30s).
@@ -379,7 +393,12 @@ func (c *Camera) saveCachedSnapshot() {
 // Start begins reading frames from the RTSP stream via the Hub.
 func (c *Camera) Start(ctx context.Context) {
 	slog.Info("starting camera", "name", c.config.Name, "url", rtsp.SanitizeURL(c.config.URL))
-	c.loadCachedSnapshot()
+
+	// Load the cached snapshot off the start path. Manager.Start calls
+	// Camera.Start synchronously inside initSubsystems before the API is
+	// marked ready, so a blocking read here (stalled recordings volume)
+	// would gate the entire NVR's readiness on one camera's disk I/O.
+	go c.loadCachedSnapshot()
 
 	go c.readFrames(ctx)
 }
@@ -801,6 +820,11 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 // detect FPS, so brief RTSP reconnects don't flap the online flag, while a
 // camera that has truly stopped delivering frames flips within a few seconds.
 const onlineFreshness = 15 * time.Second
+
+// cachedSnapshotLoadTimeout bounds the cached-snapshot read so a stalled
+// recordings volume degrades to "no cached image" instead of leaking a
+// goroutine blocked forever in the open/decode syscall.
+const cachedSnapshotLoadTimeout = 5 * time.Second
 
 // IsOnline returns true when the camera has decoded a frame within the
 // freshness window. This reflects the user-visible "can I see this camera
