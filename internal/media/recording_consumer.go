@@ -18,6 +18,14 @@ import (
 // diskPauseRetryInterval is how often a paused consumer retries the disk check.
 const diskPauseRetryInterval = 30 * time.Second
 
+// segmentWriterCreateTimeout bounds segment-file creation. A stalled storage
+// volume makes os.Create block forever in the kernel; without this bound the
+// single processLoop goroutine wedges under rc.mu and recording never
+// recovers, even after the volume comes back. On timeout the create is
+// abandoned and surfaced as a write error so the existing pause/resume path
+// takes over and recording self-heals once I/O succeeds again.
+const segmentWriterCreateTimeout = 5 * time.Second
+
 // SegmentInfo is passed to the OnSegmentDone callback when a segment is completed.
 type SegmentInfo struct {
 	Camera    string
@@ -46,6 +54,11 @@ type RecordingConsumer struct {
 	pktCh  chan rtpMsg
 	done   chan struct{}
 	closed atomic.Bool
+
+	// newWriter creates the segment writer; indirected so a stalled-volume
+	// hang in file creation can be bounded and tested. Defaults to
+	// NewSegmentWriter.
+	newWriter func(path string, video, audio *rtsp.TrackInfo) (*SegmentWriter, error)
 
 	mu              sync.Mutex
 	writer          *SegmentWriter
@@ -76,6 +89,7 @@ func NewRecordingConsumer(segDir, camera string, segLen time.Duration, video, au
 		disk:       disk,
 		pktCh:      make(chan rtpMsg, 512),
 		done:       make(chan struct{}),
+		newWriter:  NewSegmentWriter,
 	}
 
 	go rc.processLoop()
@@ -289,10 +303,36 @@ func (rc *RecordingConsumer) ensureSegment() error {
 	rc.segStart = now
 	rc.segPath = filepath.Join(rc.segDir, fmt.Sprintf("%s.mp4", now.Format("2006-01-02_15-04-05")))
 
-	var err error
-	rc.writer, err = NewSegmentWriter(rc.segPath, rc.videoTrack, rc.audioTrack)
-	if err != nil {
-		return fmt.Errorf("create segment writer: %w", err)
+	type writerResult struct {
+		w   *SegmentWriter
+		err error
+	}
+	path := rc.segPath
+	resultCh := make(chan writerResult, 1)
+	go func() {
+		w, err := rc.newWriter(path, rc.videoTrack, rc.audioTrack)
+		resultCh <- writerResult{w, err}
+	}()
+
+	select {
+	case res := <-resultCh:
+		if res.err != nil {
+			return fmt.Errorf("create segment writer: %w", res.err)
+		}
+		rc.writer = res.w
+	case <-time.After(segmentWriterCreateTimeout):
+		// Stalled volume: os.Create is wedged in the kernel and will not
+		// return until the device errors or recovers. Abandon it (one
+		// orphaned goroutine, freed when the syscall finally fails) and
+		// surface a write error so handleWriteError pauses recording; the
+		// pause/resume path then retries and self-heals once I/O works.
+		go func() {
+			if res := <-resultCh; res.err == nil && res.w != nil {
+				_, _ = res.w.Close()
+				_ = os.Remove(path)
+			}
+		}()
+		return fmt.Errorf("segment writer creation timed out after %s (stalled volume)", segmentWriterCreateTimeout)
 	}
 	rc.currentPath = rc.segPath
 

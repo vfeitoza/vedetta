@@ -15,6 +15,52 @@ func testDisk(t *testing.T) *DiskSpace {
 	return NewDiskSpace(t.TempDir())
 }
 
+// A stalled storage volume makes os.Create block forever in the kernel.
+// Segment creation runs in the single processLoop goroutine under rc.mu, so
+// an unbounded hang there wedges recording permanently (observed in
+// production: 0 segments, 0 open file handles, recorder "started" but never
+// writing). Creation must be bounded and converted into the existing
+// pause/resume recovery path instead.
+func TestRecordingConsumer_StalledSegmentCreate_PausesNotWedges(t *testing.T) {
+	dir := t.TempDir()
+	video := &rtsp.TrackInfo{
+		Codec:     "H264",
+		ClockRate: 90000,
+		IsVideo:   true,
+		SPS:       []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2},
+		PPS:       []byte{0x68, 0xce, 0x38, 0x80},
+	}
+
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, video, nil, testDisk(t), nil)
+	defer rc.Close()
+
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	// Set before any packet is sent: processLoop is parked on the packet
+	// channel and only reads newWriter after receiving a packet, so the
+	// channel send/receive establishes happens-before (no data race).
+	rc.newWriter = func(string, *rtsp.TrackInfo, *rtsp.TrackInfo) (*SegmentWriter, error) {
+		<-block // simulate a stalled volume: creation never returns
+		return nil, nil
+	}
+
+	for i := 0; i < 5; i++ {
+		rc.OnVideoRTP(&rtp.Packet{
+			Header:  rtp.Header{PayloadType: 96, Timestamp: uint32(i * 3000)},
+			Payload: []byte{0x65, 0x00, 0x01},
+		})
+	}
+
+	deadline := time.Now().Add(3*segmentWriterCreateTimeout + 2*time.Second)
+	for time.Now().Before(deadline) {
+		if rc.Paused() {
+			return // recovered into the pause path: correct
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("recording wedged on a stalled segment create: never paused, processLoop is blocked forever under rc.mu")
+}
+
 func TestRecordingConsumer_SegmentCallback(t *testing.T) {
 	dir := t.TempDir()
 
