@@ -548,6 +548,24 @@ function hideLiveOffline() {
 // produces a playable segment. Every other client starts with MSE and
 // cascades (MSE -> WebRTC -> MJPEG) guarded by the frame watchdogs. Manual
 // transport buttons still let LAN users opt into WebRTC for higher quality.
+// Kick the server into muxing the live HLS substream the instant the camera
+// page knows it will show live video - before any player attaches. The
+// server's first segment can only close one keyframe interval after the
+// first keyframe (a valid fMP4 segment must span keyframe to keyframe), so a
+// camera with a ~2s GOP needs ~3-4s of head start. iOS AVPlayer abandons a
+// not-yet-ready playlist in ~2s and cascades to the snapshot loop, so the
+// muxing must already be running by the time playback requests the
+// playlist. Fire-and-forget against the SAME URL the player will request
+// first (liveHlsUrl(...,'high')) so it reuses the one server consumer; the
+// response body is irrelevant - the request alone starts the pipeline.
+function prewarmLiveHLS(name) {
+  if (!name) return;
+  try {
+    fetch(liveHlsUrl(name, 'high'), { cache: 'no-store' })
+      .catch(function () { /* warmup is best-effort */ });
+  } catch (e) { /* fetch unavailable - the normal warmup poll still runs */ }
+}
+
 function startLiveStream() {
   if (isIOSWebKit()) {
     startNativeHLS();
@@ -731,8 +749,7 @@ function startNativeHLS() {
   // state on iOS.
   function attempt() {
     if (seq !== hlsSeq) return;
-    var url = '/api/cameras/' + encodeURIComponent(name) + '/live.m3u8'
-      + (qualityTier === 'low' ? '?quality=low' : '');
+    var url = liveHlsUrl(name, qualityTier);
     fetch(url, { cache: 'no-store' })
       .then(function (r) {
         if (seq !== hlsSeq) return;

@@ -380,6 +380,7 @@
   <script src="/hls.min.js"></script>
   <script src="/timeparse.js"></script>
   <script src="/hlsrecovery.js"></script>
+  <script src="/livehls.js"></script>
   <script src="/app.js"></script>
   <script>
     // ─── Camera Settings (per-camera config form) ───
@@ -596,6 +597,16 @@
       }
 
       function initCameraPage(camName) {
+        // Pre-warm live HLS immediately if this page will land on the live
+        // view (no recording deep-link). This runs in parallel with the
+        // snapshot/events/timeline/zones init below, giving the server a
+        // multi-second head start to mux the first segment before
+        // startLiveStream() attaches the player - so a slow-keyframe camera
+        // does not cascade to the 2s snapshot loop on a cold load.
+        if (!resolvePlaybackTime(new URLSearchParams(location.search).get('t'))) {
+          prewarmLiveHLS(camName);
+        }
+
         // Snapshot refresh
         const snap = document.getElementById('live-snapshot');
         if (snap) {
