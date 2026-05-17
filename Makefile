@@ -31,8 +31,14 @@ build-capi:
 run: build
 	$(BUILD_DIR)/$(BINARY) -config config.example.yml
 
-test:
+test: test-js
 	go test ./...
+
+# Browser-side pure logic (no DOM) is extracted into standalone modules and
+# unit-tested with the Node built-in test runner so it runs locally and in CI
+# with no extra toolchain.
+test-js:
+	node --test internal/api/static/*.test.js
 
 bench:
 	go test ./internal/detect/ -bench=. -benchmem -count=1

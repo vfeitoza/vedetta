@@ -3,6 +3,8 @@ package stream
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
@@ -28,10 +30,14 @@ const (
 	// live edge close without LL-HLS machinery.
 	hlsTargetSegmentTicks = 90000
 
-	// Completed segments kept addressable in the rolling window. iOS holds
-	// a few segments of buffer, so six gives a stable playlist with a few
-	// seconds of DVR without unbounded memory growth.
-	hlsWindowSegments = 6
+	// Completed segments kept addressable in the rolling window. iOS Safari
+	// suspends a backgrounded tab for tens of seconds (lock screen, app
+	// switch); on resume AVPlayer requests the segment it had queued, and a
+	// media-segment 404 is fatal to AVPlayer (the page then cascades to
+	// snapshots). Segments are ~1s, so retaining 32 keeps roughly half a
+	// minute of DVR - enough to outlast a realistic suspend/resume gap -
+	// while staying bounded in memory.
+	hlsWindowSegments = 32
 
 	// A consumer with no playlist/segment/init request for this long is
 	// torn down and detached from the RTSP source.
@@ -69,8 +75,9 @@ type hlsConsumer struct {
 	// AAC get a libfdk-aac encoder so iOS native HLS (which cannot decode
 	// G.711) still receives audio. aacEnc is nil for native-AAC cameras,
 	// which keep the zero-transcode passthrough.
-	aacEnc   aacEncoder
-	g711Alaw bool
+	aacEnc      aacEncoder
+	g711Alaw    bool
+	g711Upscale int // integer upsample factor applied before AAC encoding
 
 	initSegment      []byte
 	videoReady       bool
@@ -152,7 +159,25 @@ func (c *hlsConsumer) setupG711Transcode(audio *rtsp.TrackInfo) {
 	if channels <= 0 {
 		channels = 1
 	}
-	enc, err := newAACEncoder(audio.ClockRate, channels)
+
+	// Real iOS hardware AVPlayer refuses an HLS fMP4 rendition whose AAC
+	// track runs at the 8 kHz G.711 rate and disables the whole variant,
+	// so the camera page falls back to the snapshot loop. (The macOS
+	// Simulator's software AAC decoder tolerates 8 kHz, which masked this
+	// for a long time.) Upsample the band-limited G.711 PCM to a real-
+	// device-safe rate and run the encoder, the AudioSpecificConfig, and
+	// the fMP4 timescale all at that target rate.
+	srcRate := audio.ClockRate
+	if srcRate <= 0 {
+		srcRate = 8000
+	}
+	upscale := 1
+	if srcRate < hlsTranscodeSampleRate && hlsTranscodeSampleRate%srcRate == 0 {
+		upscale = hlsTranscodeSampleRate / srcRate
+	}
+	targetRate := srcRate * upscale
+
+	enc, err := newAACEncoder(targetRate, channels)
 	if err != nil {
 		slog.Warn("HLS G.711->AAC encoder unavailable, serving video only",
 			"codec", audio.Codec, "rate", audio.ClockRate, "error", err)
@@ -166,14 +191,16 @@ func (c *hlsConsumer) setupG711Transcode(audio *rtsp.TrackInfo) {
 	c.hasAudio = true
 	c.aacEnc = enc
 	c.g711Alaw = g711IsALaw(audio.Codec)
+	c.g711Upscale = upscale
 	c.aacConfig = &mpeg4audio.AudioSpecificConfig{
 		Type:          mpeg4audio.ObjectTypeAACLC,
-		SampleRate:    audio.ClockRate,
+		SampleRate:    targetRate,
 		ChannelConfig: channelConfig,
 	}
-	c.audioTimeScale = uint32(audio.ClockRate)
+	c.audioTimeScale = uint32(targetRate)
 	slog.Info("HLS G.711->AAC transcode enabled",
-		"codec", audio.Codec, "rate", audio.ClockRate, "channels", channels)
+		"codec", audio.Codec, "rate", audio.ClockRate,
+		"targetRate", targetRate, "channels", channels)
 }
 
 func (c *hlsConsumer) touch() {
@@ -298,6 +325,7 @@ func (c *hlsConsumer) OnAudioRTP(pkt *rtp.Packet) {
 		if len(pcm) == 0 {
 			return
 		}
+		pcm = upsamplePCM(pcm, c.g711Upscale)
 		encoded, err := c.aacEnc.Encode(pcm)
 		if err != nil {
 			return
@@ -349,9 +377,23 @@ func (c *hlsConsumer) closeSegmentLocked() {
 		},
 	}
 	if c.hasAudio && len(c.segAudio) > 0 {
+		audioBase := c.audioDTS
+		if c.aacEnc != nil {
+			// The G.711->AAC encoder emits fixed 1024-sample frames whose
+			// running count is independent of the camera's video RTP clock.
+			// Accumulating audio sample ticks therefore lets the audio
+			// fragment timeline drift away from video without bound (the
+			// garage camera's video RTP runs ~1.7% faster than real time,
+			// so audio falls ~33 ms behind per 2 s segment). Real iOS
+			// AVPlayer cannot sustain a progressively desyncing fMP4 and
+			// drops to the snapshot loop. Pin the audio fragment base to
+			// the video timeline so the two tracks stay locked; the per
+			// segment correction is sub-frame and never accumulates.
+			audioBase = c.videoDTS * uint64(c.audioTimeScale) / 90000
+		}
 		tracks = append(tracks, &fmp4.PartTrack{
 			ID:       audioTrackID,
-			BaseTime: c.audioDTS,
+			BaseTime: audioBase,
 			Samples:  c.segAudio,
 		})
 	}
@@ -386,7 +428,13 @@ func (c *hlsConsumer) closeSegmentLocked() {
 	c.nextSegID++
 	c.moofSeq++
 	c.videoDTS += uint64(c.segVideoTicks)
-	c.audioDTS += uint64(c.segAudioTicks)
+	if c.aacEnc != nil {
+		// Keep the transcoded audio timeline locked to video (see the
+		// audioBase rationale above) so cross-segment drift cannot build.
+		c.audioDTS = c.videoDTS * uint64(c.audioTimeScale) / 90000
+	} else {
+		c.audioDTS += uint64(c.segAudioTicks)
+	}
 	c.pendingDisc = false
 
 	c.segVideo = nil
@@ -424,7 +472,11 @@ func (c *hlsConsumer) playlist() (string, bool) {
 	b.WriteString("#EXT-X-VERSION:7\n")
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", targetDuration)
 	fmt.Fprintf(&b, "#EXT-X-MEDIA-SEQUENCE:%d\n", c.ring[0].id)
-	b.WriteString("#EXT-X-MAP:URI=\"live/init.mp4\"\n")
+	if ver := c.initVersionLocked(); ver != "" {
+		fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"live/init.mp4?v=%s\"\n", ver)
+	} else {
+		b.WriteString("#EXT-X-MAP:URI=\"live/init.mp4\"\n")
+	}
 	for i := range c.ring {
 		if c.ring[i].disc {
 			b.WriteString("#EXT-X-DISCONTINUITY\n")
@@ -451,15 +503,30 @@ func (c *hlsConsumer) waitPlaylist(ctx context.Context) (string, bool) {
 	}
 }
 
-func (c *hlsConsumer) initSeg() ([]byte, bool) {
+// initVersionLocked returns a short content hash of the current init
+// segment, or "" if none is built yet. The caller must hold c.mu. The
+// playlist embeds this in the EXT-X-MAP URI and the handler emits it as
+// the init segment's ETag: when an idle consumer is reaped and rebuilt
+// with a fresh init (new MP4 timescale / SPS), the hash changes, so iOS
+// AVPlayer sees a new MAP URI and refetches instead of decoding new
+// media segments against a stale, cached init.
+func (c *hlsConsumer) initVersionLocked() string {
+	if c.initSegment == nil {
+		return ""
+	}
+	sum := sha256.Sum256(c.initSegment)
+	return hex.EncodeToString(sum[:8])
+}
+
+func (c *hlsConsumer) initSeg() ([]byte, string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.initSegment == nil {
-		return nil, false
+		return nil, "", false
 	}
 	out := make([]byte, len(c.initSegment))
 	copy(out, c.initSegment)
-	return out, true
+	return out, c.initVersionLocked(), true
 }
 
 func (c *hlsConsumer) segment(id uint64) ([]byte, bool) {
@@ -561,7 +628,7 @@ func (m *HLSManager) PlaylistWait(ctx context.Context, rtspURL string) (string, 
 }
 
 // InitSegment serves the fMP4 init segment.
-func (m *HLSManager) InitSegment(rtspURL string) ([]byte, bool) {
+func (m *HLSManager) InitSegment(rtspURL string) ([]byte, string, bool) {
 	c := m.getOrCreate(rtspURL)
 	return c.initSeg()
 }

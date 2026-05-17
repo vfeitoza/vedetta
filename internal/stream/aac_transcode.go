@@ -6,6 +6,38 @@ import (
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/g711"
 )
 
+// hlsTranscodeSampleRate is the AAC sample rate used for G.711 cameras on
+// the HLS path. G.711 is 8 kHz, but real iOS hardware AVPlayer disables an
+// HLS fMP4 rendition whose AAC track is 8 kHz, so the band-limited speech
+// is upsampled to this standard rate (an exact 6x integer factor from
+// 8 kHz, so resampling stays artifact-free for telephony audio).
+const hlsTranscodeSampleRate = 48000
+
+// upsamplePCM resamples mono PCM by an integer factor using linear
+// interpolation. G.711 is band-limited to ~3.4 kHz, so integer-factor
+// linear interpolation introduces no audible artifacts while producing a
+// sample rate real iOS hardware will decode. factor <= 1 is the identity.
+func upsamplePCM(in []int16, factor int) []int16 {
+	if factor <= 1 || len(in) == 0 {
+		return in
+	}
+	out := make([]int16, len(in)*factor)
+	for i := range in {
+		cur := int32(in[i])
+		next := cur
+		if i+1 < len(in) {
+			next = int32(in[i+1])
+		}
+		base := i * factor
+		for f := 0; f < factor; f++ {
+			// Linear step between cur and next; integer math keeps the
+			// result deterministic and endpoint-exact (f=0 -> cur).
+			out[base+f] = int16(cur + (next-cur)*int32(f)/int32(factor))
+		}
+	}
+	return out
+}
+
 // aacEncoder converts 16-bit mono PCM into AAC-LC access units. The only
 // production implementation is libfdk-aac loaded via purego (see
 // aac_fdk.go); tests substitute a fake through newAACEncoder.

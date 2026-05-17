@@ -309,6 +309,7 @@ func (s *Server) Start() error {
 	} else {
 		handler = s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(s.mux)))
 	}
+	handler = requestLogMiddleware(handler)
 
 	s.httpSrv = &http.Server{
 		Addr:              addr,
@@ -406,7 +407,7 @@ func (s *Server) TransitionToFull(authChecker *auth.Checker) {
 	s.mux = newMux
 	s.registerRoutes()
 
-	s.httpSrv.Handler = s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux)))
+	s.httpSrv.Handler = requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux))))
 }
 
 func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient) {
@@ -452,6 +453,63 @@ func (s *Server) readyMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// statusLoggingResponseWriter records the response status code while
+// transparently forwarding everything to the underlying writer. It forwards
+// Flush so SSE handlers that type-assert http.Flusher keep working.
+type statusLoggingResponseWriter struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (w *statusLoggingResponseWriter) WriteHeader(code int) {
+	if !w.written {
+		w.status = code
+		w.written = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusLoggingResponseWriter) Write(b []byte) (int, error) {
+	if !w.written {
+		w.status = http.StatusOK
+		w.written = true
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusLoggingResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// requestLogMiddleware emits one structured "http request" line per request
+// that reaches the application, including the User-Agent and the
+// cache-revalidation request headers. This is the ground-truth instrument
+// for diagnosing whether a client ever issues a fresh document fetch.
+func requestLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lw := &statusLoggingResponseWriter{ResponseWriter: w}
+		start := time.Now()
+		next.ServeHTTP(lw, r)
+		status := lw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		slog.Info("http request",
+			"method", r.Method,
+			"uri", r.URL.RequestURI(),
+			"status", status,
+			"ua", r.UserAgent(),
+			"if_none_match", r.Header.Get("If-None-Match"),
+			"cache_control", r.Header.Get("Cache-Control"),
+			"remote", r.RemoteAddr,
+			"dur_ms", time.Since(start).Milliseconds(),
+		)
 	})
 }
 

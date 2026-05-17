@@ -98,7 +98,7 @@ func TestHLSPlaylistEmptyUntilFirstSegment(t *testing.T) {
 	if _, ok := c.playlist(); ok {
 		t.Fatal("playlist must report not-ready while the ring is empty")
 	}
-	if _, ok := c.initSeg(); ok {
+	if _, _, ok := c.initSeg(); ok {
 		t.Fatal("init segment must report not-ready before it is built")
 	}
 }
@@ -117,12 +117,17 @@ func TestHLSPlaylistFormat(t *testing.T) {
 		t.Fatal("playlist must be ready once the ring has segments")
 	}
 
+	_, ver, ok := c.initSeg()
+	if !ok || ver == "" {
+		t.Fatalf("initSeg must expose a non-empty version, got ok=%v ver=%q", ok, ver)
+	}
+
 	mustContain := []string{
 		"#EXTM3U",
 		"#EXT-X-VERSION:7",
 		"#EXT-X-TARGETDURATION:2", // ceil(max duration 2.0)
 		"#EXT-X-MEDIA-SEQUENCE:4", // first segment id in the window
-		"#EXT-X-MAP:URI=\"live/init.mp4\"",
+		"#EXT-X-MAP:URI=\"live/init.mp4?v=" + ver + "\"",
 		"#EXT-X-DISCONTINUITY", // before segment 5
 		"#EXTINF:1.000000,",
 		"live/4",
@@ -148,6 +153,64 @@ func TestHLSPlaylistFormat(t *testing.T) {
 	seg4Idx := strings.Index(pl, "live/4")
 	if seg4Idx >= discIdx || discIdx >= seg5Idx {
 		t.Errorf("discontinuity tag is not positioned before segment 5\n---\n%s", pl)
+	}
+}
+
+// iOS AVPlayer caches the EXT-X-MAP init segment by URL and reuses it
+// across playback sessions without a reliable refetch. When an idle HLS
+// consumer is reaped and rebuilt, the new init segment (fresh MP4
+// timescale / SPS) is incompatible with the cached one, so AVPlayer
+// decodes the new media segments against a stale init and renders
+// nothing - the camera page then shows only its snapshot fallback. The
+// playlist must therefore advertise the init under a content-versioned
+// URI so a rebuilt init forces AVPlayer to treat it as a new resource.
+func TestHLSPlaylistMapURIIsVersioned(t *testing.T) {
+	c := newHLSConsumer(nil, nil)
+	c.initSegment = []byte("INIT-A")
+	c.ring = []hlsSegment{{id: 1, data: []byte("a"), duration: 1.0}}
+
+	pl, ok := c.playlist()
+	if !ok {
+		t.Fatal("playlist must be ready once the ring has segments")
+	}
+
+	_, ver, ok := c.initSeg()
+	if !ok || ver == "" {
+		t.Fatalf("initSeg must expose a non-empty version, got ok=%v ver=%q", ok, ver)
+	}
+
+	wantMap := "#EXT-X-MAP:URI=\"live/init.mp4?v=" + ver + "\""
+	if !strings.Contains(pl, wantMap) {
+		t.Errorf("playlist MAP URI not versioned with the init version\nwant substring: %s\n---\n%s", wantMap, pl)
+	}
+	if strings.Contains(pl, "#EXT-X-MAP:URI=\"live/init.mp4\"") {
+		t.Errorf("playlist still advertises the bare, unversioned init URI\n---\n%s", pl)
+	}
+}
+
+// The init version must be derived from the init segment's content: a
+// rebuilt consumer with different init bytes must produce a different
+// version (so AVPlayer refetches), and identical bytes must produce the
+// same version (so an unchanged init still revalidates to 304).
+func TestHLSInitVersionTracksInitContent(t *testing.T) {
+	c := newHLSConsumer(nil, nil)
+
+	c.initSegment = []byte("INIT-A")
+	_, verA, ok := c.initSeg()
+	if !ok || verA == "" {
+		t.Fatalf("expected a version for INIT-A, got ok=%v ver=%q", ok, verA)
+	}
+
+	c.initSegment = []byte("INIT-A")
+	_, verAagain, _ := c.initSeg()
+	if verAagain != verA {
+		t.Errorf("identical init bytes produced different versions: %q vs %q", verA, verAagain)
+	}
+
+	c.initSegment = []byte("INIT-B-different")
+	_, verB, _ := c.initSeg()
+	if verB == verA {
+		t.Errorf("rebuilt init with different bytes produced the same version %q; AVPlayer would never refetch", verB)
 	}
 }
 
@@ -241,11 +304,37 @@ func TestHLSSegmentLookupAndEviction(t *testing.T) {
 	}
 }
 
+// iOS Safari suspends a backgrounded tab for tens of seconds (lock screen,
+// app switch, glance away). On resume AVPlayer requests the media segment
+// it had queued before suspending. If the live window already evicted that
+// id the request 404s; AVPlayer treats a media-segment 404 as a fatal,
+// non-recoverable error and the camera page cascades to ~2s snapshots. The
+// window must retain at least a realistic suspend gap of segments so a
+// resuming player still gets bytes, not a 404.
+func TestHLSWindowSurvivesIOSSuspendGap(t *testing.T) {
+	const iosSuspendGapSeconds = 30
+
+	c := newHLSConsumer(nil, nil)
+	// Produce well past the gap so the window has fully rotated.
+	const total = iosSuspendGapSeconds + 30
+	for i := 0; i < total; i++ {
+		closeOneSecondSegment(c)
+	}
+
+	// The segment that was the live edge iosSuspendGapSeconds ago: a tab
+	// backgrounded that long ago and resuming now asks for exactly this id.
+	resumeID := c.nextSegID - 1 - iosSuspendGapSeconds
+	if data, ok := c.segment(resumeID); !ok || len(data) == 0 {
+		t.Fatalf("segment %d evicted after a %ds suspend gap (window too short): ok=%v len=%d; ring=[%d..%d]",
+			resumeID, iosSuspendGapSeconds, ok, len(data), c.ring[0].id, c.ring[len(c.ring)-1].id)
+	}
+}
+
 func TestHLSInitSegmentReturnsDefensiveCopy(t *testing.T) {
 	c := newHLSConsumer(nil, nil)
 	c.initSegment = []byte{0x01, 0x02, 0x03}
 
-	got, ok := c.initSeg()
+	got, _, ok := c.initSeg()
 	if !ok {
 		t.Fatal("init segment must be served once present")
 	}

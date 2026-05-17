@@ -563,6 +563,11 @@ function startLiveStream() {
 var HLS_WARMUP_RETRY_MS = 1000;
 var HLS_MAX_WARMUP_RETRIES = 15;
 var HLS_STALL_TIMEOUT_MS = 12000;
+// A post-start error (notably an evicted-segment 404 after iOS suspends and
+// resumes a backgrounded tab) gets this many live-HLS restarts to resync to
+// the live edge before the quality/snapshot cascade. The budget is refreshed
+// each time playback recovers, so every suspend episode gets its own restart.
+var HLS_MAX_RESTARTS = 1;
 var hlsWarmupTimer = null;
 var hlsStallTimer = null;
 var hlsSeq = 0;
@@ -604,6 +609,7 @@ function startNativeHLS() {
   const seq = ++hlsSeq;
   var started = false;
   var warmupAttempts = 0;
+  var hlsRestartsUsed = 0;
   // Quality cascade. 'high' is the main/record stream (1080p, AAC audio) but
   // it can flap; if it never produces a playable segment within the warmup
   // budget (or stalls after starting) we step down to 'low' (the detect
@@ -675,17 +681,41 @@ function startNativeHLS() {
       var viewport = el('live-viewport');
       if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
     }
+    // Playback is healthy: refresh the restart budget so the next suspend
+    // episode also gets a live-HLS resync instead of dropping to snapshots.
+    hlsRestartsUsed = 0;
     armStallWatchdog();
   }
 
+  // Restart native HLS in place: drop the errored src and re-poll the
+  // playlist so AVPlayer resyncs to the live edge (the playlist's advanced
+  // EXT-X-MEDIA-SEQUENCE). Used to recover an iOS suspend/resume stall
+  // without changing quality tier or stranding on the snapshot loop.
+  function restartHLS() {
+    if (hlsStallTimer) { clearTimeout(hlsStallTimer); hlsStallTimer = null; }
+    showStreamConnecting('Live');
+    try { video.removeAttribute('src'); video.load(); } catch (e) { /* best effort */ }
+    hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+  }
+
   function onError() {
-    if (seq !== hlsSeq || !started) {
-      // Pre-playback error: keep trying within the warmup budget.
-      if (seq === hlsSeq && warmupAttempts < HLS_MAX_WARMUP_RETRIES) {
-        warmupAttempts++;
-        hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
-        return;
-      }
+    if (seq !== hlsSeq) return;
+    var action = nextHlsErrorAction({
+      started: started,
+      warmupAttempts: warmupAttempts,
+      maxWarmupRetries: HLS_MAX_WARMUP_RETRIES,
+      restartsUsed: hlsRestartsUsed,
+      maxRestarts: HLS_MAX_RESTARTS,
+    });
+    if (action === 'warmup-retry') {
+      warmupAttempts++;
+      hlsWarmupTimer = setTimeout(attempt, HLS_WARMUP_RETRY_MS);
+      return;
+    }
+    if (action === 'restart') {
+      hlsRestartsUsed++;
+      restartHLS();
+      return;
     }
     escalateOrFallback();
   }

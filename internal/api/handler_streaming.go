@@ -178,15 +178,27 @@ func (s *Server) GetLiveHLSInit(w http.ResponseWriter, r *http.Request, name str
 		return
 	}
 
-	init, ok := s.hls.InitSegment(s.hlsRTSPURL(r, cam))
+	init, version, ok := s.hls.InitSegment(s.hlsRTSPURL(r, cam))
 	if !ok {
 		w.Header().Set("Retry-After", "1")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stream warming up"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "video/mp4")
+	// The init segment is served at a stable path but its bytes change
+	// whenever the consumer is reaped and rebuilt. A strong, content-
+	// derived ETag plus no-cache lets a client (notably iOS AVPlayer,
+	// which aggressively caches the EXT-X-MAP target) revalidate: an
+	// unchanged init returns 304, a rebuilt one returns the new bytes.
+	etag := `"` + version + `"`
+	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "no-cache")
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(init)
 }

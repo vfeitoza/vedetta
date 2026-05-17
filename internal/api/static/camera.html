@@ -378,6 +378,8 @@
   <!-- Keyboard Shortcut Modal -->
   <div class="toast-container" id="toasts"></div>
   <script src="/hls.min.js"></script>
+  <script src="/timeparse.js"></script>
+  <script src="/hlsrecovery.js"></script>
   <script src="/app.js"></script>
   <script>
     // ─── Camera Settings (per-camera config form) ───
@@ -616,15 +618,16 @@
         const viewAll = document.getElementById('camera-events-viewall');
         if (viewAll) viewAll.href = '/events.html?camera=' + encodeURIComponent(camName);
 
-        // Auto-playback if ?t= parameter is present (from recordings page)
-        const playbackTime = new URLSearchParams(location.search).get('t');
-        if (playbackTime) {
-          const ts = new Date(playbackTime);
-          if (!isNaN(ts.getTime())) {
-            // Set timeline date BEFORE initTimeline so it fetches the right day
-            timelineDate = new Date(ts);
-            timelineDate.setHours(0, 0, 0, 0);
-          }
+        // Auto-playback only for a deliberate recording deep-link: a ?t= that
+        // resolves to a real timestamp. A present-but-unresolvable t (epoch
+        // cruft frozen into a home-screen launch URL, or garbage) yields null
+        // and must fall through to the live view, never strand the page.
+        const playbackDate = resolvePlaybackTime(
+          new URLSearchParams(location.search).get('t'));
+        if (playbackDate) {
+          // Set timeline date BEFORE initTimeline so it fetches the right day
+          timelineDate = new Date(playbackDate);
+          timelineDate.setHours(0, 0, 0, 0);
         }
 
         // Timeline date (uses timelineDate set above, or defaults to today)
@@ -637,11 +640,8 @@
         initViewportPause();
         initDetectionOverlay(camName);
 
-        if (playbackTime) {
-          const ts = new Date(playbackTime);
-          if (!isNaN(ts.getTime())) {
-            setTimeout(function() { startPlayback(ts); }, 500);
-          }
+        if (playbackDate) {
+          setTimeout(function() { startPlayback(playbackDate); }, 500);
         } else {
           // Auto-start live stream (platform picks the best transport)
           startLiveStream();
