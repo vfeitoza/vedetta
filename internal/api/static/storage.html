@@ -37,33 +37,65 @@
     <a href="/settings.html" class="conn-status" title="System health"><span class="conn-dot ok" id="conn-dot"></span><span id="conn-label">Connected</span></a>
   </nav>
 
-  <main id="storage-page">
-    <div id="recording-paused-banner" class="banner banner-warn" hidden>
-      Recording paused — disk full. Free space to resume.
+  <main class="page" id="storage-page">
+    <div class="page-header">
+      <h1>Storage</h1>
+      <span class="subtitle" id="storage-subtitle"></span>
     </div>
-    <section id="summary" class="cards"></section>
-    <section id="camera-table">
-      <h2>Per-camera</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Camera</th><th>Segments</th><th>Event clips</th><th>Oldest</th><th>Last 7d</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="camera-table-body"></tbody>
-      </table>
+
+    <div id="recording-paused-banner" class="form-banner banner-warn storage-paused" hidden>
+      Recording paused, disk full. Free space to resume.
+    </div>
+
+    <div id="summary" class="stats-row"></div>
+    <p id="storage-roots" class="storage-roots"></p>
+
+    <section class="settings-panel storage-panel">
+      <div class="settings-panel-header">
+        <h2>Per-camera usage</h2>
+        <p>Recorded segments and event clips per camera, with daily volume over the last 30 days.</p>
+      </div>
+      <div class="storage-table-wrap">
+        <table class="storage-table">
+          <thead>
+            <tr>
+              <th>Camera</th>
+              <th class="num">Segments</th>
+              <th class="num">Event clips</th>
+              <th>Oldest</th>
+              <th class="num">Last 7d</th>
+              <th class="storage-actions-col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="camera-table-body"></tbody>
+        </table>
+      </div>
     </section>
-    <section id="free-space-card" class="card">
-      <h2>Free up space</h2>
-      <p>Sweep oldest segments across all cameras until target reclaimed.</p>
-      <label>Target: <input id="free-target" type="text" placeholder="50 GB"></label>
-      <button id="free-space-btn">Preview</button>
-      <pre id="free-space-result" hidden></pre>
+
+    <section class="settings-panel storage-panel">
+      <div class="settings-panel-header">
+        <h2>Maintenance</h2>
+        <p>Reclaim disk space by sweeping the oldest segments across all cameras until the target is freed.</p>
+      </div>
+      <div class="storage-maint">
+        <div class="storage-maint-field">
+          <label class="form-label" for="free-target">Free-up target</label>
+          <div class="storage-maint-row">
+            <input id="free-target" type="text" class="form-input-sm" placeholder="50 GB" autocomplete="off" inputmode="text">
+            <button id="free-space-btn" class="btn btn-sm btn-secondary">Preview</button>
+          </div>
+        </div>
+        <div class="storage-maint-spacer"></div>
+        <button id="run-cleanup-btn" class="btn btn-sm btn-primary">Run cleanup now</button>
+      </div>
     </section>
-    <button id="run-cleanup-btn" class="primary">Run cleanup now</button>
-    <section id="audit">
-      <h2>Recent activity</h2>
-      <ul id="audit-list"></ul>
+
+    <section class="settings-panel storage-panel">
+      <div class="settings-panel-header">
+        <h2>Recent activity</h2>
+        <p>Audit log of storage deletions and retention cleanup runs.</p>
+      </div>
+      <ul id="audit-list" class="storage-audit"></ul>
     </section>
   </main>
 
@@ -81,13 +113,5 @@
 
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
-
-  <dialog id="delete-modal">
-    <h3 id="delete-modal-title">Confirm delete</h3>
-    <p id="delete-modal-summary"></p>
-    <p class="warn">This cannot be undone.</p>
-    <button id="delete-cancel">Cancel</button>
-    <button id="delete-confirm" class="danger">Delete</button>
-  </dialog>
 </body>
 </html>
