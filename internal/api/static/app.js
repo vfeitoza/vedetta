@@ -4583,7 +4583,12 @@ var webrtcMaxReconnect = 3;
 var webrtcReconnectTimer = null;
 
 function webrtcAutoReconnect() {
-  if (webrtcReconnectAttempts >= webrtcMaxReconnect) {
+  // Strict cap evaluated from a counter reset only by a genuine ICE
+  // 'connected' event (see oniceconnectionstatechange). The reset is
+  // restricted to that event because SDP signaling success predates ICE
+  // connectivity: a STUN-only camera that answers every SDP offer but never
+  // connects ICE must still reach this cap and fall through to MJPEG.
+  if (nextWebrtcAction({ attempts: webrtcReconnectAttempts, maxAttempts: webrtcMaxReconnect }) === 'fallback') {
     toast('WebRTC unavailable, falling back to MJPEG', 'error');
     webrtcReconnectAttempts = 0;
     startMJPEG();
@@ -4595,9 +4600,7 @@ function webrtcAutoReconnect() {
   toast('Reconnecting WebRTC (' + webrtcReconnectAttempts + '/' + webrtcMaxReconnect + ')...');
 
   webrtcReconnectTimer = setTimeout(function() {
-    startWebRTC().then(function() {
-      webrtcReconnectAttempts = 0;
-    }).catch(function() {
+    startWebRTC().catch(function() {
       webrtcAutoReconnect();
     });
   }, delay);
