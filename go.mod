@@ -7,6 +7,7 @@ require (
 	github.com/abema/go-mp4 v1.5.0
 	github.com/bluenviron/gortsplib/v5 v5.5.0
 	github.com/bluenviron/mediacommon/v2 v2.8.3
+	github.com/ebitengine/purego v0.8.4
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/gorilla/websocket v1.5.3
@@ -27,7 +28,6 @@ require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect

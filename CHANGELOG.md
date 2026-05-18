@@ -20,6 +20,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.4.1](https://github.com/rvben/vedetta/compare/v0.4.0...v0.4.1) - 2026-05-18
+
+### Added
+
+- **ui**: add pure live-cascade decision module ([4c238db](https://github.com/rvben/vedetta/commit/4c238db179738ac7bb08fd22348e5340ebe37a23))
+- **stream**: carry H.264 B-frame composition offsets in fMP4 samples ([64f4779](https://github.com/rvben/vedetta/commit/64f4779e6fcd3cc2c4e8ff740f35710fe74e1cf8))
+- **stream**: add stream discovery surfaces for camera consumers ([0888847](https://github.com/rvben/vedetta/commit/088884792ea5847c4bb0b90a9ae811feaf5cdefc))
+- **stream**: transcode G.711 cameras to AAC for iOS HLS ([f73df66](https://github.com/rvben/vedetta/commit/f73df66fb4871c14f88af3495e7327a911463f4f))
+- **web**: play native HLS on iOS, harden snapshot fallback ([464003a](https://github.com/rvben/vedetta/commit/464003aefdd67bd3128100ae8b86735e9fe99f9d))
+- **api**: wire live HLS playlist, init, and segment endpoints ([68bdbde](https://github.com/rvben/vedetta/commit/68bdbdeff9b9db57e0cce89a6c01e2555fe336ce))
+- **stream**: add live HLS muxer and manager ([90e2529](https://github.com/rvben/vedetta/commit/90e2529a5663c35ad2e64a9e7d0490ee99c6c30f))
+
+### Fixed
+
+- **media**: validate plane geometry at the cgo encoder boundary ([986d2e8](https://github.com/rvben/vedetta/commit/986d2e87a3d1d66de68a5754477c6e271ed024de))
+- **detect**: correct SubImage pixel indexing in SCRFD preprocessing ([107ff60](https://github.com/rvben/vedetta/commit/107ff60d01f5fdf17cece8bfb24491b5219dbd4b))
+- **media**: bound-check OpenH264 decoded planes against cgo buffer length ([23c59b9](https://github.com/rvben/vedetta/commit/23c59b9f0e342a71236991db5c4e624910d40014))
+- **stream**: stabilize MSE frame pacing across fragments ([4b9b77b](https://github.com/rvben/vedetta/commit/4b9b77b4f0a981eb160955137b93e230e8a3348a))
+- **ui**: grow self-heal backoff to the cap instead of resetting each cycle ([da784f5](https://github.com/rvben/vedetta/commit/da784f5bbc3d17d1296322e4edd6e7dfdc5779ea))
+- **ui**: allow the live-offline Retry button to actually retry ([8faff96](https://github.com/rvben/vedetta/commit/8faff96f83d92f92b68c9798808ff9544226fe58))
+- **ui**: show reconnecting state for online cameras and self-heal the cascade ([1b7c2e7](https://github.com/rvben/vedetta/commit/1b7c2e7a5f8d6bc99962e585775c1798be001ba2))
+- **ui**: bound WebRTC reconnect so STUN-only cameras fall through to MJPEG ([795bebc](https://github.com/rvben/vedetta/commit/795bebc87e3729d652f8da7711175f0e49d21e18))
+- **api**: forward http.Hijacker in request log middleware so WebSocket (MSE) upgrades work ([286f1e0](https://github.com/rvben/vedetta/commit/286f1e0975c42d6316e18178ef4b840df4e4644e))
+- **ui**: read paginated envelope in loadZones ([cf64ac9](https://github.com/rvben/vedetta/commit/cf64ac9f5b0bcef0f447afa9a285b06fa46ba05f))
+- **stream**: cascade to WebRTC when MSE WebSocket never opens ([bc8624c](https://github.com/rvben/vedetta/commit/bc8624cb704af434215670787f0695c9be5e24c9))
+- **hls**: pre-warm live HLS on camera page load to beat iOS cold-start cutoff ([dbe121a](https://github.com/rvben/vedetta/commit/dbe121a9951dd3540aac8e4a3f3988754746e368))
+- **recording**: self-heal transient segment-dir failure instead of bricking camera ([921e182](https://github.com/rvben/vedetta/commit/921e182a20641f25685b2fa0d4df7873f70bcd92))
+- **hls**: stop iPhone snapshot cascade on suspend/resume and idle reap ([50e4ae9](https://github.com/rvben/vedetta/commit/50e4ae99016d635b6d3514f61f18041d5fb98cde))
+- **recording**: bound segment-writer creation so a stalled volume doesn't wedge recording ([e07409e](https://github.com/rvben/vedetta/commit/e07409e93432f4f21a7889e4002522436f164398))
+- **camera**: don't gate NVR readiness on cached-snapshot disk I/O ([fc00bae](https://github.com/rvben/vedetta/commit/fc00bae820003b275bf529b7033581cd976f6521))
+- **hls**: hold cold playlist request instead of fatal 503 ([34fac3d](https://github.com/rvben/vedetta/commit/34fac3d9e83dfe7349ff12d6f2a9a83fa821d46f))
+- **web**: show tapped camera snapshot as backdrop while live stream warms up ([2f4ca93](https://github.com/rvben/vedetta/commit/2f4ca934f77d34ffa287c5478aae7b656d4f78d0))
+- **hls**: default iOS native HLS to the sub-stream ([8e4fe83](https://github.com/rvben/vedetta/commit/8e4fe834c2fb2ff63f0e90eef3ebdc24e74e2307))
+- **web**: refresh dashboard snapshots after initial grid load ([6fdf0c9](https://github.com/rvben/vedetta/commit/6fdf0c9c7f4c05a54798166394c9db09fa487a95))
+- **web**: cascade HLS quality and fall back to snapshots on iOS ([ca44d9f](https://github.com/rvben/vedetta/commit/ca44d9f40d24269649b2c032e155640ae66c053b))
+- **api**: emit ETag/Cache-Control so static asset updates reach iOS ([289f261](https://github.com/rvben/vedetta/commit/289f2615859b0887515fc1336e0202a81707f556))
+- **stream**: use snapshot-refresh loop for live video on iPhone Safari ([bd973a3](https://github.com/rvben/vedetta/commit/bd973a35fbf03bb847e5eb800c09f53ee274abcc))
+- **stream**: drive MJPEG cutover by decoded pixels, not the load event ([9f9382c](https://github.com/rvben/vedetta/commit/9f9382c12d9808312321f77afa11a96f05a4344b))
+- **stream**: eliminate iPhone black screen with platform-aware transport ([ce51231](https://github.com/rvben/vedetta/commit/ce51231583f48416f7b61d1bd860e089465022dd))
+- **ui**: make event play control an accessible button ([6d45442](https://github.com/rvben/vedetta/commit/6d45442b863c9d0600d738cdd0da90e73c7a3d43))
+- **api**: exempt health probes from the readiness gate ([3b448f9](https://github.com/rvben/vedetta/commit/3b448f95f27fa4dd3178351c1babdfc655497432))
+
+### Performance
+
+- **web**: make dashboard snapshot refresh motion-adaptive ([034b7c0](https://github.com/rvben/vedetta/commit/034b7c00c01d867866f4af180a47b231cd2055fd))
+- **stream**: paint cached snapshot under a second while MJPEG warms up ([a59c020](https://github.com/rvben/vedetta/commit/a59c0200e2459604a575605cbabb15ac064e4aaa))
+
 ## [0.4.0](https://github.com/rvben/vedetta/compare/v0.3.0...v0.4.0) - 2026-05-16
 
 ### Added
