@@ -158,6 +158,7 @@ var allowedDataActionFunctions = new Set([
   'runBackfill',
   'seekToLive',
   'selectUnidentified',
+  'setDashboardDensity',
   'setLabelFilter',
   'setView',
   'showAddManual',
