@@ -128,7 +128,7 @@ func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Requ
 	tmpl := template.Must(template.New("stats").Parse(
 		`<div class="stat-card"><div class="stat-label">Cameras</div><div class="stat-value">{{.CameraCount}}</div></div>` +
 			`<div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green">{{.OnlineCount}}</div></div>` +
-			`<div class="stat-card"><div class="stat-label">Events Today</div><div class="stat-value">{{.EventsToday}}</div></div>` +
+			`<div class="stat-card"><div class="stat-label">Events<span class="stat-label-q"> Today</span></div><div class="stat-value">{{.EventsToday}}</div></div>` +
 			`<div class="stat-card"><div class="stat-label">Storage</div><div class="stat-value">{{.Storage}}</div></div>`))
 
 	w.Header().Set("Content-Type", "text/html")

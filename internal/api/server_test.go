@@ -612,8 +612,10 @@ func TestHandleDashboardStatsPartial(t *testing.T) {
 	if !contains(body, "Cameras") {
 		t.Error("response missing Cameras label")
 	}
-	if !contains(body, "Events Today") {
-		t.Error("response missing Events Today label")
+	// The events label is "Events" with a responsive " Today" qualifier
+	// span that is hidden on narrow phones; both parts must be present.
+	if !contains(body, ">Events<span class=\"stat-label-q\"> Today</span>") {
+		t.Error("response missing responsive Events Today label")
 	}
 	if !contains(body, "Storage") {
 		t.Error("response missing Storage label")

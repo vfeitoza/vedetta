@@ -2175,8 +2175,10 @@ kbd {
   .camera-grid { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
   .birdseye-grid { grid-template-columns: 1fr 1fr; }
   .event-gallery { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .stats-row { flex-wrap: wrap; }
-  .stat-card { min-width: calc(50% - 1px); }
+  /* Keep stats as a single condensed 4-up row, not a tall stack —
+     the metrics must not push the camera feeds below the fold. */
+  .stat-card { padding: 0.625rem 0.625rem; }
+  .stat-value { font-size: var(--text-base); }
 
   .cam-footer { padding: 0.5rem; }
   .cam-name { font-size: var(--text-xs); }
@@ -2197,15 +2199,26 @@ kbd {
 }
 
 @media (max-width: 480px) {
-  .camera-grid { grid-template-columns: 1fr; }
+  /* Tile-density control on phones. The base density rules only change the
+     auto-fill min-track, which collapses to a single column at phone width —
+     so map each density to an explicit column count instead. These match the
+     base [data-density] specificity but come later in source, so they win. */
+  .camera-grid { grid-template-columns: 1fr 1fr; }
+  .camera-grid[data-density="compact"] { grid-template-columns: 1fr 1fr 1fr; }
+  .camera-grid[data-density="large"] { grid-template-columns: 1fr; }
   .event-gallery { grid-template-columns: 1fr 1fr; }
-  .stats-row { flex-direction: column; }
-  .stat-card {
-    border-radius: 0 !important;
-    min-width: 100%;
+  /* Condense the 4-up row further on narrow phones; never stack vertically. */
+  .stat-card { padding: 0.5rem 0.375rem; }
+  .stat-label {
+    font-size: 0.625rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .stat-card:first-child { border-radius: var(--radius-md) var(--radius-md) 0 0 !important; }
-  .stat-card:last-child { border-radius: 0 0 var(--radius-md) var(--radius-md) !important; }
+  .stat-value { font-size: var(--text-sm); }
+  /* "Events Today" → "Events" on narrow phones to keep the 4-up row tidy. */
+  .stat-label-q { display: none; }
 
   /* Stack settings 2-column grids on narrow screens */
   .sys-row,
