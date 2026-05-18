@@ -154,6 +154,7 @@ var allowedDataActionFunctions = new Set([
   'renameObject',
   'renamePerson',
   'returnToLive',
+  'retryStream',
   'runBackfill',
   'seekToLive',
   'selectUnidentified',
