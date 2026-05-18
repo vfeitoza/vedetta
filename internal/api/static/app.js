@@ -561,19 +561,40 @@ function hideLiveReconnecting() {
 
 // Bounded self-heal: while the API reports the camera online, keep retrying
 // the whole cascade from the top so a transient transport failure recovers
-// to live video on its own. Backoff grows to a cap and stays there - an
-// online camera is worth retrying indefinitely; that is the whole point of
-// "degrade without dead-ending".
+// to live video on its own. The backoff doubles from 1s to a 15s cap while
+// the camera stays online but every transport restart keeps failing. Across
+// self-heal restarts the counter is preserved (only the stale timer is
+// cancelled), so the delay keeps growing. The counter resets to 1s only when
+// a transport genuinely confirms live video, or when the user manually
+// retries. An online camera is worth retrying indefinitely; that is the whole
+// point of "degrade without dead-ending".
 var degradedRetryTimer = null;
 var degradedRetryAttempt = 0;
 var DEGRADED_RETRY_MAX_MS = 15000;
 
+function resetDegradedBackoff() {
+  degradedRetryAttempt = 0;
+}
+
+// Cancel the pending retry timer and reset the backoff counter. Use for
+// manual user retries and the terminal-offline branches in enterDegradedState
+// where the self-heal cycle ends entirely.
 function clearDegradedRetry() {
   if (degradedRetryTimer) {
     clearTimeout(degradedRetryTimer);
     degradedRetryTimer = null;
   }
-  degradedRetryAttempt = 0;
+  resetDegradedBackoff();
+}
+
+// Cancel only the pending retry timer without resetting the backoff counter.
+// Use in stopStream() so a self-heal restart discards any stale timer but
+// keeps the accumulated backoff progression intact.
+function cancelDegradedRetry() {
+  if (degradedRetryTimer) {
+    clearTimeout(degradedRetryTimer);
+    degradedRetryTimer = null;
+  }
 }
 
 // Called at every terminal transport failure. Asks the server whether the
@@ -765,6 +786,7 @@ function startNativeHLS() {
     if (seq !== hlsSeq) return;
     if (!started) {
       started = true;
+      resetDegradedBackoff();
       hideStreamConnecting();
       var viewport = el('live-viewport');
       if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
@@ -977,6 +999,7 @@ function startMSE() {
 
       currentStream = 'mse';
       mseReconnectAttempts = 0;
+      resetDegradedBackoff();
       // Remove snapshot fallback — live video is now playing.
       if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
       hideStreamConnecting();
@@ -1178,6 +1201,7 @@ async function startWebRTC() {
       } else if (state === 'connected') {
         clearWebRTCWatchdog();
         webrtcReconnectAttempts = 0;
+        resetDegradedBackoff();
       }
     };
 
@@ -1404,6 +1428,7 @@ function startMjpegMultipart() {
     if (cutoverDone) return;
     cutoverDone = true;
     clearMJPEGWatchdog();
+    resetDegradedBackoff();
     hideStreamConnecting();
     clearSnapshotBackground();
   }
@@ -1648,7 +1673,7 @@ function stopStream() {
   hideStreamConnecting();
   hideLiveOffline();
   hideLiveReconnecting();
-  clearDegradedRetry();
+  cancelDegradedRetry();
   cleanupMSE();
 
   // Clear snapshot fallback styling set during MSE startup.
