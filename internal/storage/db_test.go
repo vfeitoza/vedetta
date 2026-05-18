@@ -1819,3 +1819,59 @@ func TestStorageAudit_InsertAndList(t *testing.T) {
 		t.Errorf("Timestamp = %v, want ~%v", e.Timestamp, ts)
 	}
 }
+
+func TestPerDayCameraSegmentBytes(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+
+	// Three distinct UTC days inside the 30-day window, plus one segment
+	// well outside it. Segments are written through the production path
+	// (SaveSegment -> utc()), so start_time is stored exactly as it is in
+	// production with the modernc.org/sqlite driver.
+	twoDaysAgo := now.AddDate(0, 0, -2)
+	yesterday := now.AddDate(0, 0, -1)
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/d2.mp4", twoDaysAgo, twoDaysAgo.Add(time.Minute), 1000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/d1a.mp4", yesterday, yesterday.Add(time.Minute), 3000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/d1b.mp4", yesterday.Add(time.Hour), yesterday.Add(time.Hour+time.Minute), 2000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/d0.mp4", now, now.Add(time.Minute), 5000))
+	// 40 days old: outside the 30-day window, must be excluded.
+	old := now.AddDate(0, 0, -40)
+	mustSaveSegment(t, db, makeSegment("cam1", "/cam1/old.mp4", old, old.Add(time.Minute), 9999))
+	// Different camera, same recent day: must not leak into cam1 totals.
+	mustSaveSegment(t, db, makeSegment("cam2", "/cam2/x.mp4", now, now.Add(time.Minute), 7777))
+
+	rows, err := db.PerDayCameraSegmentBytes("cam1", 30)
+	if err != nil {
+		t.Fatalf("PerDayCameraSegmentBytes: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d day rows, want 3: %+v", len(rows), rows)
+	}
+
+	var total int64
+	for i, r := range rows {
+		if r.Date == "" {
+			t.Errorf("row %d has empty Date: %+v", i, r)
+		}
+		if i > 0 && rows[i-1].Date >= r.Date {
+			t.Errorf("rows not ascending by date: %q then %q", rows[i-1].Date, r.Date)
+		}
+		total += r.Bytes
+	}
+	if total != 11000 {
+		t.Errorf("summed bytes = %d, want 11000 (old segment and cam2 excluded)", total)
+	}
+
+	want := map[string]int64{
+		twoDaysAgo.Format("2006-01-02"): 1000,
+		yesterday.Format("2006-01-02"):  5000,
+		now.Format("2006-01-02"):        5000,
+	}
+	for _, r := range rows {
+		if w, ok := want[r.Date]; !ok {
+			t.Errorf("unexpected day %q in result", r.Date)
+		} else if r.Bytes != w {
+			t.Errorf("day %q bytes = %d, want %d", r.Date, r.Bytes, w)
+		}
+	}
+}

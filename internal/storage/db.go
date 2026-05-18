@@ -2622,15 +2622,21 @@ func (d *DB) PerDayCameraSegmentBytes(camera string, days int) ([]DayBytes, erro
 	if days <= 0 {
 		days = 30
 	}
+	// The modernc.org/sqlite driver serializes time.Time via Go's String()
+	// ("2006-01-02 15:04:05.999999999 +0000 UTC"), which SQLite's date
+	// functions cannot parse. Mirror the rest of this file: normalize the
+	// 'T' separator and compare/group as fixed-width text, deriving the day
+	// from the leading "YYYY-MM-DD" rather than strftime/datetime.
+	cutoff := utc(time.Now().AddDate(0, 0, -days))
 	rows, err := d.db.Query(`
-		SELECT strftime('%Y-%m-%d', start_time) AS day,
+		SELECT substr(replace(start_time, 'T', ' '), 1, 10) AS day,
 		       COALESCE(SUM(size_bytes), 0) AS bytes
 		FROM segments
 		WHERE camera = ?
-		  AND start_time >= datetime('now', ?)
+		  AND replace(start_time, 'T', ' ') >= replace(?, 'T', ' ')
 		GROUP BY day
 		ORDER BY day ASC`,
-		camera, fmt.Sprintf("-%d days", days))
+		camera, cutoff)
 	if err != nil {
 		return nil, err
 	}
