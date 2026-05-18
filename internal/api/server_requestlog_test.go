@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
 )
 
 // captureLogs installs a JSON slog handler writing into buf as the default
@@ -120,5 +123,88 @@ func TestRequestLogMiddlewareDefaultsImplicit200(t *testing.T) {
 	got := findRequestLog(t, buf)
 	if got["status"] != float64(http.StatusOK) {
 		t.Errorf("status = %v, want 200 for implicit write", got["status"])
+	}
+}
+
+// gorilla/websocket's Upgrade() does w.(http.Hijacker). The logging
+// wrapper MUST forward Hijack or every WebSocket endpoint (MSE live
+// video) breaks behind requestLogMiddleware - exactly the production
+// outage this fixes. Served via httptest.NewServer because only a real
+// server connection (not httptest.ResponseRecorder) is hijackable.
+func TestRequestLogMiddlewarePreservesHijacker(t *testing.T) {
+	captureLogs(t)
+	var sawHijacker bool
+
+	h := requestLogMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawHijacker = w.(http.Hijacker)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/cameras/garage/mse/ws")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if !sawHijacker {
+		t.Fatal("wrapped ResponseWriter does not implement http.Hijacker; WebSocket upgrades (MSE live video) would fail")
+	}
+}
+
+// End-to-end: a real WebSocket client upgrading through the exact
+// logging middleware that wraps every production response. Fails today
+// (500, no upgrade); passes once Hijack() is forwarded. Also asserts
+// the access log reports a truthful 101 rather than a misleading 200.
+func TestRequestLogMiddlewareAllowsWebSocketUpgrade(t *testing.T) {
+	buf := captureLogs(t)
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(*http.Request) bool { return true },
+	}
+	h := requestLogMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("server upgrade failed: %v", err)
+			return
+		}
+		defer c.Close()
+		mt, msg, err := c.ReadMessage()
+		if err != nil {
+			t.Errorf("server read failed: %v", err)
+			return
+		}
+		_ = c.WriteMessage(mt, msg)
+	}))
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/cameras/garage/mse/ws"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed (upgrade rejected): %v", err)
+	}
+	defer conn.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("handshake status = %d, want 101", resp.StatusCode)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+		t.Fatalf("client write failed: %v", err)
+	}
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("client read failed: %v", err)
+	}
+	if string(msg) != "ping" {
+		t.Fatalf("echo = %q, want \"ping\"", msg)
+	}
+
+	got := findRequestLog(t, buf)
+	if got["status"] != float64(http.StatusSwitchingProtocols) {
+		t.Errorf("logged status = %v, want 101 for a hijacked upgrade", got["status"])
 	}
 }
