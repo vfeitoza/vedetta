@@ -157,6 +157,15 @@ type mseConsumer struct {
 	mu      sync.Mutex
 	clients []*mseClient
 
+	// cameraName labels diagnostic/timer logs so a jittery stream can be
+	// attributed to a specific camera rather than the generic "mse".
+	cameraName string
+
+	// diagFragments counts emitted fragments so per-fragment pacing
+	// logging can be throttled instead of logged on every 125ms flush.
+	diagFragments uint64
+	lastFlushWall time.Time
+
 	videoSPS []byte
 	videoPPS []byte
 	hasAudio bool
@@ -191,14 +200,20 @@ type mseConsumer struct {
 	// streams reorder correctly (built lazily on first video AU).
 	vtimer *h264SampleTimer
 
+	// vsmoother holds the per-frame duration target stable across fragments
+	// for B-frame-free streams so a variable-frame-rate camera doesn't make
+	// the browser's render cadence lurch fragment-to-fragment.
+	vsmoother durationSmoother
+
 	// Audio batching. AAC samples have a fixed 1024-sample duration so
 	// no in-flight handling is needed.
 	pendingAudio     []*fmp4.Sample
 	pendingAudioTicks uint32
 }
 
-func newMSEConsumer(video, audio *rtsp.TrackInfo) *mseConsumer {
+func newMSEConsumer(cameraName string, video, audio *rtsp.TrackInfo) *mseConsumer {
 	mc := &mseConsumer{
+		cameraName:     cameraName,
 		audioTimeScale: 90000,
 	}
 
@@ -317,7 +332,7 @@ func (mc *mseConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	}
 
 	if mc.vtimer == nil {
-		mc.vtimer = newH264SampleTimer("mse")
+		mc.vtimer = newH264SampleTimer(mc.cameraName)
 		// Seed the timer with the current parameter sets so DTS extraction
 		// works for cameras that advertise SPS/PPS only in the SDP.
 		mc.vtimer.setParameterSets(mc.videoSPS, mc.videoPPS)
@@ -344,10 +359,11 @@ func (mc *mseConsumer) flushVideoLocked() {
 		return
 	}
 
-	// Normalize per-sample durations to a uniform target so the browser
-	// renders frames at evenly-spaced intervals even when RTP timestamps
-	// arrive jittered (network or capture-side). The fragment's total
-	// duration is preserved by absorbing the remainder into the last sample.
+	// Smooth per-sample durations so the browser renders frames at an even
+	// cadence even when the camera delivers them at a wildly irregular rate.
+	// The smoother holds a per-frame target stable ACROSS fragments and
+	// returns the stamped fragment total; the decode clock MUST advance by
+	// that, not the raw input total, or the fragment boundary tears.
 	//
 	// This is only safe for B-frame-free streams (PTS == DTS, all
 	// composition offsets zero). When any sample carries a non-zero
@@ -362,13 +378,47 @@ func (mc *mseConsumer) flushVideoLocked() {
 			break
 		}
 	}
-	if n := uint32(len(mc.pendingVideo)); n >= 2 && !hasCompositionOffset {
-		target := mc.pendingVideoTicks / n
-		last := n - 1
-		for i := uint32(0); i < last; i++ {
-			mc.pendingVideo[i].Duration = target
+	stampedTicks := mc.pendingVideoTicks
+	if len(mc.pendingVideo) >= 2 && !hasCompositionOffset {
+		stampedTicks = mc.vsmoother.smooth(mc.pendingVideo, mc.pendingVideoTicks)
+	}
+
+	// Diagnostic: confirm the cadence the browser actually receives. After
+	// smoothing the per-sample durations are the cross-fragment-stable
+	// target, so min/max/spread here should stay tight even when the raw
+	// input total swings. Logged periodically so a regression in pacing is
+	// objectively detectable in production.
+	if len(mc.pendingVideo) >= 2 {
+		mc.diagFragments++
+		if mc.diagFragments%40 == 1 {
+			minD := mc.pendingVideo[0].Duration
+			maxD := minD
+			for _, s := range mc.pendingVideo {
+				if s.Duration < minD {
+					minD = s.Duration
+				}
+				if s.Duration > maxD {
+					maxD = s.Duration
+				}
+			}
+			n := uint32(len(mc.pendingVideo))
+			now := time.Now()
+			var wallMS int64 = -1
+			if !mc.lastFlushWall.IsZero() {
+				wallMS = now.Sub(mc.lastFlushWall).Milliseconds()
+			}
+			slog.Info("MSE fragment pacing",
+				"camera", mc.cameraName,
+				"bframe", hasCompositionOffset,
+				"samples", n,
+				"raw_total_ticks", mc.pendingVideoTicks,
+				"stamped_total_ticks", stampedTicks,
+				"min_ticks", minD,
+				"max_ticks", maxD,
+				"spread_ticks", maxD-minD,
+				"wall_ms_since_prev", wallMS)
 		}
-		mc.pendingVideo[last].Duration = mc.pendingVideoTicks - target*last
+		mc.lastFlushWall = time.Now()
 	}
 
 	part := fmp4.Part{
@@ -388,7 +438,7 @@ func (mc *mseConsumer) flushVideoLocked() {
 	}
 
 	mc.seqNum++
-	mc.videoDTS += uint64(mc.pendingVideoTicks)
+	mc.videoDTS += uint64(stampedTicks)
 
 	// Each fragment must own its byte slice — buf is stack-allocated and
 	// will be reused/recycled, but client.send() consumes asynchronously.
@@ -588,7 +638,7 @@ func originAllowed(r *http.Request, allowedOrigins []string, trustedProxies []ne
 	return false
 }
 
-func (m *MSEManager) getOrCreateConsumer(rtspURL string) *mseConsumer {
+func (m *MSEManager) getOrCreateConsumer(cameraName, rtspURL string) *mseConsumer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -597,7 +647,7 @@ func (m *MSEManager) getOrCreateConsumer(rtspURL string) *mseConsumer {
 	}
 
 	source := m.hub.GetOrCreate(rtspURL)
-	mc := newMSEConsumer(source.VideoTrack(), source.AudioTrack())
+	mc := newMSEConsumer(cameraName, source.VideoTrack(), source.AudioTrack())
 	m.consumers[rtspURL] = mc
 	source.AddConsumer(mc)
 
@@ -644,7 +694,7 @@ func (m *MSEManager) HandleWebSocket(w http.ResponseWriter, r *http.Request, cam
 		return
 	}
 
-	consumer := m.getOrCreateConsumer(rtspURL)
+	consumer := m.getOrCreateConsumer(cameraName, rtspURL)
 	client := newMSEClient(conn)
 
 	// addClient computes the codec string under the consumer lock,
