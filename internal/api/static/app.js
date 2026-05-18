@@ -6349,7 +6349,7 @@ function _acHandleVerify(res, recordUrl) {
   var thumbHtml = (!_ac.manual && _ac._thumb)
     ? '<img class="addcam-verify-thumb" alt="" src="' + _acEsc(_ac._thumb) + '">'
     : '';
-  verify.innerHTML = thumbHtml + '<div class="addcam-verify-ok">✓ Stream verified — ' +
+  verify.innerHTML = thumbHtml + '<div class="addcam-verify-ok">✓ Stream verified - ' +
     (res.width ? res.width + '\xd7' + res.height + ' ' : '') + _acEsc(res.codec || '') + '</div>';
   el('addcam-save').disabled = false;
 }
