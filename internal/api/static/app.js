@@ -5397,7 +5397,9 @@ function loadZones() {
   fetch('/api/cameras/' + encodeURIComponent(name) + '/zones')
     .then(function(r) { return r.json(); })
     .then(function(zones) {
-      zoneData = zones || [];
+      // The endpoint returns a paginated envelope ({items,total,has_more});
+      // tolerate a bare array too in case the contract changes back.
+      zoneData = Array.isArray(zones) ? zones : ((zones && zones.items) || []);
       renderZoneOverlay();
       renderZoneList();
       startPresencePolling();
