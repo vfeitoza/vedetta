@@ -87,6 +87,11 @@
             <p class="live-offline-sub" id="live-offline-sub"></p>
             <button class="btn-retry" data-action-click="retryStream()">Retry</button>
           </div>
+          <div class="live-offline live-reconnecting hidden" id="live-reconnecting" role="status" aria-live="polite">
+            <div class="spinner"></div>
+            <p class="live-offline-title">Reconnecting live view...</p>
+            <p class="live-offline-sub">Camera is online - retrying the live stream.</p>
+          </div>
           <div class="stream-stats" id="stream-stats"></div>
           <div class="video-pause-indicator hidden" id="video-pause-indicator">
             <svg viewBox="0 0 24 24" fill="white" width="64" height="64"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -381,6 +386,7 @@
   <script src="/timeparse.js"></script>
   <script src="/hlsrecovery.js"></script>
   <script src="/livehls.js"></script>
+  <script src="/livecascade.js"></script>
   <script src="/app.js"></script>
   <script>
     // ─── Camera Settings (per-camera config form) ───

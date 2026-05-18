@@ -541,6 +541,75 @@ function hideLiveOffline() {
   if (viewport) viewport.classList.remove('live-snapshot-fallback');
 }
 
+function showLiveReconnecting() {
+  hideStreamConnecting();
+  var off = el('live-offline');
+  if (off) off.classList.add('hidden');
+  var viewport = el('live-viewport');
+  if (viewport) viewport.classList.add('live-snapshot-fallback');
+  var rc = el('live-reconnecting');
+  if (rc) rc.classList.remove('hidden');
+}
+
+function hideLiveReconnecting() {
+  var rc = el('live-reconnecting');
+  if (rc) rc.classList.add('hidden');
+  var viewport = el('live-viewport');
+  if (viewport) viewport.classList.remove('live-snapshot-fallback');
+}
+
+// Bounded self-heal: while the API reports the camera online, keep retrying
+// the whole cascade from the top so a transient transport failure recovers
+// to live video on its own. Backoff grows to a cap and stays there - an
+// online camera is worth retrying indefinitely; that is the whole point of
+// "degrade without dead-ending".
+var degradedRetryTimer = null;
+var degradedRetryAttempt = 0;
+var DEGRADED_RETRY_MAX_MS = 15000;
+
+function clearDegradedRetry() {
+  if (degradedRetryTimer) {
+    clearTimeout(degradedRetryTimer);
+    degradedRetryTimer = null;
+  }
+  degradedRetryAttempt = 0;
+}
+
+// Called at every terminal transport failure. Asks the server whether the
+// camera is actually down. Online -> "Reconnecting" over the last snapshot
+// plus a scheduled retry; down (or status unknown) -> honest "Camera
+// offline".
+function enterDegradedState(name) {
+  fetch('/api/cameras/' + encodeURIComponent(name))
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      var apiOnline = data && typeof data.online === 'boolean' ? data.online : null;
+      if (liveOverlayState({ apiOnline: apiOnline }) === 'reconnecting') {
+        showLiveReconnecting();
+        scheduleDegradedRetry(name);
+      } else {
+        clearDegradedRetry();
+        showLiveOffline(name);
+      }
+    })
+    .catch(function() {
+      clearDegradedRetry();
+      showLiveOffline(name);
+    });
+}
+
+function scheduleDegradedRetry(name) {
+  if (degradedRetryTimer) return; // one retry in flight at a time
+  degradedRetryAttempt++;
+  var delay = Math.min(1000 * Math.pow(2, degradedRetryAttempt - 1), DEGRADED_RETRY_MAX_MS);
+  degradedRetryTimer = setTimeout(function() {
+    degradedRetryTimer = null;
+    // Re-check status on the next terminal failure; restart the cascade now.
+    hideLiveReconnecting();
+    startLiveStream();
+  }, delay);
+}
+
 // Picks the best live transport for this platform. iOS WebKit has no usable
 // MediaSource and WebRTC there silently fails over WAN without a TURN server,
 // but it plays HLS natively in a <video> with real H.264 + AAC audio. So iOS
@@ -793,6 +862,8 @@ function startNativeHLS() {
 }
 
 function retryStream() {
+  clearDegradedRetry();
+  hideLiveReconnecting();
   hideLiveOffline();
   startLiveStream();
 }
@@ -829,7 +900,7 @@ function startMSE() {
     if (currentStream === null) {
       // No stream established yet — show offline state.
       cleanupMSE();
-      showLiveOffline(name);
+      enterDegradedState(name);
     }
   }, MSE_OFFLINE_TIMEOUT_MS);
 
@@ -1202,7 +1273,7 @@ function startSnapshotStream() {
     hideStreamConnecting();
     stopStreamStats();
     displayImg.classList.add('hidden');
-    showLiveOffline(name);
+    enterDegradedState(name);
   }
 
   function scheduleNext() {
@@ -1341,7 +1412,7 @@ function startMjpegMultipart() {
     clearSnapshotBackground();
     stopStreamStats();
     mjpeg.classList.add('hidden');
-    if (message) toast(message, 'error'); else showLiveOffline(name);
+    if (message) toast(message, 'error'); else enterDegradedState(name);
   }
 
   mjpeg.onerror = function () {
@@ -1575,6 +1646,8 @@ function stopStream() {
 
   hideStreamConnecting();
   hideLiveOffline();
+  hideLiveReconnecting();
+  clearDegradedRetry();
   cleanupMSE();
 
   // Clear snapshot fallback styling set during MSE startup.

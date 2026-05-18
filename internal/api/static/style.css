@@ -4607,6 +4607,22 @@ kbd {
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* Reconnecting overlay - a transport hiccup on a camera the API still
+   reports online. Reuses .live-offline layout; lighter scrim and a spinner
+   instead of the offline icon so it reads as transient, not terminal. */
+.live-reconnecting {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.live-reconnecting .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
 /* Camera-not-found panel — replaces viewport when slug is unknown */
 .cam-not-found {
   display: flex;
