@@ -21,6 +21,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.4.2](https://github.com/rvben/vedetta/compare/v0.4.1...v0.4.2) - 2026-05-18
+
+### Added
+
+- **api**: redesign storage page with per-camera daily volume ([24a1b48](https://github.com/rvben/vedetta/commit/24a1b48575d1c9b7f7f7118296a1e1a4441fce12))
+
+### Fixed
+
+- **storage**: parse modernc sqlite timestamps in PerDayCameraSegmentBytes ([e09ff55](https://github.com/rvben/vedetta/commit/e09ff5547f6127d9d9d8f5a6cdedf94b37a77a42))
+- **api**: allow setDashboardDensity in data-action dispatcher ([7fc89ca](https://github.com/rvben/vedetta/commit/7fc89cae21fb75b7a6cde75d9fd1e3ffa2a133d6))
+- **api**: make mobile dashboard stats and tile density usable ([ba92f57](https://github.com/rvben/vedetta/commit/ba92f578564125b00341da46bdda081930e29332))
+
 ## [0.4.1](https://github.com/rvben/vedetta/compare/v0.4.0...v0.4.1) - 2026-05-18
 
 ### Added
