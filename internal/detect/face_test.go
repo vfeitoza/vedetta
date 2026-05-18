@@ -234,6 +234,46 @@ func TestPrepareSCRFDInput_Dimensions(t *testing.T) {
 	}
 }
 
+// prepareSCRFDInput is called on the result of cropRegion, which is an
+// image.RGBA SubImage: its Pix slice is re-sliced to start at the crop's
+// top-left and its Rect.Min is the non-zero crop origin. Indexing Pix with a
+// full-frame-relative offset (adding bounds.Min again on top of the already
+// offset slice) double-counts the origin and reads far past the shortened
+// sub-slice. For any non-origin crop this panics with index out of range,
+// which makes face recognition fail on every detected person whose box does
+// not start at (0,0) - i.e. essentially always.
+func TestPrepareSCRFDInput_OffsetSubImageCrop(t *testing.T) {
+	fr := &FaceRecognizer{}
+
+	// A full camera-sized frame; the person crop sits in the bottom-right so
+	// the double-counted origin offset overshoots the re-sliced Pix slice.
+	frame := image.NewRGBA(image.Rect(0, 0, 640, 640))
+	cropRect := image.Rect(320, 320, 640, 640)
+	for y := cropRect.Min.Y; y < cropRect.Max.Y; y++ {
+		for x := cropRect.Min.X; x < cropRect.Max.X; x++ {
+			frame.SetRGBA(x, y, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+		}
+	}
+
+	crop := cropRegion(frame, [4]int{cropRect.Min.X, cropRect.Min.Y, cropRect.Max.X, cropRect.Max.Y})
+
+	buf, _, _, _ := fr.prepareSCRFDInput(crop)
+
+	// The crop is solid red, so the first sampled cell (channel 0) must carry
+	// the normalized red value, proving the right pixels were read - not a
+	// pre-fill artifact and not garbage from a wild offset.
+	channelStride := scrfdInputSize * scrfdInputSize
+	wantR := float32((255.0 - 127.5) / 128.0)
+	if math.Abs(float64(buf[0]-wantR)) > 0.01 {
+		t.Errorf("sampled R at crop origin = %f, want ≈ %f (crop is solid red)", buf[0], wantR)
+	}
+	// Green channel of a pure-red pixel normalizes to ≈ -0.996.
+	wantG := float32((0.0 - 127.5) / 128.0)
+	if math.Abs(float64(buf[channelStride]-wantG)) > 0.01 {
+		t.Errorf("sampled G at crop origin = %f, want ≈ %f", buf[channelStride], wantG)
+	}
+}
+
 func TestPrepareSCRFDInput_Normalization(t *testing.T) {
 	fr := &FaceRecognizer{}
 
