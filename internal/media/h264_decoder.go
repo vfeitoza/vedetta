@@ -199,7 +199,24 @@ func (d *H264Decoder) Decode(nalData []byte) *image.YCbCr {
 		return nil
 	}
 
-	if dst[0] == nil {
+	return frameFromDecoded(dst, &bufInfo)
+}
+
+// frameFromDecoded copies OpenH264's decoded planes into Go-owned buffers,
+// validating the decoder-reported geometry against the actual length of the
+// cgo-backed plane slices first.
+//
+// OpenH264 can hand back a frame whose reported stride*height exceeds the
+// plane buffer it actually allocated - a transitional or corrupt frame, e.g.
+// a mid-stream resolution change while error concealment is active. Slicing
+// dst[i][:stride*h] and copying it then reads far past the decoder-owned
+// buffer into foreign heap memory across the cgo boundary; that read can
+// fault and, worse, the bogus geometry propagates into a *image.YCbCr that
+// out-of-bounds-indexes in pure-Go consumers. Rejecting such a frame (return
+// nil = "no frame, need more data") is always safe; a real dropped frame is
+// invisible next to a heap fault.
+func frameFromDecoded(dst [3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr {
+	if dst[0] == nil || dst[1] == nil || dst[2] == nil {
 		return nil
 	}
 
@@ -209,13 +226,20 @@ func (d *H264Decoder) Decode(nalData []byte) *image.YCbCr {
 	yStride := int(sysBuf.IStride[0])
 	cStride := int(sysBuf.IStride[1])
 
-	if w <= 0 || h <= 0 {
+	// Geometry must be positive and self-consistent: a stride narrower than
+	// the frame, or a non-positive dimension, is garbage.
+	if w <= 0 || h <= 0 || yStride < w || cStride*2 < w {
 		return nil
 	}
 
-	// Copy planes — OpenH264 owns the source buffers
 	yLen := yStride * h
 	cLen := cStride * (h / 2)
+
+	// The reported planes must fit within the buffers OpenH264 returned.
+	if yLen <= 0 || cLen <= 0 ||
+		yLen > len(dst[0]) || cLen > len(dst[1]) || cLen > len(dst[2]) {
+		return nil
+	}
 
 	y := make([]byte, yLen)
 	cb := make([]byte, cLen)
@@ -246,40 +270,11 @@ func (d *H264Decoder) Flush() *image.YCbCr {
 	var bufInfo openh264.SBufferInfo
 
 	ret := d.decoder.FlushFrame(&dst, &bufInfo)
-	if ret != 0 || dst[0] == nil {
+	if ret != 0 {
 		return nil
 	}
 
-	sysBuf := bufInfo.UsrData_sSystemBuffer()
-	w := int(sysBuf.IWidth)
-	h := int(sysBuf.IHeight)
-	yStride := int(sysBuf.IStride[0])
-	cStride := int(sysBuf.IStride[1])
-
-	if w <= 0 || h <= 0 {
-		return nil
-	}
-
-	yLen := yStride * h
-	cLen := cStride * (h / 2)
-
-	y := make([]byte, yLen)
-	cb := make([]byte, cLen)
-	cr := make([]byte, cLen)
-
-	copy(y, dst[0][:yLen])
-	copy(cb, dst[1][:cLen])
-	copy(cr, dst[2][:cLen])
-
-	return &image.YCbCr{
-		Y:              y,
-		Cb:             cb,
-		Cr:             cr,
-		YStride:        yStride,
-		CStride:        cStride,
-		SubsampleRatio: image.YCbCrSubsampleRatio420,
-		Rect:           image.Rect(0, 0, w, h),
-	}
+	return frameFromDecoded(dst, &bufInfo)
 }
 
 // Close releases the decoder resources.
