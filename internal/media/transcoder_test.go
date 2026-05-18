@@ -45,6 +45,72 @@ func TestScaleYCbCr_EvenDimensions(t *testing.T) {
 	}
 }
 
+// The transcoder hands scaled.Y/Cb/Cr straight to the C OpenH264 encoder via
+// raw unsafe.Pointer; the C library then reads IPicHeight rows of IStride
+// bytes out of those Go-owned slices across the cgo boundary. If a degenerate
+// or corrupt decoded frame yields planes shorter than that traversal, C reads
+// past Go heap memory - an out-of-bounds the Go bounds checker cannot see,
+// exactly the wild-read signature behind the recompression crash loop.
+// encoderInputValid must accept a well-formed scaleYCbCr result and reject
+// anything the encoder would over-read.
+func TestEncoderInputValid_AcceptsScaledOutput(t *testing.T) {
+	src := image.NewYCbCr(image.Rect(0, 0, 1920, 1080), image.YCbCrSubsampleRatio420)
+	scaled := scaleYCbCr(src, 1280, 720)
+	if !encoderInputValid(scaled, scaled.Rect.Dx(), scaled.Rect.Dy()) {
+		t.Fatalf("well-formed %dx%d scaled frame rejected", scaled.Rect.Dx(), scaled.Rect.Dy())
+	}
+}
+
+func TestEncoderInputValid_RejectsBadGeometry(t *testing.T) {
+	good := image.NewYCbCr(image.Rect(0, 0, 64, 64), image.YCbCrSubsampleRatio420)
+
+	cases := []struct {
+		name       string
+		img        *image.YCbCr
+		outW, outH int
+	}{
+		{"zero width", good, 0, 64},
+		{"zero height", good, 64, 0},
+		{"negative width", good, -64, 64},
+		{"odd width", good, 63, 64},
+		{"odd height", good, 64, 63},
+		{
+			name: "luma plane shorter than stride*height",
+			img: &image.YCbCr{
+				Y: make([]byte, 64*63), Cb: make([]byte, 32*32), Cr: make([]byte, 32*32),
+				YStride: 64, CStride: 32, SubsampleRatio: image.YCbCrSubsampleRatio420,
+				Rect: image.Rect(0, 0, 64, 64),
+			},
+			outW: 64, outH: 64,
+		},
+		{
+			name: "chroma plane truncated",
+			img: &image.YCbCr{
+				Y: make([]byte, 64*64), Cb: make([]byte, 32*31), Cr: make([]byte, 32*32),
+				YStride: 64, CStride: 32, SubsampleRatio: image.YCbCrSubsampleRatio420,
+				Rect: image.Rect(0, 0, 64, 64),
+			},
+			outW: 64, outH: 64,
+		},
+		{
+			name: "luma stride narrower than width",
+			img: &image.YCbCr{
+				Y: make([]byte, 64*64), Cb: make([]byte, 32*32), Cr: make([]byte, 32*32),
+				YStride: 32, CStride: 32, SubsampleRatio: image.YCbCrSubsampleRatio420,
+				Rect: image.Rect(0, 0, 64, 64),
+			},
+			outW: 64, outH: 64,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if encoderInputValid(c.img, c.outW, c.outH) {
+				t.Fatalf("%s: expected rejection, got accepted", c.name)
+			}
+		})
+	}
+}
+
 func TestScaleYCbCr_SameSize(t *testing.T) {
 	src := image.NewYCbCr(image.Rect(0, 0, 1280, 720), image.YCbCrSubsampleRatio420)
 	got := scaleYCbCr(src, 1280, 720)

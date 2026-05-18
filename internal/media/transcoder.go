@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"unsafe"
@@ -59,6 +60,36 @@ func scaleYCbCr(src *image.YCbCr, targetW, targetH int) *image.YCbCr {
 	}
 
 	return dst
+}
+
+// encoderInputValid reports whether the scaled I420 planes are large enough
+// for the geometry handed to the C OpenH264 encoder.
+//
+// EncodeFrame receives the plane base pointers plus IStride and IPicHeight,
+// then reads IPicHeight rows of IStride[0] luma bytes and IPicHeight/2 rows of
+// IStride[1]/IStride[2] chroma bytes directly out of these Go-owned slices
+// across the cgo boundary. If a degenerate or corrupt decoded frame produces a
+// plane shorter than that traversal, the C library reads past Go heap memory -
+// an out-of-bounds read invisible to Go's bounds checker that produces exactly
+// the random-victim heap-fault signature behind the recompression crash loop.
+// A well-formed scaleYCbCr result (even dimensions, exactly-sized planes)
+// always passes; only a corrupt frame fails, and skipping a single
+// recompressed GOP is invisible next to a heap fault.
+func encoderInputValid(scaled *image.YCbCr, outW, outH int) bool {
+	if outW <= 0 || outH <= 0 || outW%2 != 0 || outH%2 != 0 {
+		return false
+	}
+	cW := outW / 2
+	cH := outH / 2
+	if scaled.YStride < outW || scaled.CStride < cW {
+		return false
+	}
+	if len(scaled.Y) < scaled.YStride*outH ||
+		len(scaled.Cb) < scaled.CStride*cH ||
+		len(scaled.Cr) < scaled.CStride*cH {
+		return false
+	}
+	return true
 }
 
 // shouldTranscode reports whether transcoding from (srcW, srcH) to (targetW, targetH)
@@ -454,8 +485,19 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		if frame != nil {
 			scaled := scaleYCbCr(frame, outW, outH)
 
-			// Guard against degenerate frames that would panic on &slice[0].
-			if len(scaled.Y) == 0 || len(scaled.Cb) == 0 || len(scaled.Cr) == 0 {
+			// Defense-in-depth at the cgo encoder boundary: never hand the C
+			// encoder a plane shorter than the IStride*IPicHeight it will
+			// traverse. A short buffer here is an invisible out-of-bounds
+			// read into foreign Go heap. The log line is the instrumentation:
+			// in a healthy stream this never fires; a burst of it is the
+			// smoking gun for the recompression-path corruptor and the
+			// prerequisite signal before tiered storage may be re-enabled.
+			if !encoderInputValid(scaled, outW, outH) {
+				slog.Warn("transcode: skipping frame with invalid encoder input geometry",
+					"outW", outW, "outH", outH,
+					"yStride", scaled.YStride, "cStride", scaled.CStride,
+					"lenY", len(scaled.Y), "lenCb", len(scaled.Cb), "lenCr", len(scaled.Cr),
+					"gop", gopIdx)
 				pinner.Unpin()
 				continue
 			}
