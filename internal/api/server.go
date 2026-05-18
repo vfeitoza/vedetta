@@ -1,17 +1,20 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -458,7 +461,9 @@ func (s *Server) readyMiddleware(next http.Handler) http.Handler {
 
 // statusLoggingResponseWriter records the response status code while
 // transparently forwarding everything to the underlying writer. It forwards
-// Flush so SSE handlers that type-assert http.Flusher keep working.
+// Flush so SSE handlers that type-assert http.Flusher keep working, and
+// forwards Hijack so WebSocket upgrades that type-assert http.Hijacker keep
+// working.
 type statusLoggingResponseWriter struct {
 	http.ResponseWriter
 	status  int
@@ -485,6 +490,26 @@ func (w *statusLoggingResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack satisfies http.Hijacker by delegating to the underlying writer.
+// gorilla/websocket type-asserts http.Hijacker during the upgrade handshake,
+// so WebSocket endpoints behind requestLogMiddleware (including the MSE
+// live-video transport) require this method. After a successful hijack
+// gorilla writes the 101 handshake directly on the raw connection, bypassing
+// WriteHeader, so the status is recorded here to keep the access log
+// truthful.
+func (w *statusLoggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("statusLoggingResponseWriter: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	conn, rw, err := hj.Hijack()
+	if err == nil && !w.written {
+		w.status = http.StatusSwitchingProtocols
+		w.written = true
+	}
+	return conn, rw, err
 }
 
 // requestLogMiddleware emits one structured "http request" line per request
