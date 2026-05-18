@@ -980,9 +980,20 @@ function startMSE() {
 
   ws.onclose = function() {
     if (currentStream === 'mse') {
+      // Stream had connected then dropped — reconnect, eventually cascading
+      // to WebRTC if reconnects are exhausted.
       toast('MSE stream disconnected', 'error');
       cleanupMSE();
       mseAutoReconnect();
+    } else {
+      // Socket closed before the codec handshake: the MSE endpoint never
+      // became usable (e.g. a proxy that refuses the WebSocket upgrade).
+      // Cascade to WebRTC like the other MSE failure paths instead of
+      // letting the offline watchdog falsely declare an online camera
+      // offline. cleanupMSE() also clears the offline timer.
+      cleanupMSE();
+      if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+      startWebRTC();
     }
   };
 }
