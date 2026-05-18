@@ -128,9 +128,9 @@ func TestRequestLogMiddlewareDefaultsImplicit200(t *testing.T) {
 
 // gorilla/websocket's Upgrade() does w.(http.Hijacker). The logging
 // wrapper MUST forward Hijack or every WebSocket endpoint (MSE live
-// video) breaks behind requestLogMiddleware - exactly the production
-// outage this fixes. Served via httptest.NewServer because only a real
-// server connection (not httptest.ResponseRecorder) is hijackable.
+// video) breaks behind requestLogMiddleware. Served via
+// httptest.NewServer because only a real server connection (not
+// httptest.ResponseRecorder) is hijackable.
 func TestRequestLogMiddlewarePreservesHijacker(t *testing.T) {
 	captureLogs(t)
 	var sawHijacker bool
