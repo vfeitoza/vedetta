@@ -22,6 +22,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.4.3](https://github.com/rvben/vedetta/compare/v0.4.2...v0.4.3) - 2026-05-19
+
+### Added
+
+- **api**: redesign empty state and expose camera names on grid cards ([7e4f715](https://github.com/rvben/vedetta/commit/7e4f7152309c2fd423dc508688362c69a73b56ad))
+- **api**: discovery-first Add Camera module ([79f6067](https://github.com/rvben/vedetta/commit/79f606775d29f66b97a7a8ee523e9aed8ab92a25))
+- **api**: replace Add Camera modal markup with step container ([7635a1d](https://github.com/rvben/vedetta/commit/7635a1df6ffda17d238ba95109330c390d0e33a0))
+- **api**: add styles for discovery-first Add Camera flow ([9d4596d](https://github.com/rvben/vedetta/commit/9d4596debb52c747a2d439ae07b5d69c2c946af8))
+- **api**: expose camera discovery handlers at runtime ([8580bda](https://github.com/rvben/vedetta/commit/8580bdafa013457b9eae1d8fc94d36ef91c09043))
+
+### Fixed
+
+- **api**: use hyphen in stream-verified message to match design spec ([8b6d116](https://github.com/rvben/vedetta/commit/8b6d116368cc45e6e288a2e59e166083531ef896))
+
 ## [0.4.2](https://github.com/rvben/vedetta/compare/v0.4.1...v0.4.2) - 2026-05-18
 
 ### Added
