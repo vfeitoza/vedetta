@@ -636,10 +636,13 @@ func TestHandleCameraGridPartial_Empty(t *testing.T) {
 	if ct != "text/html" {
 		t.Errorf("Content-Type = %q, want %q", ct, "text/html")
 	}
-	// No cameras renders an empty-state hero with discover/add CTAs.
+	// No cameras renders an empty-state hero with an Add Camera CTA.
 	body := w.Body.String()
-	if !strings.Contains(body, "No cameras configured yet") {
+	if !strings.Contains(body, "No cameras yet") {
 		t.Errorf("expected empty-state hero in body, got %q", body)
+	}
+	if !strings.Contains(body, "openAddCameraModal()") {
+		t.Errorf("expected openAddCameraModal() CTA in body, got %q", body)
 	}
 }
 

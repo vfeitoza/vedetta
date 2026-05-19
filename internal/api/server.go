@@ -249,6 +249,17 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/cameras/test-rtsp", s.TestRTSPConnection)
 	s.mux.HandleFunc("GET /api/cameras/{name}/detections", s.StreamCameraDetections)
 
+	// Camera discovery: reuse the setup-wizard handlers at runtime so the
+	// Add Camera flow can scan/probe. setupDone is nil here, which is safe:
+	// only signalComplete() closes it, and its callers (HandleAddCameras,
+	// HandleComplete) are not registered on the runtime mux.
+	if s.setupHandler == nil {
+		s.setupHandler = NewSetupHandler(s.configPath, s.db, nil)
+	}
+	s.mux.HandleFunc("GET /api/discover", s.setupHandler.HandleDiscover)
+	s.mux.HandleFunc("POST /api/discover/probe", s.setupHandler.HandleProbe)
+	s.mux.HandleFunc("GET /api/discover/thumbnail/{ip}", s.setupHandler.HandleThumbnail)
+
 	// Settings API endpoints
 	s.mux.HandleFunc("GET /api/settings/mqtt", s.GetMQTTSettings)
 	s.mux.HandleFunc("PUT /api/settings/mqtt", s.UpdateMQTTSettings)

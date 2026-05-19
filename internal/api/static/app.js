@@ -120,6 +120,13 @@ document.body.addEventListener('htmx:configRequest', function(evt) {
 var allowedDataActionFunctions = new Set([
   'assignFace',
   'assignToNewPerson',
+  'acAddAnother',
+  'acBackToList',
+  'acManual',
+  'acRescan',
+  'acSelect',
+  'acSubmit',
+  'acVerify',
   'calendarNav',
   'closeAccountModal',
   'closeAssignModal',
@@ -5952,14 +5959,6 @@ function loadZonePresence(z) {
     });
 }
 
-function startDiscovery() {
-  toast('Camera discovery coming soon');
-}
-
-function showAddManual() {
-  toast('Manual camera add coming soon');
-}
-
 // PTZ Controls
 function initPTZ(cameraName) {
   fetch('/api/cameras')
@@ -6131,4 +6130,286 @@ function bindPTZControls(cameraName) {
       window.location.href = e.data.url;
     }
   });
+})();
+
+/* ─── Add Camera (discovery-first) ─── */
+var _ac = { discovered: [], selected: null, manual: false, verified: null, lastFocus: null };
+
+function _acStep(name) {
+  var steps = el('addcam-steps');
+  if (!steps) return;
+  steps.setAttribute('data-active', name);
+  var statusEl = el('addcam-step-status');
+  if (statusEl) statusEl.textContent = { scan: 'Scanning for cameras', list: 'Select a camera', details: 'Enter camera details', done: 'Camera saved' }[name] || name;
+  // Move focus to the first control/heading of the new step.
+  var firstFocusable = steps.querySelector('[data-step="' + name + '"] button, [data-step="' + name + '"] input');
+  if (firstFocusable) setTimeout(function() { firstFocusable.focus(); }, 50);
+}
+
+function openAddCameraModal() {
+  _ac = { discovered: [], selected: null, manual: false, verified: null, lastFocus: document.activeElement };
+  el('add-camera-backdrop').classList.add('open');
+  el('add-camera-modal').classList.add('open');
+  _acStep('scan');
+  acRescan();
+}
+
+function closeAddCameraModal() {
+  el('add-camera-backdrop').classList.remove('open');
+  el('add-camera-modal').classList.remove('open');
+  if (_ac.lastFocus && _ac.lastFocus.focus) _ac.lastFocus.focus();
+}
+
+function acRescan() {
+  _acStep('scan');
+  fetch('/api/discover')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _ac.discovered = (data && data.cameras) || [];
+      if (_ac.manual) return;
+      if (_ac.discovered.length === 0) { acManual(); return; }
+      _acRenderList();
+      _acStep('list');
+    })
+    .catch(function() { if (_ac.manual) return; acManual(); });
+}
+
+function _acRenderList() {
+  var title = el('addcam-list-title');
+  if (title) title.textContent = 'Found ' + _ac.discovered.length + ' camera' + (_ac.discovered.length === 1 ? '' : 's');
+  var list = el('addcam-list');
+  if (!list) return;
+  list.innerHTML = '';
+  _ac.discovered.forEach(function(cam, i) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'addcam-card';
+    btn.setAttribute('data-action-click', 'acSelect(' + i + ')');
+    var meta = [cam.manufacturer, cam.model, cam.ip].filter(Boolean).join(' · ');
+    btn.innerHTML =
+      '<img class="addcam-card-thumb" alt="" loading="lazy" ' +
+      'src="/api/discover/thumbnail/' + encodeURIComponent(cam.ip) + '">' +
+      '<div class="addcam-card-body">' +
+      '<div class="addcam-card-name">' + _acEsc(cam.name || cam.manufacturer || 'Camera') + '</div>' +
+      '<div class="addcam-card-meta">' + _acEsc(meta) + '</div></div>';
+    list.appendChild(btn);
+    _acWireThumb(btn.querySelector('.addcam-card-thumb'));
+  });
+}
+
+// Thumbnails are generated asynchronously by the backend (after a probe) and
+// /api/discover/thumbnail/{ip} returns 404 until one is cached. Mirror the
+// setup wizard's proven retry/backoff, and on final failure degrade to the
+// styled placeholder background rather than a broken image (spec: never show
+// a broken image). A thumbnail that genuinely exists (e.g. from a prior
+// probe this session) will appear; otherwise it stays a clean placeholder
+// until the credentials probe in the details step produces one.
+function _acWireThumb(img) {
+  if (!img) return;
+  img.addEventListener('load', function() { img.classList.add('loaded'); });
+  (function retry(node, attempts) {
+    node.addEventListener('error', function handler() {
+      node.removeEventListener('error', handler);
+      if (attempts > 0) {
+        setTimeout(function() {
+          node.src = node.src.split('?')[0] + '?t=' + Date.now();
+          retry(node, attempts - 1);
+        }, 1500);
+      } else {
+        // Drop the src: an <img> with no src renders nothing (no broken-image
+        // glyph) while the element keeps its fixed size and surface background
+        // from .addcam-card-thumb, i.e. a clean placeholder box.
+        node.removeAttribute('src');
+        node.classList.add('thumb-empty');
+      }
+    });
+  })(img, 3);
+}
+
+function _acEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function _acSanitizeName(s) {
+  return String(s || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64) || 'camera';
+}
+
+function acSelect(i) {
+  _ac.selected = _ac.discovered[i];
+  _ac.manual = false;
+  el('addcam-manual-urls').hidden = true;
+  el('addcam-creds').hidden = false;
+  el('addcam-name').value = _acSanitizeName(_ac.selected.model || _ac.selected.name || _ac.selected.manufacturer);
+  el('addcam-back').hidden = false;
+  _acResetVerify();
+  _acStep('details');
+}
+
+function acManual() {
+  _ac.selected = null;
+  _ac.manual = true;
+  el('addcam-manual-urls').hidden = false;
+  el('addcam-creds').hidden = true;
+  el('addcam-name').value = '';
+  el('addcam-url').value = '';
+  el('addcam-recurl').value = '';
+  el('addcam-back').hidden = true;
+  _acResetVerify();
+  _acStep('details');
+}
+
+function acBackToList() {
+  if (_ac.discovered.length > 0) { _acStep('list'); } else { _acStep('scan'); acRescan(); }
+}
+
+function _acResetVerify() {
+  _ac.verified = null;
+  el('addcam-verify').innerHTML = '';
+  el('addcam-name-error').textContent = '';
+  el('addcam-save').disabled = true;
+}
+
+function _acNameTaken(name) {
+  // No server-side duplicate check exists (AddCameraManage appends blindly);
+  // guard client-side against the rendered grid. The data-camera-name
+  // attribute is added to grid cards by Task 5 Step 2 — that change MUST
+  // land for this guard to work; it is part of this same plan.
+  var cards = document.querySelectorAll('#camera-grid [data-camera-name]');
+  for (var i = 0; i < cards.length; i++) {
+    if (cards[i].getAttribute('data-camera-name') === name) return true;
+  }
+  return false;
+}
+
+function _acTestRtsp(url) {
+  return fetch('/api/cameras/test-rtsp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url, timeout_seconds: 8 })
+  }).then(function(r) { return r.json(); });
+}
+
+function acVerify() {
+  var name = el('addcam-name').value.trim();
+  el('addcam-name-error').textContent = '';
+  if (!name) { el('addcam-name-error').textContent = 'Name is required'; return; }
+  if (_acNameTaken(name)) { el('addcam-name-error').textContent = 'A camera with this name already exists'; return; }
+
+  var verify = el('addcam-verify');
+  verify.innerHTML = '<div style="color:var(--text-secondary);font-size:var(--text-xs)">Verifying…</div>';
+
+  if (_ac.manual) {
+    var url = el('addcam-url').value.trim();
+    if (!url) { verify.innerHTML = '<div class="addcam-error">RTSP URL is required</div>'; return; }
+    _acTestRtsp(url).then(function(res) { _acHandleVerify(res, url); })
+      .catch(function() { verify.innerHTML = '<div class="addcam-error">Verification failed</div>'; });
+    return;
+  }
+
+  // Discovery path: probe credentials → get working main/sub URLs → test-rtsp main for dimensions.
+  fetch('/api/discover/probe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cameras: [{ ip: _ac.selected.ip, port: _ac.selected.port, manufacturer: _ac.selected.manufacturer, name: _ac.selected.name }],
+      username: el('addcam-user').value,
+      password: el('addcam-pass').value
+    })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    var result = data && data.results && data.results[0];
+    if (!result || result.status !== 'ok' || !result.streams || !result.streams.length) {
+      verify.innerHTML = '<div class="addcam-error">' + _acEsc((result && result.error) || 'Could not connect with those credentials') + '</div>';
+      return;
+    }
+    var main = result.streams.filter(function(s) { return s.resolution === 'main'; })[0] || result.streams[0];
+    var sub = result.streams.filter(function(s) { return s.resolution === 'sub'; })[0];
+    _ac._mainUrl = main.url;
+    _ac._subUrl = sub ? sub.url : '';
+    _ac._thumb = result.thumbnail || ''; // probe generates this; reliable here
+    _acTestRtsp(main.url).then(function(res) { _acHandleVerify(res, main.url); })
+      .catch(function() { verify.innerHTML = '<div class="addcam-error">Stream verification failed</div>'; });
+  }).catch(function() { verify.innerHTML = '<div class="addcam-error">Probe failed</div>'; });
+}
+
+function _acHandleVerify(res, recordUrl) {
+  var verify = el('addcam-verify');
+  if (!res || !res.ok) {
+    verify.innerHTML = '<div class="addcam-error">' + _acEsc((res && res.error) || 'Stream did not respond') + '</div>';
+    return;
+  }
+  _ac.verified = {
+    recordUrl: recordUrl,
+    detectUrl: _ac.manual ? '' : (_ac._subUrl || ''),
+    width: res.width, height: res.height, codec: res.codec
+  };
+  if (res.width) { el('addcam-rw').value = res.width; el('addcam-rh').value = res.height; }
+  var thumbHtml = (!_ac.manual && _ac._thumb)
+    ? '<img class="addcam-verify-thumb" alt="" src="' + _acEsc(_ac._thumb) + '">'
+    : '';
+  verify.innerHTML = thumbHtml + '<div class="addcam-verify-ok">✓ Stream verified - ' +
+    (res.width ? res.width + '\xd7' + res.height + ' ' : '') + _acEsc(res.codec || '') + '</div>';
+  el('addcam-save').disabled = false;
+}
+
+function _acIntOr(id, def) { var v = parseInt(el(id).value, 10); return isNaN(v) ? def : v; }
+
+function acSubmit() {
+  if (!_ac.verified) return;
+  var save = el('addcam-save');
+  save.disabled = true;
+  var body = {
+    name: el('addcam-name').value.trim(),
+    url: _ac.manual ? el('addcam-url').value.trim() : _ac.verified.recordUrl,
+    record_url: _ac.manual ? (el('addcam-recurl').value.trim() || el('addcam-url').value.trim()) : _ac.verified.recordUrl,
+    enabled: true,
+    detect: { width: _acIntOr('addcam-dw', 640), height: _acIntOr('addcam-dh', 480), fps: _acIntOr('addcam-df', 5), enabled: true },
+    record: { width: _acIntOr('addcam-rw', 1920), height: _acIntOr('addcam-rh', 1080), fps: _acIntOr('addcam-rf', 15) }
+  };
+  if (!_ac.manual && _ac.verified.detectUrl) { body.url = _ac.verified.detectUrl; }
+  fetch('/api/cameras/manage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data && data.error) {
+      el('addcam-verify').innerHTML = '<div class="addcam-error">' + _acEsc(data.error) + '</div>';
+      save.disabled = false;
+      return;
+    }
+    el('addcam-done-name').textContent = body.name + ' saved';
+    _acStep('done');
+    if (typeof htmx !== 'undefined') { htmx.trigger(el('camera-grid'), 'load'); }
+  }).catch(function() {
+    el('addcam-verify').innerHTML = '<div class="addcam-error">Save failed</div>';
+    save.disabled = false;
+  });
+}
+
+function acAddAnother() { openAddCameraModal(); }
+
+// Repurpose the empty-state CTAs (previously toast stubs) to the real modal.
+function startDiscovery() { openAddCameraModal(); }
+function showAddManual() { openAddCameraModal(); acManual(); }
+
+// Modal a11y: Escape closes; focus trap while open.
+document.addEventListener('keydown', function(e) {
+  var modal = el('add-camera-modal');
+  if (!modal || !modal.classList.contains('open')) return;
+  if (e.key === 'Escape') { closeAddCameraModal(); return; }
+  if (e.key === 'Tab') {
+    var f = modal.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+    var vis = Array.prototype.filter.call(f, function(x) { return x.offsetParent !== null && !x.disabled; });
+    if (!vis.length) return;
+    var first = vis[0], last = vis[vis.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
+(function() {
+  var bd = el('add-camera-backdrop');
+  if (bd) bd.addEventListener('click', closeAddCameraModal);
 })();

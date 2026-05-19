@@ -88,7 +88,9 @@
     <!-- Camera Grid -->
     <div class="page-header" style="display:flex;align-items:center;gap:0.75rem">
       <h1>Cameras</h1>
-      <button class="btn btn-secondary btn-sm" style="margin-left:auto" data-action-click="openAddCameraModal()">Add Camera</button>
+      <button type="button" class="btn btn-sm add-camera-trigger" style="margin-left:auto;border-color:var(--accent);color:var(--accent)" data-action-click="openAddCameraModal()" aria-haspopup="dialog">
+        <span aria-hidden="true">+</span><span class="btn-label">Add Camera</span>
+      </button>
       <div class="density-selector" title="Tile density">
         <button class="density-btn" data-density="compact" data-action-click="setDashboardDensity('compact')" title="Compact tiles">
           <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="7.5" y="1" width="5" height="5" rx="1"/><rect x="1" y="7.5" width="5" height="5" rx="1"/><rect x="7.5" y="7.5" width="5" height="5" rx="1"/></svg>
@@ -174,135 +176,97 @@
 
   <!-- Add Camera Modal -->
   <div class="shortcut-backdrop" id="add-camera-backdrop"></div>
-  <div class="shortcut-modal" id="add-camera-modal" role="dialog" aria-modal="true" aria-label="Add camera">
+  <div class="shortcut-modal" id="add-camera-modal" role="dialog" aria-modal="true" aria-labelledby="addcam-dialog-title">
     <div class="shortcut-modal-header">
-      <h2>Add Camera</h2>
+      <h2 id="addcam-dialog-title">Add Camera</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeAddCameraModal()" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="shortcut-modal-body" style="grid-template-columns:1fr;padding:1rem 1.25rem">
-      <form id="add-camera-form">
-        <div style="margin-bottom:0.75rem">
-          <label for="addcam-name" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Name</label>
-          <input type="text" id="addcam-name" class="form-input">
-          <div id="addcam-name-error" class="rtsp-test-result" aria-live="polite"></div>
-        </div>
-        <div style="margin-bottom:0.75rem">
-          <label for="addcam-url" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">URL</label>
-          <div style="display:flex;gap:0.5rem">
-            <input type="text" id="addcam-url" placeholder="rtsp://..." class="form-input" style="flex:1">
-            <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('addcam-url','addcam-url-result')">Test</button>
+      <p id="addcam-step-status" role="status" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0"></p>
+      <div class="addcam-steps" id="addcam-steps" data-active="scan">
+
+        <div data-step="scan">
+          <div class="addcam-scan">
+            <div class="addcam-spinner" aria-hidden="true"></div>
+            <div>Scanning your network...</div>
+            <div style="color:var(--text-secondary);font-size:var(--text-xs);margin-top:0.3rem">Looking for ONVIF cameras (~5s)</div>
           </div>
-          <div id="addcam-url-result" class="rtsp-test-result" aria-live="polite"></div>
+          <button type="button" class="addcam-manual-link" data-action-click="acManual()">Enter camera details manually</button>
         </div>
-        <div style="margin-bottom:0.75rem">
-          <label for="addcam-recurl" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem;display:block">Record URL</label>
-          <div style="display:flex;gap:0.5rem">
-            <input type="text" id="addcam-recurl" placeholder="rtsp://... (optional, uses URL if empty)" class="form-input" style="flex:1">
-            <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('addcam-recurl','addcam-recurl-result')">Test</button>
+
+        <div data-step="list">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+            <strong id="addcam-list-title">Found cameras</strong>
+            <button type="button" class="btn btn-xs btn-ghost" data-action-click="acRescan()">Rescan</button>
           </div>
-          <div id="addcam-recurl-result" class="rtsp-test-result" aria-live="polite"></div>
+          <div id="addcam-list"></div>
+          <button type="button" class="addcam-manual-link" data-action-click="acManual()">Not listed? Enter details manually</button>
         </div>
-        <div style="margin-bottom:0.75rem">
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
-            <input type="checkbox" id="addcam-enabled" checked style="width:18px;height:18px;accent-color:var(--accent)">
-            <span>Enabled</span>
-          </label>
+
+        <div data-step="details">
+          <button type="button" class="btn btn-xs btn-ghost" data-action-click="acBackToList()" id="addcam-back" style="margin-bottom:0.6rem">Back</button>
+          <div style="margin-bottom:0.6rem">
+            <label class="form-label" for="addcam-name">Name</label>
+            <input type="text" id="addcam-name" class="form-input" autocomplete="off">
+            <div id="addcam-name-error" class="addcam-error"></div>
+          </div>
+          <div id="addcam-manual-urls" hidden>
+            <div style="margin-bottom:0.6rem">
+              <label class="form-label" for="addcam-url">RTSP URL</label>
+              <input type="text" id="addcam-url" class="form-input" placeholder="rtsp://..." autocomplete="off">
+            </div>
+            <div style="margin-bottom:0.6rem">
+              <label class="form-label" for="addcam-recurl">Record URL (optional)</label>
+              <input type="text" id="addcam-recurl" class="form-input" placeholder="rtsp://... (defaults to RTSP URL)" autocomplete="off">
+            </div>
+          </div>
+          <div id="addcam-creds">
+            <div style="margin-bottom:0.6rem">
+              <label class="form-label" for="addcam-user">Username</label>
+              <input type="text" id="addcam-user" class="form-input" autocomplete="off">
+            </div>
+            <div style="margin-bottom:0.6rem">
+              <label class="form-label" for="addcam-pass">Password</label>
+              <input type="password" id="addcam-pass" class="form-input" autocomplete="off">
+            </div>
+          </div>
+          <details style="margin:0.5rem 0">
+            <summary style="cursor:pointer;color:var(--text-secondary);font-size:var(--text-xs)">Advanced</summary>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-top:0.5rem">
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Detect W</span><input type="number" id="addcam-dw" value="640" class="form-input-sm"></label>
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Detect H</span><input type="number" id="addcam-dh" value="480" class="form-input-sm"></label>
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Detect FPS</span><input type="number" id="addcam-df" value="5" class="form-input-sm"></label>
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Rec W</span><input type="number" id="addcam-rw" value="1920" class="form-input-sm"></label>
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Rec H</span><input type="number" id="addcam-rh" value="1080" class="form-input-sm"></label>
+              <label style="font-size:var(--text-xs);color:var(--text-secondary)"><span style="display:block">Rec FPS</span><input type="number" id="addcam-rf" value="15" class="form-input-sm"></label>
+            </div>
+          </details>
+          <div id="addcam-verify"></div>
+          <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.7rem">
+            <button type="button" class="btn btn-sm btn-ghost" data-action-click="acVerify()">Verify</button>
+            <button type="button" class="btn btn-sm btn-primary" id="addcam-save" data-action-click="acSubmit()" disabled>Save</button>
+          </div>
         </div>
-        <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Detection Stream</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;margin-bottom:0.75rem">
-          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-dw" value="640" class="form-input-sm"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-dh" value="480" class="form-input-sm"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-df" value="5" class="form-input-sm"></div>
-          <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem"><input type="checkbox" id="addcam-det-enabled" checked style="accent-color:var(--accent)">On</label>
+
+        <div data-step="done">
+          <div class="addcam-done">
+            <div class="addcam-done-check" aria-hidden="true">&#10003;</div>
+            <div id="addcam-done-name">Camera saved</div>
+            <div style="color:var(--text-secondary);font-size:var(--text-xs);margin-top:0.35rem">It will start recording after the next service restart.</div>
+          </div>
+          <div style="display:flex;gap:0.5rem;justify-content:center">
+            <button type="button" class="btn btn-sm btn-ghost" data-action-click="acAddAnother()">Add another</button>
+            <button type="button" class="btn btn-sm btn-primary" data-action-click="closeAddCameraModal()">Done</button>
+          </div>
         </div>
-        <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Record Stream</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:1rem">
-          <div><label style="font-size:0.8rem;color:var(--muted)">W</label><input type="number" id="addcam-rw" value="1920" class="form-input-sm"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">H</label><input type="number" id="addcam-rh" value="1080" class="form-input-sm"></div>
-          <div><label style="font-size:0.8rem;color:var(--muted)">FPS</label><input type="number" id="addcam-rf" value="15" class="form-input-sm"></div>
-        </div>
-        <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-          <button type="button" class="btn btn-sm btn-ghost" data-action-click="closeAddCameraModal()">Cancel</button>
-          <button type="button" class="btn btn-sm btn-primary" data-action-click="addNewCamera()">Add</button>
-        </div>
-        <div id="add-camera-status" style="min-height:1.3rem;margin-top:0.5rem;font-size:0.92rem;color:var(--muted)"></div>
-      </form>
+
+      </div>
     </div>
   </div>
 
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
-  <script>
-    function openAddCameraModal() {
-      document.getElementById('add-camera-backdrop').classList.add('open');
-      document.getElementById('add-camera-modal').classList.add('open');
-      setTimeout(function() {
-        var nameField = document.getElementById('addcam-name');
-        if (nameField) nameField.focus();
-      }, 100);
-    }
-    function closeAddCameraModal() {
-      document.getElementById('add-camera-backdrop').classList.remove('open');
-      document.getElementById('add-camera-modal').classList.remove('open');
-      if (typeof clearAddCamErrors === 'function') clearAddCamErrors();
-      var status = document.getElementById('add-camera-status');
-      if (status) { status.textContent = ''; status.style.color = ''; }
-      _addCameraPending = false;
-    }
-    function setAddCamFieldError(fieldId, errorId, msg) {
-      var field = document.getElementById(fieldId);
-      var err = document.getElementById(errorId);
-      if (err) { err.textContent = msg; err.className = 'rtsp-test-result' + (msg ? ' error' : ''); }
-      if (field) { field.style.borderColor = msg ? 'var(--danger)' : ''; }
-    }
-    function clearAddCamErrors() {
-      setAddCamFieldError('addcam-name', 'addcam-name-error', '');
-      setAddCamFieldError('addcam-url', 'addcam-url-result', '');
-    }
-    var _addCameraPending = false;
-    function addNewCamera() {
-      if (_addCameraPending) return;
-      var $ = function(id) { return document.getElementById(id); };
-      var status = $('add-camera-status');
-      var name = $('addcam-name').value.trim();
-      var url = $('addcam-url').value.trim();
-      clearAddCamErrors();
-      if (!name) { setAddCamFieldError('addcam-name', 'addcam-name-error', 'Name is required'); $('addcam-name').focus(); return; }
-      if (!url) { setAddCamFieldError('addcam-url', 'addcam-url-result', 'URL is required'); $('addcam-url').focus(); return; }
-      _addCameraPending = true;
-      status.textContent = 'Adding...';
-      status.style.color = 'var(--muted)';
-      var intOr = function(id, def) { var v = parseInt($(id).value); return isNaN(v) ? def : v; };
-      fetch('/api/cameras/manage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name,
-          url: url,
-          record_url: $('addcam-recurl').value,
-          enabled: $('addcam-enabled').checked,
-          detect: { width: intOr('addcam-dw', 640), height: intOr('addcam-dh', 480), fps: intOr('addcam-df', 5), enabled: $('addcam-det-enabled').checked },
-          record: { width: intOr('addcam-rw', 1920), height: intOr('addcam-rh', 1080), fps: intOr('addcam-rf', 15) }
-        })
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data && data.error) {
-          status.textContent = data.error;
-          status.style.color = 'var(--danger)';
-          _addCameraPending = false;
-        } else {
-          status.textContent = 'Added — restart required';
-          status.style.color = 'var(--success)';
-          setTimeout(function() { location.reload(); }, 800);
-        }
-      }).catch(function() {
-        status.textContent = 'Add failed';
-        status.style.color = 'var(--danger)';
-        _addCameraPending = false;
-      });
-    }
-    document.getElementById('add-camera-backdrop').addEventListener('click', closeAddCameraModal);
-  </script>
 </body>
 </html>
