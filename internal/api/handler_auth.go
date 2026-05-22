@@ -209,7 +209,7 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	// Verify current password (skip for proxy-auth users setting initial local password)
 	if principal.Kind != auth.AuthKindProxy {
-		if s.auth == nil || !s.auth.Check(principal.Username, req.CurrentPassword, "") {
+		if s.auth == nil || !s.auth.Check(principal.Username, req.CurrentPassword, s.auth.ClientIP(r)) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "current password is incorrect"})
 			return
 		}
