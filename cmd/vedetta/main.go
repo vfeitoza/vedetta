@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -49,7 +50,10 @@ var Version = "dev"
 // subsystems holds all initialized runtime components so both the normal and
 // setup-mode startup paths can share the same initialization logic.
 type subsystems struct {
-	mqttClient     *mqtt.Client
+	// mqttClient is read by the event loop and the disk/camera-status ticker
+	// goroutines while the reconnect goroutine may install a new client, so
+	// access goes through atomic load/store.
+	mqttClient     atomic.Pointer[mqtt.Client]
 	detector       *detect.Detector
 	faceRecognizer *detect.FaceRecognizer
 	objectEmbedder *detect.ObjectEmbedder
@@ -195,8 +199,8 @@ func main() {
 		if cfg.MQTT.Enabled {
 			server.SetMQTTEnabled(true)
 		}
-		if sub.mqttClient != nil {
-			server.SetMQTT(sub.mqttClient)
+		if mc := sub.mqttClient.Load(); mc != nil {
+			server.SetMQTT(mc)
 		}
 
 		// Start RTSP re-publishing server if enabled
@@ -306,8 +310,8 @@ func main() {
 	if cfg.MQTT.Enabled {
 		server.SetMQTTEnabled(true)
 	}
-	if sub.mqttClient != nil {
-		server.SetMQTT(sub.mqttClient)
+	if mc := sub.mqttClient.Load(); mc != nil {
+		server.SetMQTT(mc)
 	}
 
 	slog.Info("vedetta started", "cameras", len(cfg.Cameras))
@@ -338,9 +342,9 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	var err error
 
 	if cfg.MQTT.Enabled {
-		sub.mqttClient, err = mqtt.New(cfg.MQTT)
-		if err != nil {
-			slog.Warn("MQTT unavailable, continuing without it", "error", err)
+		c, mqttErr := mqtt.New(cfg.MQTT)
+		if mqttErr != nil {
+			slog.Warn("MQTT unavailable, continuing without it", "error", mqttErr)
 			// Start background reconnect
 			go func() {
 				for {
@@ -351,10 +355,12 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 						continue
 					}
 					slog.Info("MQTT reconnected")
-					sub.mqttClient = c
+					sub.mqttClient.Store(c)
 					return
 				}
 			}()
+		} else {
+			sub.mqttClient.Store(c)
 		}
 	}
 
@@ -418,14 +424,14 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	sub.recorder.StartRecompressionJob(ctx)
 
 	// Publish HA MQTT discovery for all enabled cameras
-	if sub.mqttClient != nil {
+	if mc := sub.mqttClient.Load(); mc != nil {
 		var cameraNames []string
 		for _, cam := range cfg.Cameras {
 			if cam.IsEnabled() {
 				cameraNames = append(cameraNames, cam.Name)
 			}
 		}
-		sub.mqttClient.PublishDiscovery(cameraNames)
+		mc.PublishDiscovery(cameraNames)
 
 		// Publish discovery for tracked objects
 		if knownObjects, err := db.ListKnownObjects(); err == nil {
@@ -433,7 +439,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 			for _, obj := range knownObjects {
 				objInfos = append(objInfos, mqtt.ObjectInfo{Name: obj.Name, Label: obj.Label})
 			}
-			sub.mqttClient.PublishObjectDiscovery(objInfos)
+			mc.PublishObjectDiscovery(objInfos)
 		}
 	}
 
@@ -450,7 +456,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	syncConfigZones(db, cfg.Cameras, sub.manager)
 
 	// Publish HA discovery for zone presence sensors
-	if sub.mqttClient != nil {
+	if mc := sub.mqttClient.Load(); mc != nil {
 		var zoneInfos []mqtt.ZoneInfo
 		for _, camCfg := range cfg.Cameras {
 			if !camCfg.IsEnabled() {
@@ -470,7 +476,7 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 			}
 		}
 		if len(zoneInfos) > 0 {
-			sub.mqttClient.PublishPresenceDiscovery(zoneInfos)
+			mc.PublishPresenceDiscovery(zoneInfos)
 		}
 	}
 
@@ -478,17 +484,21 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	diskMonitor := recording.NewDiskMonitor(sub.recorder.DiskMonitorSampler())
 	go diskMonitor.Run(ctx, 30*time.Second)
 
-	if sub.mqttClient != nil {
-		sub.mqttClient.PublishDiskDiscovery()
+	if mc := sub.mqttClient.Load(); mc != nil {
+		mc.PublishDiskDiscovery()
 
 		go func() {
 			t := time.NewTicker(30 * time.Second)
 			defer t.Stop()
 			publish := func() {
+				c := sub.mqttClient.Load()
+				if c == nil {
+					return
+				}
 				sampler := sub.recorder.DiskMonitorSampler()
 				paused := sub.recorder.AnyCameraPaused()
 				diskMonitor.SetPaused(paused)
-				sub.mqttClient.PublishDiskStatus(sampler.Available(), sampler.Total(), paused)
+				c.PublishDiskStatus(sampler.Available(), sampler.Total(), paused)
 			}
 			publish()
 			for {
@@ -532,11 +542,15 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	sub.ptzClients = ptzClients
 
 	// Periodically publish camera online/offline status to MQTT.
-	if sub.mqttClient != nil {
+	if mc := sub.mqttClient.Load(); mc != nil {
 		go func() {
 			publishStatuses := func() {
+				c := sub.mqttClient.Load()
+				if c == nil {
+					return
+				}
 				for _, st := range sub.manager.CameraStatuses() {
-					sub.mqttClient.PublishCameraStatus(st.Name, st.Online, st.Stopped)
+					c.PublishCameraStatus(st.Name, st.Online, st.Stopped)
 				}
 			}
 
@@ -656,8 +670,8 @@ func configuredCameraNames(cfg *config.Config) []string {
 
 // closeSubsystems releases resources held by subsystems.
 func closeSubsystems(sub *subsystems) {
-	if sub.mqttClient != nil {
-		sub.mqttClient.Close()
+	if mc := sub.mqttClient.Load(); mc != nil {
+		mc.Close()
 	}
 	sub.detector.Close()
 	if sub.faceRecognizer != nil {
@@ -699,8 +713,8 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			}
 
 			// Publish event end over MQTT
-			if sub.mqttClient != nil {
-				if err := sub.mqttClient.PublishEvent(ev, nil); err != nil {
+			if mc := sub.mqttClient.Load(); mc != nil {
+				if err := mc.PublishEvent(ev, nil); err != nil {
 					slog.Error("failed to publish event end", "event", ev.ID, "error", err)
 				}
 
@@ -710,7 +724,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					if counts[ev.Label] < 0 {
 						counts[ev.Label] = 0
 					}
-					sub.mqttClient.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
+					mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
 				}
 			}
 
@@ -802,8 +816,8 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					}
 				}
 
-				if sub.mqttClient != nil {
-					if err := sub.mqttClient.PublishEvent(event, nil); err != nil {
+				if mc := sub.mqttClient.Load(); mc != nil {
+					if err := mc.PublishEvent(event, nil); err != nil {
 						slog.Error("failed to publish event", "error", err)
 					}
 
@@ -812,7 +826,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 						objectCounts[event.CameraName] = make(map[string]int)
 					}
 					objectCounts[event.CameraName][event.Label]++
-					sub.mqttClient.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
+					mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
 
 					// Use annotated image for MQTT (with bounding boxes for visual context)
 					mqttImg := event.AnnotatedImage
@@ -821,7 +835,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					}
 					if mqttImg != nil {
 						if jpegData := encodeJPEG(mqttImg, cfg.Events.SnapshotQuality); jpegData != nil {
-							sub.mqttClient.PublishSnapshot(event.CameraName, event.Label, jpegData)
+							mc.PublishSnapshot(event.CameraName, event.Label, jpegData)
 						}
 					}
 				}
@@ -834,9 +848,9 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 								cam.SetTrackName(ev.TrackID, matched[0])
 							}
 						}
-						if sub.mqttClient != nil {
+						if mc := sub.mqttClient.Load(); mc != nil {
 							for _, name := range matched {
-								sub.mqttClient.PublishObjectSighting(name, ev)
+								mc.PublishObjectSighting(name, ev)
 							}
 						}
 					}(event)
@@ -892,12 +906,12 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if err := db.UpdateZonePresence(pe.ZoneID, pe.Label, pe.Type == "zone_enter"); err != nil {
 					slog.Error("failed to persist presence event", "zone", pe.ZoneName, "label", pe.Label, "error", err)
 				}
-				if sub.mqttClient != nil {
+				if mc := sub.mqttClient.Load(); mc != nil {
 					var objectName string
 					if pe.Type == "zone_enter" {
 						objectName = db.LatestObjectNameForZone(pe.ZoneName, pe.Label)
 					}
-					sub.mqttClient.PublishPresence(pe, objectName)
+					mc.PublishPresence(pe, objectName)
 				}
 
 			case ma := <-motionActivity:
