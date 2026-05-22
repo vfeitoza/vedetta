@@ -164,3 +164,19 @@ func TestAuthMiddleware_PWAAssetsArePublic(t *testing.T) {
 		}
 	}
 }
+
+// The login page is shown to unauthenticated users and loads /safehref.js to
+// sanitize its post-login redirect target. That script must therefore bypass
+// auth; otherwise the unauthenticated browser gets a 302 to /login.html instead
+// of the script, safeRedirectPath is undefined, and login cannot redirect.
+func TestAuthMiddleware_SafeHrefScriptIsPublic(t *testing.T) {
+	srv, _ := newTestServerAuth(t)
+	handler := authMiddleware(srv, okHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/safehref.js", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /safehref.js status = %d, want %d (login page needs it before auth)", w.Code, http.StatusOK)
+	}
+}

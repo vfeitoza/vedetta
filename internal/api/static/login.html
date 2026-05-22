@@ -114,12 +114,13 @@
     </form>
   </main>
 
+  <script src="/safehref.js"></script>
   <script>
     (function() {
       var form = document.getElementById('login-form');
       var statusEl = document.getElementById('status');
       var submit = document.getElementById('submit');
-      var next = new URLSearchParams(location.search).get('next') || '/';
+      var nextRaw = new URLSearchParams(location.search).get('next');
 
       function setStatus(message, isError) {
         statusEl.textContent = message || '';
@@ -147,7 +148,7 @@
             });
           })
           .then(function() {
-            location.href = next;
+            location.href = safeRedirectPath(nextRaw, location.origin);
           })
           .catch(function(err) {
             setStatus(err.message, true);

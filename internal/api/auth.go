@@ -110,6 +110,11 @@ func isPublicPath(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodGet && r.URL.Path == "/sw.js":
 		return true
+	// safehref.js sanitizes the login page's post-login redirect target. The
+	// login page is served to unauthenticated users, so the script it depends
+	// on must also load without a session.
+	case r.Method == http.MethodGet && r.URL.Path == "/safehref.js":
+		return true
 	case r.Method == http.MethodGet && isPWAIconPath(r.URL.Path):
 		return true
 	// Signed push-notification snapshot URLs. iOS fetches these without
