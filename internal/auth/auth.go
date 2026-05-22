@@ -22,6 +22,7 @@ import (
 
 const (
 	maxFailures         = 10
+	maxIPFailures       = 50
 	maxTokenCreations   = 20
 	failureWindow       = 5 * time.Minute
 	cleanupInterval     = time.Minute
@@ -71,6 +72,7 @@ type Checker struct {
 
 	mu            sync.Mutex
 	loginFailures map[string]*failureRecord
+	ipFailures    map[string]*failureRecord
 	tokenCreates  map[string]*failureRecord
 	done          chan struct{}
 }
@@ -85,6 +87,7 @@ func New(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Ch
 		db:             db,
 		exposure:       apiCfg.Exposure,
 		loginFailures:  make(map[string]*failureRecord),
+		ipFailures:     make(map[string]*failureRecord),
 		tokenCreates:   make(map[string]*failureRecord),
 		done:           make(chan struct{}),
 		trustedProxies: parseTrustedProxies(apiCfg.TrustedProxies),
@@ -112,6 +115,7 @@ func NewFromDB(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.D
 		db:             db,
 		exposure:       apiCfg.Exposure,
 		loginFailures:  make(map[string]*failureRecord),
+		ipFailures:     make(map[string]*failureRecord),
 		tokenCreates:   make(map[string]*failureRecord),
 		done:           make(chan struct{}),
 		trustedProxies: parseTrustedProxies(apiCfg.TrustedProxies),
@@ -206,28 +210,50 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 	if c == nil {
 		return true
 	}
-	key := loginFailureKey(remoteIP, user)
-	if c.isRateLimited(c.loginFailures, key, maxFailures) {
+	if c.loginRateLimited(remoteIP, user) {
 		slog.Warn("auth rate limited", "ip", remoteIP, "username", user)
 		return false
 	}
 	if !c.verify(user, pass) {
-		c.recordFailure(c.loginFailures, key)
+		c.recordLoginFailure(remoteIP, user)
 		slog.Warn("auth failed", "ip", remoteIP, "username", user)
 		return false
 	}
-	c.clearFailures(c.loginFailures, key)
+	c.clearLoginFailures(remoteIP, user)
 	return true
 }
 
-// loginFailureKey scopes the brute-force counter to a single (IP, username)
-// pair. Keying on the IP alone let any holder of a valid account reset the
-// limit for every other account on that IP simply by logging in, because a
-// successful login clears the bucket. Per-account scoping keeps a victim's
-// counter intact while still allowing a legitimate user to recover their own
-// bucket on success.
+// loginFailureKey scopes the per-account brute-force counter to a single
+// (IP, username) pair.
 func loginFailureKey(remoteIP, username string) string {
 	return remoteIP + "\x00" + username
+}
+
+// loginRateLimited reports whether either the per-account bucket (IP, username)
+// or the aggregate per-IP bucket has reached its limit. The per-account bucket
+// stops password guessing against a specific account; the per-IP bucket bounds
+// a username-spraying flood that would otherwise never fill any single
+// per-account bucket and could exhaust CPU on bcrypt and memory on the failure
+// map.
+func (c *Checker) loginRateLimited(remoteIP, username string) bool {
+	return c.isRateLimited(c.loginFailures, loginFailureKey(remoteIP, username), maxFailures) ||
+		c.isRateLimited(c.ipFailures, remoteIP, maxIPFailures)
+}
+
+// recordLoginFailure increments both the per-account and aggregate per-IP
+// counters for a failed credential check.
+func (c *Checker) recordLoginFailure(remoteIP, username string) {
+	c.recordFailure(c.loginFailures, loginFailureKey(remoteIP, username))
+	c.recordFailure(c.ipFailures, remoteIP)
+}
+
+// clearLoginFailures resets only the per-account bucket on a successful login.
+// The aggregate per-IP counter is deliberately left intact: clearing it would
+// let any holder of a valid account wipe the brute-force protection for every
+// other account on the same IP simply by logging in. The per-IP counter
+// expires on its own after failureWindow.
+func (c *Checker) clearLoginFailures(remoteIP, username string) {
+	c.clearFailures(c.loginFailures, loginFailureKey(remoteIP, username))
 }
 
 // ProxyAuthEnabled reports whether proxy authentication is configured.
@@ -282,17 +308,16 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 	if c.db == nil {
 		return nil, ErrStorageUnavailable
 	}
-	key := loginFailureKey(remoteIP, user)
-	if c.isRateLimited(c.loginFailures, key, maxFailures) {
+	if c.loginRateLimited(remoteIP, user) {
 		slog.Warn("login rate limited", "ip", remoteIP, "username", user)
 		return nil, ErrRateLimited
 	}
 	if !c.verify(user, pass) {
-		c.recordFailure(c.loginFailures, key)
+		c.recordLoginFailure(remoteIP, user)
 		slog.Warn("login failed", "ip", remoteIP, "username", user)
 		return nil, ErrInvalidCredentials
 	}
-	c.clearFailures(c.loginFailures, key)
+	c.clearLoginFailures(remoteIP, user)
 
 	sessionID, err := generateOpaqueToken(32)
 	if err != nil {
@@ -711,6 +736,7 @@ func (c *Checker) cleanupLoop() {
 			return
 		case <-ticker.C:
 			c.expireFailureMap(c.loginFailures)
+			c.expireFailureMap(c.ipFailures)
 			c.expireFailureMap(c.tokenCreates)
 			if c.db != nil {
 				if err := c.db.DeleteExpiredSessions(time.Now().UTC()); err != nil {

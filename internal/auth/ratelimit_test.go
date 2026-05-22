@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/rvben/vedetta/internal/config"
@@ -79,6 +80,28 @@ func TestLoginSuccessClearsOwnAccountRateLimit(t *testing.T) {
 	// After the reset, a fresh wrong attempt must not be immediately limited.
 	if _, err := c.Login("bob", "wrong", ip, "agent", false); err != ErrInvalidCredentials {
 		t.Fatalf("bob bucket should have been cleared, got %v", err)
+	}
+}
+
+// Per-account scoping must not remove the aggregate per-IP cap. An attacker
+// who varies the username on every attempt would otherwise never fill any
+// single (IP, username) bucket, leaving the IP free to run unbounded bcrypt
+// work and grow the failure map without limit. The per-IP aggregate counter
+// must still throttle a username-spraying flood from one address.
+func TestLoginRateLimitCapsAggregatePerIP(t *testing.T) {
+	c := newTwoUserChecker(t)
+	const ip = "10.0.0.1"
+
+	for i := range maxIPFailures {
+		user := fmt.Sprintf("spray-%d", i)
+		if _, err := c.Login(user, "wrong", ip, "agent", false); err != ErrInvalidCredentials {
+			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i, err)
+		}
+	}
+	// The IP has hit the aggregate cap; further attempts are throttled even
+	// with a fresh username or valid credentials.
+	if _, err := c.Login("alice", "secret", ip, "agent", false); err != ErrRateLimited {
+		t.Fatalf("IP should be rate limited after %d aggregate failures, got %v", maxIPFailures, err)
 	}
 }
 
