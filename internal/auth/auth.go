@@ -137,14 +137,19 @@ func (c *Checker) reloadUsers() {
 		return
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.users = make(map[string][]byte, len(dbUsers))
+	// Build the replacement map and dummy hash before locking: makeDummyHash
+	// runs bcrypt, and verify() holds c.mu, so doing this work under the lock
+	// would stall all concurrent logins. Lock only to swap the fields.
+	users := make(map[string][]byte, len(dbUsers))
 	for _, u := range dbUsers {
-		c.users[u.Username] = []byte(u.PasswordHash)
+		users[u.Username] = []byte(u.PasswordHash)
 	}
-	c.dummyHash = makeDummyHash(c.users)
+	dummy := makeDummyHash(users)
+
+	c.mu.Lock()
+	c.users = users
+	c.dummyHash = dummy
+	c.mu.Unlock()
 }
 
 func ValidateConfig(cfg config.AuthConfig) error {
@@ -211,10 +216,14 @@ func (c *Checker) Enabled() bool {
 
 // UpdatePassword updates the in-memory password hash for a user.
 func (c *Checker) UpdatePassword(username string, hash []byte) {
+	// Compute the dummy hash from the new hash before locking so the bcrypt
+	// work doesn't stall logins waiting on c.mu. The new hash is representative
+	// of the user set's cost.
+	dummy := makeDummyHash(map[string][]byte{username: hash})
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.users[username] = hash
-	c.dummyHash = makeDummyHash(c.users)
+	c.dummyHash = dummy
 }
 
 // ChangePassword verifies the current password and updates to the new one.
