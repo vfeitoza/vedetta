@@ -699,7 +699,6 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 			}
 
 			eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
-			c.confirmedTracks[obj.TrackID] = eventID
 
 			// Pick the first matched zone name for the event
 			var zoneName string
@@ -743,7 +742,7 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 				}
 			}
 
-			c.emitEvent(ev)
+			c.confirmTrack(obj.TrackID, ev)
 		}
 	}
 
@@ -815,15 +814,30 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 	}
 }
 
+// confirmTrack records a newly confirmed track and emits its start event. The
+// track is only marked confirmed when the event is actually enqueued: if the
+// events channel is full and the event is dropped, the track stays unconfirmed
+// so the next frame retries. Marking it confirmed on a dropped event would
+// orphan the track - the manager never saves the event, yet later event-end and
+// face messages would reference an event ID that never existed.
+func (c *Camera) confirmTrack(trackID int, ev Event) {
+	if c.emitEvent(ev) {
+		c.confirmedTracks[trackID] = ev.ID
+	}
+}
+
 // emitEvent forwards a new event to the manager without ever blocking the
-// detector goroutine. If the events channel is full the event is dropped and a
-// warning is logged, matching the presence/face/detection channels: a slow
-// downstream consumer must never stall the decode/detect pipeline.
-func (c *Camera) emitEvent(ev Event) {
+// detector goroutine. It reports whether the event was enqueued. If the events
+// channel is full the event is dropped and a warning is logged, matching the
+// presence/face/detection channels: a slow downstream consumer must never stall
+// the decode/detect pipeline.
+func (c *Camera) emitEvent(ev Event) bool {
 	select {
 	case c.events <- ev:
+		return true
 	default:
 		slog.Warn("event channel full, dropping", "camera", c.config.Name, "label", ev.Label)
+		return false
 	}
 }
 

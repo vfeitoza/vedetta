@@ -51,6 +51,40 @@ func TestEmitEventDropsWhenFull(t *testing.T) {
 	}
 }
 
+// confirmTrack must only mark a track as confirmed when the start event is
+// actually enqueued. If the channel is full and the event is dropped, the track
+// must stay unconfirmed so the next frame retries instead of leaving an orphan
+// track whose ID downstream event-end/face messages would reference.
+
+func TestConfirmTrackMarksConfirmedOnEnqueue(t *testing.T) {
+	ch := make(chan Event, 1)
+	c := &Camera{config: config.CameraConfig{Name: "cam"}, events: ch, confirmedTracks: map[int]string{}}
+
+	c.confirmTrack(7, Event{ID: "e7", Label: "person"})
+
+	if got := c.confirmedTracks[7]; got != "e7" {
+		t.Fatalf("track 7 confirmed event id = %q, want e7", got)
+	}
+	if got := <-ch; got.ID != "e7" {
+		t.Fatalf("emitted event id = %q, want e7", got.ID)
+	}
+}
+
+func TestConfirmTrackDoesNotConfirmWhenDropped(t *testing.T) {
+	ch := make(chan Event, 1)
+	c := &Camera{config: config.CameraConfig{Name: "cam"}, events: ch, confirmedTracks: map[int]string{}}
+
+	c.confirmTrack(1, Event{ID: "e1"}) // enqueues, fills the single-slot buffer, marks track 1
+	c.confirmTrack(2, Event{ID: "e2"}) // channel full: must drop and leave track 2 unconfirmed
+
+	if _, ok := c.confirmedTracks[1]; !ok {
+		t.Fatal("track 1 should be confirmed after a successful enqueue")
+	}
+	if _, ok := c.confirmedTracks[2]; ok {
+		t.Fatal("track 2 marked confirmed despite a dropped start event")
+	}
+}
+
 func TestEmitEventEndDropsWhenFull(t *testing.T) {
 	ch := make(chan EventEnd, 1)
 	c := &Camera{config: config.CameraConfig{Name: "cam"}, eventEnds: ch}
