@@ -325,12 +325,7 @@ func (s *Server) Start() error {
 	}
 	handler = requestLogMiddleware(handler)
 
-	s.httpSrv = &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	s.httpSrv = s.buildHTTPServer(addr, handler)
 
 	if s.config.TLSCert != "" && s.config.TLSKey != "" {
 		s.httpSrv.TLSConfig = &tls.Config{
@@ -342,6 +337,24 @@ func (s *Server) Start() error {
 
 	slog.Info("API server listening", "addr", addr)
 	return s.httpSrv.ListenAndServe()
+}
+
+// buildHTTPServer constructs the *http.Server with the timeouts that bound how
+// long a client may take to send a request, mitigating slowloris-style attacks
+// that hold connections open by trickling bytes.
+//
+// WriteTimeout is deliberately left at zero: SSE (/api/events/stream), MSE, and
+// HLS responses stream for minutes, and a global write deadline would sever
+// them mid-stream. Slow-body protection comes from ReadTimeout; per-handler
+// MaxBytesReader caps the body size.
+func (s *Server) buildHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 func (s *Server) SetVersion(v string) {
