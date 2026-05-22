@@ -743,7 +743,7 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 				}
 			}
 
-			c.events <- ev
+			c.emitEvent(ev)
 		}
 	}
 
@@ -802,16 +802,39 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 	// Notify when tracked objects leave the frame
 	for _, obj := range c.tracker.DeletedTracks() {
 		if eventID, ok := c.confirmedTracks[obj.TrackID]; ok {
-			c.eventEnds <- EventEnd{
+			c.emitEventEnd(EventEnd{
 				EventID:    eventID,
 				CameraName: c.config.Name,
 				EndTime:    time.Now(),
-			}
+			})
 			delete(c.confirmedTracks, obj.TrackID)
 		}
 		c.mu.Lock()
 		delete(c.trackNames, obj.TrackID)
 		c.mu.Unlock()
+	}
+}
+
+// emitEvent forwards a new event to the manager without ever blocking the
+// detector goroutine. If the events channel is full the event is dropped and a
+// warning is logged, matching the presence/face/detection channels: a slow
+// downstream consumer must never stall the decode/detect pipeline.
+func (c *Camera) emitEvent(ev Event) {
+	select {
+	case c.events <- ev:
+	default:
+		slog.Warn("event channel full, dropping", "camera", c.config.Name, "label", ev.Label)
+	}
+}
+
+// emitEventEnd forwards an event-end to the manager without blocking the
+// detector goroutine. A dropped end is recoverable: the event-loop's
+// max-duration timer finalizes the event if no end arrives.
+func (c *Camera) emitEventEnd(ee EventEnd) {
+	select {
+	case c.eventEnds <- ee:
+	default:
+		slog.Warn("event-end channel full, dropping", "camera", c.config.Name, "event", ee.EventID)
 	}
 }
 
