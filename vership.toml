@@ -4,6 +4,13 @@ branch = "main"
 [changelog]
 unconventional = "exclude"
 
+# Run the project's make targets so preflight matches CI exactly. The default
+# Go lint (go vet) does not honor the //nolint:govet directives that
+# golangci-lint respects, so use make lint/test as the single source of truth.
+[checks]
+lint_command = "make lint"
+test_command = "make test"
+
 [[version_files]]
 glob = "pypi/pyproject.toml"
 search = 'version = "{prev}"'
