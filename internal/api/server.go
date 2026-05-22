@@ -735,6 +735,18 @@ const appShell404HTML = `<!DOCTYPE html>
 </body>
 </html>`
 
+// serverError logs the underlying error with request context and returns a
+// generic 500 to the client. Internal details (raw SQLite errors, file paths,
+// schema names) stay in the server log and are never leaked in the response.
+func (s *Server) serverError(w http.ResponseWriter, r *http.Request, err error) {
+	method, path := "", ""
+	if r != nil {
+		method, path = r.Method, r.URL.Path
+	}
+	slog.Error("request failed", "method", method, "path", path, "error", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

@@ -18,10 +18,10 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-func (s *Server) ListPeople(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ListPeople(w http.ResponseWriter, r *http.Request) {
 	people, err := s.db.ListPeople()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (s *Server) ListPeople(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) GetPerson(w http.ResponseWriter, r *http.Request, id int64) {
 	person, err := s.db.GetPerson(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if person == nil {
@@ -131,14 +131,14 @@ func (s *Server) UpdatePerson(w http.ResponseWriter, r *http.Request, id int64) 
 			return
 		}
 		if err := s.db.UpdatePersonName(id, name); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 		_ = s.db.UpdateSubLabelsForPerson(id, name)
 	}
 	if req.Ignore != nil {
 		if err := s.db.SetPersonIgnore(id, *req.Ignore); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 	}
@@ -147,7 +147,7 @@ func (s *Server) UpdatePerson(w http.ResponseWriter, r *http.Request, id int64) 
 
 func (s *Server) DeletePerson(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeletePerson(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -172,7 +172,7 @@ func (s *Server) MergePeople(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.db.MergePeople(req.TargetID, req.SourceID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -214,7 +214,7 @@ func (s *Server) ListPersonFaces(w http.ResponseWriter, r *http.Request, id int6
 	}
 	faces, err := s.db.ListFacesByPerson(id, limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if faces == nil {
@@ -247,7 +247,7 @@ func (s *Server) ListPersonEvents(w http.ResponseWriter, r *http.Request, id int
 	}
 	events, err := s.db.QueryEventsFiltered(storage.EventFilters{Object: person.Name}, 20, 0)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if events == nil {
@@ -269,7 +269,7 @@ func (s *Server) ListUnmatchedFaces(w http.ResponseWriter, r *http.Request, para
 	}
 	faces, err := s.db.ListUnmatchedFaces(limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if faces == nil {
@@ -307,14 +307,14 @@ func (s *Server) AssignFace(w http.ResponseWriter, r *http.Request, id int64) {
 		}
 		newID, err := s.db.SavePerson(name, false, nil)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 		personID = newID
 	}
 
 	if err := s.db.UpdateFacePerson(faceID, personID, 1.0); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -328,7 +328,7 @@ func (s *Server) AssignFace(w http.ResponseWriter, r *http.Request, id int64) {
 
 func (s *Server) IgnoreFace(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeleteFace(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
@@ -337,7 +337,7 @@ func (s *Server) IgnoreFace(w http.ResponseWriter, r *http.Request, id int64) {
 func (s *Server) GetFaceCrop(w http.ResponseWriter, r *http.Request, id int64) {
 	cropPath, err := s.db.GetFaceCropPath(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if cropPath == "" {

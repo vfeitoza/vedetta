@@ -32,7 +32,7 @@ func authMiddleware(s *Server, next http.Handler) http.Handler {
 
 		principal, err := s.auth.Authenticate(r)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 

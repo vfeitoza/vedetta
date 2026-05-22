@@ -28,7 +28,7 @@ func (s *Server) ListSegments(w http.ResponseWriter, r *http.Request, camera str
 
 	segments, err := s.db.GetSegmentsForDate(camera, date)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -73,13 +73,13 @@ func (s *Server) GetCameraTimeline(w http.ResponseWriter, r *http.Request, name 
 
 	segments, err := s.db.GetSegmentsForDate(name, date)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
 	events, err := s.db.QueryEventsForDate(name, date)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (s *Server) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name 
 	end := start.Add(time.Duration(durationSec) * time.Second)
 	segments, err := s.db.QuerySegments(name, start, end)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if len(segments) == 0 {
@@ -200,7 +200,7 @@ func (s *Server) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name 
 func (s *Server) GetSegment(w http.ResponseWriter, r *http.Request, name string, id int64) {
 	seg, err := s.db.GetSegmentByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if seg == nil || seg.Camera != name {
@@ -215,7 +215,7 @@ func (s *Server) GetSegment(w http.ResponseWriter, r *http.Request, name string,
 func (s *Server) GetSegmentInit(w http.ResponseWriter, r *http.Request, name string, id int64) {
 	seg, err := s.db.GetSegmentByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if seg == nil || seg.Camera != name {
@@ -314,7 +314,7 @@ func (s *Server) GetRecordingsCalendar(w http.ResponseWriter, r *http.Request, p
 
 	days, err := s.db.GetRecordingDays(cameraFilter, year, month)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if days == nil {
@@ -333,7 +333,7 @@ func (s *Server) GetRecordingsSummary(w http.ResponseWriter, r *http.Request, pa
 	// Get all segments for the date across all cameras.
 	segments, err := s.db.GetSegmentsForDate("", date)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 

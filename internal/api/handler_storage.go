@@ -10,10 +10,10 @@ import (
 )
 
 // GetStorage returns the cached storage breakdown for all cameras.
-func (s *Server) GetStorage(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetStorage(w http.ResponseWriter, r *http.Request) {
 	out, err := s.recorder.StorageBreakdown()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -75,27 +75,27 @@ func storageActor(r *http.Request) string {
 
 // PostStorageCleanup triggers an async retention-cleanup pass. Returns 200 {"started":true}
 // immediately, or 409 if a cleanup is already running.
-func (s *Server) PostStorageCleanup(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) PostStorageCleanup(w http.ResponseWriter, r *http.Request) {
 	if err := s.recorder.TryRunCleanupAsync(); errors.Is(err, recording.ErrStorageBusy) {
 		w.Header().Set("Retry-After", "5")
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "storage busy"})
 		return
 	} else if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"started": true})
 }
 
 // GetStorageAudit returns the most recent storage-audit entries (default 50, max 500).
-func (s *Server) GetStorageAudit(w http.ResponseWriter, _ *http.Request, params GetStorageAuditParams) {
+func (s *Server) GetStorageAudit(w http.ResponseWriter, r *http.Request, params GetStorageAuditParams) {
 	limit := 50
 	if params.Limit != nil && *params.Limit > 0 && *params.Limit <= 500 {
 		limit = *params.Limit
 	}
 	entries, err := s.recorder.StorageAudit(limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	type auditRow struct {

@@ -183,7 +183,7 @@ func (s *Server) GetCameraThumbnail(w http.ResponseWriter, r *http.Request, name
 	// Find the segment containing the timestamp
 	segments, err := s.db.QuerySegments(name, t, t.Add(1*time.Second))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if len(segments) == 0 {
@@ -317,7 +317,7 @@ func (s *Server) ListZones(w http.ResponseWriter, r *http.Request, name string) 
 
 	zones, err := s.db.ListZones(name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if zones == nil {
@@ -376,7 +376,7 @@ func (s *Server) CreateZone(w http.ResponseWriter, r *http.Request, name string)
 		Enabled:         payload.Enabled == nil || *payload.Enabled,
 	}
 	if err := s.db.SaveZone(z); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -396,7 +396,7 @@ func (s *Server) UpdateZone(w http.ResponseWriter, r *http.Request, name string,
 
 	existing, err := s.db.GetZone(name, zoneName)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if existing == nil {
@@ -459,7 +459,7 @@ func (s *Server) UpdateZone(w http.ResponseWriter, r *http.Request, name string,
 	}
 
 	if err := s.db.SaveZone(z); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -477,7 +477,7 @@ func (s *Server) DeleteZone(w http.ResponseWriter, r *http.Request, name string,
 	}
 
 	if err := s.db.DeleteZone(name, zoneName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -495,7 +495,7 @@ func (s *Server) GetZonePresence(w http.ResponseWriter, r *http.Request, name st
 
 	zoneRecord, err := s.db.GetZone(name, zone)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if zoneRecord == nil {

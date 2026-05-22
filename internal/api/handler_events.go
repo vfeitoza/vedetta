@@ -57,7 +57,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListE
 	}
 	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -91,7 +91,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListE
 func (s *Server) GetEvent(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil {
@@ -104,7 +104,7 @@ func (s *Server) GetEvent(w http.ResponseWriter, r *http.Request, id string) {
 func (s *Server) GetEventSnapshot(w http.ResponseWriter, r *http.Request, id string, params GetEventSnapshotParams) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil || event.SnapshotPath == "" || !event.SnapshotAvailable {
@@ -148,7 +148,7 @@ func (s *Server) GetEventSnapshot(w http.ResponseWriter, r *http.Request, id str
 func (s *Server) GetEventClip(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil || event.ClipPath == "" || !event.ClipAvailable {
@@ -204,7 +204,7 @@ func (s *Server) GetEventDetectionCrop(w http.ResponseWriter, r *http.Request, i
 func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string) {
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil {
@@ -212,7 +212,7 @@ func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	if err := s.recorder.ReextractClip(*event); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "event": id})
@@ -305,7 +305,7 @@ func (s *Server) IdentifyEvent(w http.ResponseWriter, r *http.Request, id string
 	eventID := id
 	event, err := s.db.GetEventByID(eventID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil || !event.SnapshotAvailable {
@@ -327,7 +327,7 @@ func (s *Server) IdentifyEvent(w http.ResponseWriter, r *http.Request, id string
 
 	knownObjects, err := s.db.ListKnownObjectsByLabel(event.Label)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -405,7 +405,7 @@ func (s *Server) TrackPerson(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	personID, err := s.db.SavePersonWithEvent(name, false, centroid, eventID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 

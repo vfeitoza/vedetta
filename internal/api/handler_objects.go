@@ -20,10 +20,10 @@ type objectEmbedder interface {
 	SaveCrop(frame *image.RGBA, box [4]int, dir string, objectID int64) string
 }
 
-func (s *Server) ListObjects(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ListObjects(w http.ResponseWriter, r *http.Request) {
 	objects, err := s.db.ListKnownObjects()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if objects == nil {
@@ -64,7 +64,7 @@ func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 
 	event, err := s.db.GetEventByID(req.EventID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if event == nil || !event.SnapshotAvailable {
@@ -91,7 +91,7 @@ func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 	}
 	objID, err := s.db.SaveKnownObject(obj)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -187,7 +187,7 @@ func (s *Server) CreateObjectFromCameraTrack(w http.ResponseWriter, r *http.Requ
 	}
 	objID, err := s.db.SaveKnownObject(obj)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -227,13 +227,13 @@ func (s *Server) UpdateObject(w http.ResponseWriter, r *http.Request, id int64) 
 			return
 		}
 		if err := s.db.UpdateKnownObjectName(id, name); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 	}
 	if req.MatchThreshold != nil {
 		if err := s.db.UpdateKnownObjectThreshold(id, req.MatchThreshold); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 	}
@@ -252,7 +252,7 @@ func (s *Server) DismissSighting(w http.ResponseWriter, r *http.Request, id int6
 		_ = s.db.UpdateEventSubLabel(sighting.EventID, "")
 	}
 	if err := s.db.DeleteObjectSighting(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
@@ -261,7 +261,7 @@ func (s *Server) DismissSighting(w http.ResponseWriter, r *http.Request, id int6
 func (s *Server) DeleteObject(w http.ResponseWriter, r *http.Request, id int64) {
 	obj, err := s.db.GetKnownObject(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if obj == nil {
@@ -273,7 +273,7 @@ func (s *Server) DeleteObject(w http.ResponseWriter, r *http.Request, id int64) 
 		os.Remove(obj.CropPath)
 	}
 	if err := s.db.DeleteKnownObject(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -286,7 +286,7 @@ func (s *Server) ListObjectSightings(w http.ResponseWriter, r *http.Request, id 
 	}
 	sightings, err := s.db.ListObjectSightings(id, limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if sightings == nil {
@@ -306,7 +306,7 @@ func (s *Server) GetObjectCrop(w http.ResponseWriter, r *http.Request, id int64,
 	if params.Ref != nil {
 		refs, err := s.db.ListObjectReferences(id)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 		refID := *params.Ref
@@ -400,7 +400,7 @@ func fileExists(path string) bool {
 func (s *Server) ListObjectReferences(w http.ResponseWriter, r *http.Request, id int64) {
 	refs, err := s.db.ListObjectReferences(id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if refs == nil {
@@ -465,7 +465,7 @@ func (s *Server) AddObjectReference(w http.ResponseWriter, r *http.Request, id i
 		CropPath:  cropPath,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -507,7 +507,7 @@ func (s *Server) SetObjectThumbnail(w http.ResponseWriter, r *http.Request, id i
 	if hasRef {
 		refs, err := s.db.ListObjectReferences(id)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 		var match *storage.ObjectReference
@@ -550,7 +550,7 @@ func (s *Server) SetObjectThumbnail(w http.ResponseWriter, r *http.Request, id i
 	}
 
 	if err := s.db.UpdateKnownObjectCrop(id, newPath); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, SetObjectThumbnailResponse{
@@ -561,7 +561,7 @@ func (s *Server) SetObjectThumbnail(w http.ResponseWriter, r *http.Request, id i
 
 func (s *Server) DeleteObjectReference(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.db.DeleteObjectReference(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

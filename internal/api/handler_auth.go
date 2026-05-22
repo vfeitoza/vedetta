@@ -40,7 +40,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -60,7 +60,7 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.auth.Logout(principal.SessionID, principal.Username); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	s.auth.ClearSessionCookies(w, r)
@@ -135,7 +135,7 @@ func (s *Server) DeleteToken(w http.ResponseWriter, r *http.Request, id int64) {
 		return
 	}
 	if err := s.auth.RevokeToken(id, principal.Username); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
@@ -149,7 +149,7 @@ func (s *Server) ListTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, err := s.db.ListAPITokensByUser(principal.Username)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	type tokenItem struct {

@@ -91,7 +91,7 @@ func (s *Server) CreatePushSubscription(w http.ResponseWriter, r *http.Request) 
 	}
 	if err != nil {
 		slog.Error("push subscribe: save failed", "username", p.Username, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	slog.Info("push subscribe: registered", "username", p.Username, "id", id, "user_agent", body.UserAgent)
@@ -108,7 +108,7 @@ func (s *Server) ListPushSubscriptions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.db.ListPushSubscriptionsByUser(p.Username)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	type subOut struct {
@@ -147,7 +147,7 @@ func (s *Server) DeletePushSubscription(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -177,7 +177,7 @@ func (s *Server) GetPushPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	disabled, err := s.db.ListNotificationPrefs(p.Username)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 
@@ -225,19 +225,19 @@ func (s *Server) PutPushPrefs(w http.ResponseWriter, r *http.Request) {
 		mutedVal = "1"
 	}
 	if err := s.db.SetKV("notify:"+p.Username+":muted", mutedVal); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.serverError(w, r, err)
 		return
 	}
 	if body.CooldownSeconds > 0 {
 		if err := s.db.SetKV("notify:"+p.Username+":cooldown_seconds", strconv.Itoa(body.CooldownSeconds)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.serverError(w, r, err)
 			return
 		}
 	}
 	for cam, classes := range body.Cameras {
 		for class, enabled := range classes {
 			if err := s.db.SetNotificationPref(p.Username, cam, class, enabled); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				s.serverError(w, r, err)
 				return
 			}
 		}
