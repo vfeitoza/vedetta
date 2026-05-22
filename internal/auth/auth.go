@@ -80,14 +80,8 @@ func New(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Ch
 		return nil
 	}
 
-	dummyHash, err := bcrypt.GenerateFromPassword([]byte("vedetta-not-a-real-password"), bcrypt.MinCost)
-	if err != nil {
-		panic(err)
-	}
-
 	c := &Checker{
 		users:          make(map[string][]byte, len(authCfg.Users)),
-		dummyHash:      dummyHash,
 		db:             db,
 		exposure:       apiCfg.Exposure,
 		loginFailures:  make(map[string]*failureRecord),
@@ -100,6 +94,7 @@ func New(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Ch
 	for _, user := range authCfg.Users {
 		c.users[user.Username] = []byte(user.PasswordHash)
 	}
+	c.dummyHash = makeDummyHash(c.users)
 
 	go c.cleanupLoop()
 	slog.Info("authentication enabled", "users", len(c.users))
@@ -110,14 +105,8 @@ func New(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Ch
 // from static config. It loads users immediately and supports reloading via
 // reloadUsers.
 func NewFromDB(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Checker {
-	dummyHash, err := bcrypt.GenerateFromPassword([]byte("vedetta-not-a-real-password"), bcrypt.MinCost)
-	if err != nil {
-		panic(err)
-	}
-
 	c := &Checker{
 		users:          make(map[string][]byte),
-		dummyHash:      dummyHash,
 		db:             db,
 		exposure:       apiCfg.Exposure,
 		loginFailures:  make(map[string]*failureRecord),
@@ -128,6 +117,7 @@ func NewFromDB(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.D
 	}
 
 	c.reloadUsers()
+	c.dummyHash = makeDummyHash(c.users)
 
 	go c.cleanupLoop()
 	slog.Info("authentication enabled (db-primary)", "users", len(c.users))
@@ -614,6 +604,26 @@ func (c *Checker) RequestIsSecure(r *http.Request) bool {
 		return true
 	}
 	return c.cookieSecure(r)
+}
+
+// makeDummyHash builds the constant fake hash that verify() compares against
+// for unknown usernames. Its bcrypt cost matches an existing user hash so the
+// unknown-user comparison takes the same time as a real one; a cheaper dummy
+// would make the unknown-user path measurably faster and leak whether a
+// username exists. Falls back to DefaultCost when no user hash cost is readable.
+func makeDummyHash(users map[string][]byte) []byte {
+	cost := bcrypt.DefaultCost
+	for _, h := range users {
+		if k, err := bcrypt.Cost(h); err == nil {
+			cost = k
+			break
+		}
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("vedetta-not-a-real-password"), cost)
+	if err != nil {
+		panic(err)
+	}
+	return hash
 }
 
 func (c *Checker) verify(user, pass string) bool {
