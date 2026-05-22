@@ -537,19 +537,24 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			if nLayers > maxLayers {
 				nLayers = maxLayers
 			}
-			// Capture C pointer values before doing any allocation. The buffers
-			// point to memory owned by the encoder (C-allocated in cgo mode,
-			// Go-allocated in purego mode) and remain valid until the next
+			// Capture the encoder's output buffer addresses as uintptr, not as
+			// pointer-typed values. PBsBuf and PNalLengthInByte point into
+			// memory owned by the OpenH264 library (the C library mallocs these
+			// even in the purego/dlopen build), valid until the next
 			// EncodeFrame or destroy call, both serialized by OpenH264Lock.
+			// Holding such an address in a Go *uint8/*int32 would make the GC
+			// trace it as a Go heap pointer and run span lookups on a foreign
+			// address, which can fault at a wild address. uintptr is not traced
+			// by the GC, so the address stays opaque to it.
 			var (
-				layerBufPtrs   [maxLayers]*uint8
-				layerLenPtrs   [maxLayers]*int32
+				layerBufPtrs   [maxLayers]uintptr
+				layerLenPtrs   [maxLayers]uintptr
 				layerNalCounts [maxLayers]int32
 			)
 			for iLayer := 0; iLayer < nLayers; iLayer++ {
 				layer := &encInfo.SLayerInfo[iLayer]
-				layerBufPtrs[iLayer] = layer.PBsBuf
-				layerLenPtrs[iLayer] = layer.PNalLengthInByte
+				layerBufPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PBsBuf))
+				layerLenPtrs[iLayer] = uintptr(unsafe.Pointer(layer.PNalLengthInByte))
 				layerNalCounts[iLayer] = layer.INalCount
 			}
 			OpenH264Unlock()
@@ -560,25 +565,39 @@ func transcodeFile(src, dst string, outW, outH int) error {
 			pinner.Unpin()
 			pinner = &runtime.Pinner{}
 
-			// Copy NAL bytes from the encoder buffers into Go-owned slices.
+			// Copy NAL bytes from the library-owned buffers into Go-owned
+			// slices. The buffers remain valid until the next EncodeFrame or
+			// WelsDestroySVCEncoder call (serialized by OpenH264Lock above).
+			//
+			// Access the memory via uintptr arithmetic and transient
+			// unsafe.Pointer conversions rather than unsafe.Slice, so no slice
+			// header whose Data field holds a foreign address is ever live on
+			// the Go stack or heap for the GC to trace.
 			var nalBytes []byte
 			if encRet == openh264.CmResultSuccess && encFrameType != openh264.VideoFrameTypeSkip {
 				for iLayer := 0; iLayer < nLayers; iLayer++ {
 					nalCount := layerNalCounts[iLayer]
 					nalLenPtr := layerLenPtrs[iLayer]
 					bufPtr := layerBufPtrs[iLayer]
-					if nalCount <= 0 || nalLenPtr == nil || bufPtr == nil {
+					if nalCount <= 0 || nalLenPtr == 0 || bufPtr == 0 {
 						continue
 					}
-					nalLens := unsafe.Slice(nalLenPtr, nalCount)
+					// Sum NAL unit lengths by stepping through the library-owned
+					// int32 array one element at a time.
 					var layerSize int32
-					for _, l := range nalLens {
+					for i := int32(0); i < nalCount; i++ {
+						l := *(*int32)(unsafe.Pointer(nalLenPtr + uintptr(i)*4)) //nolint:govet // address held as uintptr; the GC must not trace library-owned memory
 						layerSize += l
 					}
 					if layerSize <= 0 {
 						continue
 					}
-					nalBytes = append(nalBytes, unsafe.Slice(bufPtr, layerSize)...)
+					// Copy the NAL bytes one byte at a time into a Go-owned slice.
+					layerCopy := make([]byte, layerSize)
+					for i := int32(0); i < layerSize; i++ {
+						layerCopy[i] = *(*uint8)(unsafe.Pointer(bufPtr + uintptr(i))) //nolint:govet // address held as uintptr; the GC must not trace library-owned memory
+					}
+					nalBytes = append(nalBytes, layerCopy...)
 				}
 			}
 
