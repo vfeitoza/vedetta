@@ -80,7 +80,7 @@ func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 
 	embedding, err := s.objectEmbedder.Embed(img, event.Box)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		s.serverErrorMsg(w, r, err, "embedding failed")
 		return
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) CreateObjectFromCameraTrack(w http.ResponseWriter, r *http.Requ
 
 	embedding, err := s.objectEmbedder.Embed(frame, box)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		s.serverErrorMsg(w, r, err, "embedding failed")
 		return
 	}
 
@@ -451,7 +451,7 @@ func (s *Server) AddObjectReference(w http.ResponseWriter, r *http.Request, id i
 
 	embedding, err := s.objectEmbedder.Embed(img, event.Box)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		s.serverErrorMsg(w, r, err, "embedding failed")
 		return
 	}
 

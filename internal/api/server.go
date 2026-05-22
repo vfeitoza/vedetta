@@ -739,12 +739,33 @@ const appShell404HTML = `<!DOCTYPE html>
 // generic 500 to the client. Internal details (raw SQLite errors, file paths,
 // schema names) stay in the server log and are never leaked in the response.
 func (s *Server) serverError(w http.ResponseWriter, r *http.Request, err error) {
+	s.serverErrorMsg(w, r, err, "internal server error")
+}
+
+// serverErrorMsg behaves like serverError but lets the caller supply a
+// meaningful, non-sensitive client message (e.g. "embedding failed"). The
+// raw error is logged server-side and never written to the response body.
+func (s *Server) serverErrorMsg(w http.ResponseWriter, r *http.Request, err error, clientMsg string) {
+	s.logRequestError(r, err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": clientMsg})
+}
+
+// serverErrorText is the text/plain analogue of serverError for HTML partial
+// handlers that respond via http.Error rather than JSON. The raw error stays
+// in the server log; the client sees only a generic message.
+func (s *Server) serverErrorText(w http.ResponseWriter, r *http.Request, err error) {
+	s.logRequestError(r, err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
+}
+
+// logRequestError records a failed request with method/path context, tolerating
+// a nil request (some call sites are in closures without a request in scope).
+func (s *Server) logRequestError(r *http.Request, err error) {
 	method, path := "", ""
 	if r != nil {
 		method, path = r.Method, r.URL.Path
 	}
 	slog.Error("request failed", "method", method, "path", path, "error", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

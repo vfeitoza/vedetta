@@ -140,7 +140,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	}
 	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverErrorText(w, r, err)
 		return
 	}
 
@@ -206,7 +206,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 	id := r.PathValue("id")
 	event, err := s.db.GetEventByID(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverErrorText(w, r, err)
 		return
 	}
 

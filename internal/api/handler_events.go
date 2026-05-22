@@ -321,7 +321,7 @@ func (s *Server) IdentifyEvent(w http.ResponseWriter, r *http.Request, id string
 
 	embedding, err := s.objectEmbedder.Embed(img, event.Box)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "embedding failed: " + err.Error()})
+		s.serverErrorMsg(w, r, err, "embedding failed")
 		return
 	}
 
