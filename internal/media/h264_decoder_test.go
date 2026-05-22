@@ -1,10 +1,29 @@
 package media
 
 import (
+	"syscall"
 	"testing"
 
 	openh264 "github.com/y9o/go-openh264"
 )
+
+// offHeapPlanes returns three slices carved out of a single anonymous mmap
+// region, mimicking the libopenh264-owned (off-heap, non-Go-managed) plane
+// buffers that frameFromDecoded copies from in production. Using off-heap
+// memory keeps the test faithful and lets it run under -d=checkptr: the
+// uintptr round-trip in frameFromDecoded is only flagged when it lands on a
+// Go-heap object, which a real decoder buffer never is. The region is
+// unmapped on test cleanup.
+func offHeapPlanes(t *testing.T, yLen, cLen int) [3][]byte {
+	t.Helper()
+	region, err := syscall.Mmap(-1, 0, yLen+2*cLen,
+		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
+	if err != nil {
+		t.Fatalf("mmap: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Munmap(region) })
+	return [3][]byte{region[:yLen], region[yLen : yLen+cLen], region[yLen+cLen : yLen+2*cLen]}
+}
 
 // bufInfoWith builds an SBufferInfo whose reported system-buffer geometry is
 // exactly w/h/yStride/cStride, mirroring what OpenH264 fills in on a decoded
@@ -26,12 +45,16 @@ func TestFrameFromDecodedCopiesValidFrame(t *testing.T) {
 	yLen := yStride * h
 	cLen := cStride * (h / 2)
 
-	dst := [3][]byte{make([]byte, yLen), make([]byte, cLen), make([]byte, cLen)}
-	for i := range dst[0] {
-		dst[0][i] = byte(i + 1)
+	// Off-heap planes mirror the libopenh264-owned buffers; keep the Y backing
+	// slice separately since frameFromDecoded clears *dst, so the aliasing
+	// check below must mutate the original buffer, not dst[0].
+	dst := offHeapPlanes(t, yLen, cLen)
+	yBacking := dst[0]
+	for i := range yBacking {
+		yBacking[i] = byte(i + 1)
 	}
 
-	img := frameFromDecoded(dst, bufInfoWith(w, h, yStride, cStride))
+	img := frameFromDecoded(&dst, bufInfoWith(w, h, yStride, cStride))
 	if img == nil {
 		t.Fatal("frameFromDecoded returned nil for a valid frame")
 	}
@@ -45,7 +68,7 @@ func TestFrameFromDecodedCopiesValidFrame(t *testing.T) {
 		t.Fatalf("Y plane not copied correctly: len=%d first=%d last=%d", len(img.Y), img.Y[0], img.Y[len(img.Y)-1])
 	}
 	// Must be a Go-owned copy, not an alias of the cgo-backed input.
-	dst[0][0] = 0xFF
+	yBacking[0] = 0xFF
 	if img.Y[0] == 0xFF {
 		t.Fatal("Y plane aliases the decoder buffer; mutation leaked into the returned frame")
 	}
@@ -61,7 +84,7 @@ func TestFrameFromDecodedRejectsGeometryLargerThanBuffer(t *testing.T) {
 	// Buffers sized for a 4x4 frame, but the decoder reports 64x64.
 	dst := [3][]byte{make([]byte, 16), make([]byte, 4), make([]byte, 4)}
 
-	if img := frameFromDecoded(dst, bufInfoWith(64, 64, 64, 32)); img != nil {
+	if img := frameFromDecoded(&dst, bufInfoWith(64, 64, 64, 32)); img != nil {
 		t.Fatalf("expected nil for geometry exceeding buffer length, got %v", img.Rect)
 	}
 }
@@ -70,8 +93,6 @@ func TestFrameFromDecodedRejectsGeometryLargerThanBuffer(t *testing.T) {
 // than the frame) must be rejected before it can produce an image.YCbCr that
 // out-of-bounds-indexes in a pure-Go consumer.
 func TestFrameFromDecodedRejectsDegenerateGeometry(t *testing.T) {
-	big := [3][]byte{make([]byte, 1<<20), make([]byte, 1<<20), make([]byte, 1<<20)}
-
 	cases := []struct {
 		name                       string
 		w, h, yStride, cStride int32
@@ -83,7 +104,10 @@ func TestFrameFromDecodedRejectsDegenerateGeometry(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if img := frameFromDecoded(big, bufInfoWith(c.w, c.h, c.yStride, c.cStride)); img != nil {
+			// Fresh non-nil planes per case: frameFromDecoded clears *dst, and
+			// we want the geometry check to reject, not the nil-plane check.
+			big := [3][]byte{make([]byte, 1<<20), make([]byte, 1<<20), make([]byte, 1<<20)}
+			if img := frameFromDecoded(&big, bufInfoWith(c.w, c.h, c.yStride, c.cStride)); img != nil {
 				t.Fatalf("expected nil for %s, got %v", c.name, img.Rect)
 			}
 		})
@@ -93,7 +117,8 @@ func TestFrameFromDecodedRejectsDegenerateGeometry(t *testing.T) {
 // A nil plane (OpenH264 produced no frame) is not an error - it just means
 // "need more data"; the helper returns nil without touching the slices.
 func TestFrameFromDecodedNilPlane(t *testing.T) {
-	if img := frameFromDecoded([3][]byte{nil, nil, nil}, bufInfoWith(4, 4, 4, 2)); img != nil {
+	dst := [3][]byte{nil, nil, nil}
+	if img := frameFromDecoded(&dst, bufInfoWith(4, 4, 4, 2)); img != nil {
 		t.Fatal("expected nil when no plane was produced")
 	}
 }

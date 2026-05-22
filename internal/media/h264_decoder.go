@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"unsafe"
 
 	openh264 "github.com/y9o/go-openh264"
 )
@@ -199,24 +200,47 @@ func (d *H264Decoder) Decode(nalData []byte) *image.YCbCr {
 		return nil
 	}
 
-	return frameFromDecoded(dst, &bufInfo)
+	return frameFromDecoded(&dst, &bufInfo)
 }
 
 // frameFromDecoded copies OpenH264's decoded planes into Go-owned buffers,
 // validating the decoder-reported geometry against the actual length of the
 // cgo-backed plane slices first.
 //
+// GC safety: the dst slice headers point into memory owned by OpenH264 (the
+// library mallocs the plane buffers even in the purego/dlopen build). Holding
+// such a foreign address in a GC-traced slice header lets Go's concurrent GC
+// run span lookups on it; if the address collides with a Go heap arena, the GC
+// mis-marks a real object and corrupts the heap. So the first thing we do is
+// lift each plane to an opaque (uintptr, len) pair and clear *dst, after which
+// no foreign pointer is live in any GC-scanned word across the allocations
+// below. The bytes are read back through a slice materialized only as the
+// immediate argument to copy (lowered to a non-preemptible memmove), so the
+// transient foreign pointer is never observable at a GC safepoint.
+//
 // OpenH264 can hand back a frame whose reported stride*height exceeds the
 // plane buffer it actually allocated - a transitional or corrupt frame, e.g.
 // a mid-stream resolution change while error concealment is active. Slicing
-// dst[i][:stride*h] and copying it then reads far past the decoder-owned
-// buffer into foreign heap memory across the cgo boundary; that read can
-// fault and, worse, the bogus geometry propagates into a *image.YCbCr that
-// out-of-bounds-indexes in pure-Go consumers. Rejecting such a frame (return
-// nil = "no frame, need more data") is always safe; a real dropped frame is
-// invisible next to a heap fault.
-func frameFromDecoded(dst [3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr {
-	if dst[0] == nil || dst[1] == nil || dst[2] == nil {
+// past the decoder-owned buffer and copying it then reads far into foreign
+// memory across the cgo boundary; that read can fault and, worse, the bogus
+// geometry propagates into a *image.YCbCr that out-of-bounds-indexes in
+// pure-Go consumers. Rejecting such a frame (return nil = "no frame, need more
+// data") is always safe; a real dropped frame is invisible next to a heap
+// fault.
+func frameFromDecoded(dst *[3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr {
+	var (
+		planePtr [3]uintptr
+		planeLen [3]int
+	)
+	for i := range dst {
+		planePtr[i] = uintptr(unsafe.Pointer(unsafe.SliceData(dst[i]))) //nolint:govet // address held as uintptr so the GC never traces library-owned memory
+		planeLen[i] = len(dst[i])
+	}
+	// Drop the C-backed slice headers from the GC-scanned frame before any
+	// allocation below can trigger a garbage collection.
+	*dst = [3][]byte{}
+
+	if planePtr[0] == 0 || planePtr[1] == 0 || planePtr[2] == 0 {
 		return nil
 	}
 
@@ -237,7 +261,7 @@ func frameFromDecoded(dst [3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr
 
 	// The reported planes must fit within the buffers OpenH264 returned.
 	if yLen <= 0 || cLen <= 0 ||
-		yLen > len(dst[0]) || cLen > len(dst[1]) || cLen > len(dst[2]) {
+		yLen > planeLen[0] || cLen > planeLen[1] || cLen > planeLen[2] {
 		return nil
 	}
 
@@ -245,9 +269,9 @@ func frameFromDecoded(dst [3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr
 	cb := make([]byte, cLen)
 	cr := make([]byte, cLen)
 
-	copy(y, dst[0][:yLen])
-	copy(cb, dst[1][:cLen])
-	copy(cr, dst[2][:cLen])
+	copyFromCPlane(y, planePtr[0], yLen)
+	copyFromCPlane(cb, planePtr[1], cLen)
+	copyFromCPlane(cr, planePtr[2], cLen)
 
 	return &image.YCbCr{
 		Y:              y,
@@ -258,6 +282,15 @@ func frameFromDecoded(dst [3][]byte, bufInfo *openh264.SBufferInfo) *image.YCbCr
 		SubsampleRatio: image.YCbCrSubsampleRatio420,
 		Rect:           image.Rect(0, 0, w, h),
 	}
+}
+
+// copyFromCPlane copies n bytes from a library-owned buffer (addressed by a
+// uintptr, never a GC-traced pointer) into a Go-owned slice. The source slice
+// header is materialized only as the immediate argument to copy, which lowers
+// to a non-preemptible memmove, so the foreign address is never live at a GC
+// safepoint and never stored where the GC could trace it.
+func copyFromCPlane(dst []byte, src uintptr, n int) {
+	copy(dst, unsafe.Slice((*byte)(unsafe.Pointer(src)), n)) //nolint:govet // address held as uintptr; the slice is transient and consumed by memmove
 }
 
 // Flush retrieves any buffered frame from the decoder without feeding new data.
@@ -274,7 +307,7 @@ func (d *H264Decoder) Flush() *image.YCbCr {
 		return nil
 	}
 
-	return frameFromDecoded(dst, &bufInfo)
+	return frameFromDecoded(&dst, &bufInfo)
 }
 
 // Close releases the decoder resources.
