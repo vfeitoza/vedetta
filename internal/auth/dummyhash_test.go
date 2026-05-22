@@ -42,6 +42,37 @@ func TestDummyHashMatchesUserCostDefault(t *testing.T) {
 	}
 }
 
+func TestDummyHashRefreshesAfterReload(t *testing.T) {
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const highCost = bcrypt.DefaultCost + 2
+	h1, _ := bcrypt.GenerateFromPassword([]byte("secret"), highCost)
+	if err := db.SaveAuthUser("admin", string(h1)); err != nil {
+		t.Fatalf("SaveAuthUser: %v", err)
+	}
+
+	c := NewFromDB(config.AuthConfig{}, config.APIConfig{}, db)
+	t.Cleanup(c.Close)
+	if got, _ := bcrypt.Cost(c.dummyHash); got != highCost {
+		t.Fatalf("initial dummy hash cost = %d, want %d", got, highCost)
+	}
+
+	// Simulate a password change lowering the stored hash cost, then reload.
+	h2, _ := bcrypt.GenerateFromPassword([]byte("secret2"), bcrypt.DefaultCost)
+	if err := db.SaveAuthUser("admin", string(h2)); err != nil {
+		t.Fatalf("SaveAuthUser: %v", err)
+	}
+	c.reloadUsers()
+
+	if got, _ := bcrypt.Cost(c.dummyHash); got != bcrypt.DefaultCost {
+		t.Fatalf("dummy hash cost after reload = %d, want %d (not refreshed)", got, bcrypt.DefaultCost)
+	}
+}
+
 func TestDummyHashMatchesUserCostNonDefault(t *testing.T) {
 	const userCost = bcrypt.DefaultCost + 2
 	c := newCheckerWithUserCost(t, userCost)

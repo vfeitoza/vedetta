@@ -144,6 +144,7 @@ func (c *Checker) reloadUsers() {
 	for _, u := range dbUsers {
 		c.users[u.Username] = []byte(u.PasswordHash)
 	}
+	c.dummyHash = makeDummyHash(c.users)
 }
 
 func ValidateConfig(cfg config.AuthConfig) error {
@@ -213,6 +214,7 @@ func (c *Checker) UpdatePassword(username string, hash []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.users[username] = hash
+	c.dummyHash = makeDummyHash(c.users)
 }
 
 // ChangePassword verifies the current password and updates to the new one.
@@ -627,9 +629,16 @@ func makeDummyHash(users map[string][]byte) []byte {
 }
 
 func (c *Checker) verify(user, pass string) bool {
+	// Snapshot the hash and dummy under the lock, then run the expensive bcrypt
+	// compare without holding it: reloadUsers/UpdatePassword replace these
+	// fields (never mutate in place), so a copied reference stays valid, and we
+	// avoid serializing every login behind one another's bcrypt cost.
+	c.mu.Lock()
 	hash, ok := c.users[user]
+	dummy := c.dummyHash
+	c.mu.Unlock()
 	if !ok {
-		_ = bcrypt.CompareHashAndPassword(c.dummyHash, []byte(pass))
+		_ = bcrypt.CompareHashAndPassword(dummy, []byte(pass))
 		return false
 	}
 	return bcrypt.CompareHashAndPassword(hash, []byte(pass)) == nil
