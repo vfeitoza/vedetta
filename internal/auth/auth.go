@@ -219,7 +219,7 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 		slog.Warn("auth failed", "ip", remoteIP, "username", user)
 		return false
 	}
-	c.clearLoginFailures(remoteIP, user)
+	c.completeLoginSuccess(remoteIP, user)
 	return true
 }
 
@@ -236,7 +236,7 @@ func loginFailureKey(remoteIP, username string) string {
 //
 //   - The per-account bucket (IP, username) stops sustained password guessing
 //     against one account. It is incremented only on an actual failure (so a
-//     legitimate user recovers via clearLoginFailures on success).
+//     legitimate user recovers via completeLoginSuccess on success).
 //   - The aggregate per-IP bucket bounds a username-spraying flood that would
 //     never fill any single per-account bucket. It is incremented here, under
 //     the same lock as the limit check and before bcrypt runs, so a concurrent
@@ -259,17 +259,39 @@ func (c *Checker) reserveLoginAttempt(remoteIP, username string) bool {
 }
 
 // recordLoginFailure increments the per-account bucket after a failed credential
-// check. The aggregate per-IP slot was already reserved by reserveLoginAttempt.
+// check. The aggregate per-IP slot was already reserved by reserveLoginAttempt
+// and is deliberately retained on failure so failed attempts count toward the
+// per-IP cap.
 func (c *Checker) recordLoginFailure(remoteIP, username string) {
 	c.recordFailure(c.loginFailures, loginFailureKey(remoteIP, username))
 }
 
-// clearLoginFailures resets only the per-account bucket on a successful login.
-// The aggregate per-IP counter is deliberately left intact: clearing it would
-// let any holder of a valid account wipe the brute-force protection for every
-// other account on the same IP simply by logging in.
-func (c *Checker) clearLoginFailures(remoteIP, username string) {
-	c.clearFailures(c.loginFailures, loginFailureKey(remoteIP, username))
+// completeLoginSuccess finalizes a successful credential check: it clears the
+// per-account bucket so a legitimate user recovers, and releases the aggregate
+// per-IP slot reserved before the verify. Releasing on success means the per-IP
+// counter only ever holds failed and in-flight attempts, so a high-frequency
+// legitimate client (e.g. RTSP Basic Auth re-authenticating on every
+// DESCRIBE/SETUP) cannot exhaust the cap and lock out its own IP. The
+// per-account bucket is what protects against guessing a specific account, and
+// failed attempts still fill the per-IP cap to bound a spraying flood.
+func (c *Checker) completeLoginSuccess(remoteIP, username string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.loginFailures, loginFailureKey(remoteIP, username))
+	c.releaseLocked(c.ipFailures, remoteIP)
+}
+
+// releaseLocked rolls back one reserved attempt for key, removing the record
+// once it reaches zero. Caller must hold c.mu.
+func (c *Checker) releaseLocked(m map[string]*failureRecord, key string) {
+	rec, ok := m[key]
+	if !ok {
+		return
+	}
+	rec.count--
+	if rec.count <= 0 {
+		delete(m, key)
+	}
 }
 
 // ProxyAuthEnabled reports whether proxy authentication is configured.
@@ -333,7 +355,7 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 		slog.Warn("login failed", "ip", remoteIP, "username", user)
 		return nil, ErrInvalidCredentials
 	}
-	c.clearLoginFailures(remoteIP, user)
+	c.completeLoginSuccess(remoteIP, user)
 
 	sessionID, err := generateOpaqueToken(32)
 	if err != nil {
@@ -810,12 +832,6 @@ func (c *Checker) recordFailure(m map[string]*failureRecord, key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bumpLocked(m, key)
-}
-
-func (c *Checker) clearFailures(m map[string]*failureRecord, key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(m, key)
 }
 
 func (c *Checker) isTrustedProxy(raw string) bool {

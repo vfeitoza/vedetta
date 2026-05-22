@@ -152,6 +152,22 @@ func TestLoginAggregateCapHoldsUnderConcurrency(t *testing.T) {
 	}
 }
 
+// Check backs RTSP Basic Auth, which re-authenticates on every DESCRIBE/SETUP.
+// Successful checks must not consume the aggregate per-IP attempt cap, or many
+// legitimate RTSP sessions behind one NAT/proxy would lock the whole IP out
+// after maxIPFailures successful auths. Only failed and in-flight attempts may
+// hold an aggregate slot; a success releases it.
+func TestCheckSuccessDoesNotExhaustIPCap(t *testing.T) {
+	c := newTwoUserChecker(t)
+	const ip = "10.0.0.1"
+
+	for i := range maxIPFailures + 10 {
+		if !c.Check("alice", "secret", ip) {
+			t.Fatalf("successful check %d was rate limited; valid auth must not fill the IP cap", i)
+		}
+	}
+}
+
 // The same per-account scoping applies to Check (RTSP basic auth): a successful
 // check for one user must not clear another user's failure bucket on that IP.
 func TestCheckRateLimitNotResetByOtherAccountSuccess(t *testing.T) {
