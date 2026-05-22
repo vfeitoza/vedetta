@@ -206,17 +206,28 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 	if c == nil {
 		return true
 	}
-	if c.isRateLimited(c.loginFailures, remoteIP, maxFailures) {
-		slog.Warn("auth rate limited", "ip", remoteIP)
+	key := loginFailureKey(remoteIP, user)
+	if c.isRateLimited(c.loginFailures, key, maxFailures) {
+		slog.Warn("auth rate limited", "ip", remoteIP, "username", user)
 		return false
 	}
 	if !c.verify(user, pass) {
-		c.recordFailure(c.loginFailures, remoteIP)
+		c.recordFailure(c.loginFailures, key)
 		slog.Warn("auth failed", "ip", remoteIP, "username", user)
 		return false
 	}
-	c.clearFailures(c.loginFailures, remoteIP)
+	c.clearFailures(c.loginFailures, key)
 	return true
+}
+
+// loginFailureKey scopes the brute-force counter to a single (IP, username)
+// pair. Keying on the IP alone let any holder of a valid account reset the
+// limit for every other account on that IP simply by logging in, because a
+// successful login clears the bucket. Per-account scoping keeps a victim's
+// counter intact while still allowing a legitimate user to recover their own
+// bucket on success.
+func loginFailureKey(remoteIP, username string) string {
+	return remoteIP + "\x00" + username
 }
 
 // ProxyAuthEnabled reports whether proxy authentication is configured.
@@ -271,16 +282,17 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 	if c.db == nil {
 		return nil, ErrStorageUnavailable
 	}
-	if c.isRateLimited(c.loginFailures, remoteIP, maxFailures) {
+	key := loginFailureKey(remoteIP, user)
+	if c.isRateLimited(c.loginFailures, key, maxFailures) {
 		slog.Warn("login rate limited", "ip", remoteIP, "username", user)
 		return nil, ErrRateLimited
 	}
 	if !c.verify(user, pass) {
-		c.recordFailure(c.loginFailures, remoteIP)
+		c.recordFailure(c.loginFailures, key)
 		slog.Warn("login failed", "ip", remoteIP, "username", user)
 		return nil, ErrInvalidCredentials
 	}
-	c.clearFailures(c.loginFailures, remoteIP)
+	c.clearFailures(c.loginFailures, key)
 
 	sessionID, err := generateOpaqueToken(32)
 	if err != nil {
