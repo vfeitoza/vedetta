@@ -23,6 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.4.4](https://github.com/rvben/vedetta/compare/v0.4.3...v0.4.4) - 2026-05-22
+
+### Fixed
+
+- **media**: hold OpenH264-owned buffer addresses as uintptr to avoid GC heap corruption ([f6e269e](https://github.com/rvben/vedetta/commit/f6e269e2cacaed12f598085c5713be467f80b51a))
+
 ## [0.4.3](https://github.com/rvben/vedetta/compare/v0.4.2...v0.4.3) - 2026-05-19
 
 ### Added
