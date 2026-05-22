@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/rvben/vedetta/internal/config"
@@ -102,6 +103,52 @@ func TestLoginRateLimitCapsAggregatePerIP(t *testing.T) {
 	// with a fresh username or valid credentials.
 	if _, err := c.Login("alice", "secret", ip, "agent", false); err != ErrRateLimited {
 		t.Fatalf("IP should be rate limited after %d aggregate failures, got %v", maxIPFailures, err)
+	}
+}
+
+// The aggregate per-IP cap must hold under a concurrent flood, not just for
+// sequential attempts. If the limit check and the counter increment are not
+// atomic with respect to the bcrypt verify, a parallel burst can all pass the
+// pre-check before any failure is recorded, run bcrypt en masse, and blow past
+// the cap. The number of attempts that get past the reservation (i.e. actually
+// run the credential check) must be bounded by maxIPFailures.
+func TestLoginAggregateCapHoldsUnderConcurrency(t *testing.T) {
+	c := newTwoUserChecker(t)
+	const ip = "10.0.0.1"
+	const attempts = 200
+
+	var (
+		mu          sync.Mutex
+		gotPastCap  int
+		rateLimited int
+		wg          sync.WaitGroup
+	)
+	for i := range attempts {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			// Distinct usernames so no per-account bucket ever fills; only the
+			// aggregate per-IP cap can throttle this flood.
+			_, err := c.Login(fmt.Sprintf("spray-%d", n), "wrong", ip, "agent", false)
+			mu.Lock()
+			defer mu.Unlock()
+			switch err {
+			case ErrInvalidCredentials:
+				gotPastCap++
+			case ErrRateLimited:
+				rateLimited++
+			default:
+				t.Errorf("unexpected error: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if gotPastCap > maxIPFailures {
+		t.Fatalf("%d attempts ran the credential check, exceeding the per-IP cap of %d", gotPastCap, maxIPFailures)
+	}
+	if rateLimited == 0 {
+		t.Fatalf("expected some attempts to be rate limited under a flood of %d, got none", attempts)
 	}
 }
 

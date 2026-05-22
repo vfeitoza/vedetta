@@ -210,7 +210,7 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 	if c == nil {
 		return true
 	}
-	if c.loginRateLimited(remoteIP, user) {
+	if !c.reserveLoginAttempt(remoteIP, user) {
 		slog.Warn("auth rate limited", "ip", remoteIP, "username", user)
 		return false
 	}
@@ -229,29 +229,45 @@ func loginFailureKey(remoteIP, username string) string {
 	return remoteIP + "\x00" + username
 }
 
-// loginRateLimited reports whether either the per-account bucket (IP, username)
-// or the aggregate per-IP bucket has reached its limit. The per-account bucket
-// stops password guessing against a specific account; the per-IP bucket bounds
-// a username-spraying flood that would otherwise never fill any single
-// per-account bucket and could exhaust CPU on bcrypt and memory on the failure
-// map.
-func (c *Checker) loginRateLimited(remoteIP, username string) bool {
-	return c.isRateLimited(c.loginFailures, loginFailureKey(remoteIP, username), maxFailures) ||
-		c.isRateLimited(c.ipFailures, remoteIP, maxIPFailures)
+// reserveLoginAttempt atomically enforces both brute-force limits and, when the
+// attempt is allowed, reserves an aggregate per-IP slot before the caller runs
+// the expensive bcrypt verify. It returns false (and reserves nothing) when the
+// attempt is rate limited.
+//
+//   - The per-account bucket (IP, username) stops sustained password guessing
+//     against one account. It is incremented only on an actual failure (so a
+//     legitimate user recovers via clearLoginFailures on success).
+//   - The aggregate per-IP bucket bounds a username-spraying flood that would
+//     never fill any single per-account bucket. It is incremented here, under
+//     the same lock as the limit check and before bcrypt runs, so a concurrent
+//     burst cannot all pass the check and then run bcrypt en masse: at most
+//     maxIPFailures attempts per window ever reach the verify step. It counts
+//     attempts rather than failures and is never cleared on success, so it
+//     cannot be reset by logging in to a second account; it expires on its own
+//     after failureWindow.
+func (c *Checker) reserveLoginAttempt(remoteIP, username string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.countLocked(c.loginFailures, loginFailureKey(remoteIP, username)) >= maxFailures {
+		return false
+	}
+	if c.countLocked(c.ipFailures, remoteIP) >= maxIPFailures {
+		return false
+	}
+	c.bumpLocked(c.ipFailures, remoteIP)
+	return true
 }
 
-// recordLoginFailure increments both the per-account and aggregate per-IP
-// counters for a failed credential check.
+// recordLoginFailure increments the per-account bucket after a failed credential
+// check. The aggregate per-IP slot was already reserved by reserveLoginAttempt.
 func (c *Checker) recordLoginFailure(remoteIP, username string) {
 	c.recordFailure(c.loginFailures, loginFailureKey(remoteIP, username))
-	c.recordFailure(c.ipFailures, remoteIP)
 }
 
 // clearLoginFailures resets only the per-account bucket on a successful login.
 // The aggregate per-IP counter is deliberately left intact: clearing it would
 // let any holder of a valid account wipe the brute-force protection for every
-// other account on the same IP simply by logging in. The per-IP counter
-// expires on its own after failureWindow.
+// other account on the same IP simply by logging in.
 func (c *Checker) clearLoginFailures(remoteIP, username string) {
 	c.clearFailures(c.loginFailures, loginFailureKey(remoteIP, username))
 }
@@ -308,7 +324,7 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 	if c.db == nil {
 		return nil, ErrStorageUnavailable
 	}
-	if c.loginRateLimited(remoteIP, user) {
+	if !c.reserveLoginAttempt(remoteIP, user) {
 		slog.Warn("login rate limited", "ip", remoteIP, "username", user)
 		return nil, ErrRateLimited
 	}
@@ -762,28 +778,38 @@ func (c *Checker) expireFailureMap(m map[string]*failureRecord) {
 func (c *Checker) isRateLimited(m map[string]*failureRecord, key string, limit int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.countLocked(m, key) >= limit
+}
 
+// countLocked returns the current failure count for key, pruning the record if
+// its window has elapsed. Caller must hold c.mu.
+func (c *Checker) countLocked(m map[string]*failureRecord, key string) int {
 	rec, ok := m[key]
 	if !ok {
-		return false
+		return 0
 	}
 	if time.Since(rec.firstAt) > failureWindow {
 		delete(m, key)
-		return false
+		return 0
 	}
-	return rec.count >= limit
+	return rec.count
 }
 
-func (c *Checker) recordFailure(m map[string]*failureRecord, key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+// bumpLocked increments the failure count for key, starting a fresh window when
+// the record is absent or expired. Caller must hold c.mu.
+func (c *Checker) bumpLocked(m map[string]*failureRecord, key string) {
 	rec, ok := m[key]
 	if !ok || time.Since(rec.firstAt) > failureWindow {
 		m[key] = &failureRecord{count: 1, firstAt: time.Now()}
 		return
 	}
 	rec.count++
+}
+
+func (c *Checker) recordFailure(m map[string]*failureRecord, key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bumpLocked(m, key)
 }
 
 func (c *Checker) clearFailures(m map[string]*failureRecord, key string) {
