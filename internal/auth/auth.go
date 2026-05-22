@@ -210,7 +210,8 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 	if c == nil {
 		return true
 	}
-	if !c.reserveLoginAttempt(remoteIP, user) {
+	ok, reservedAt := c.reserveLoginAttempt(remoteIP, user)
+	if !ok {
 		slog.Warn("auth rate limited", "ip", remoteIP, "username", user)
 		return false
 	}
@@ -219,7 +220,7 @@ func (c *Checker) Check(user, pass, remoteIP string) bool {
 		slog.Warn("auth failed", "ip", remoteIP, "username", user)
 		return false
 	}
-	c.completeLoginSuccess(remoteIP, user)
+	c.completeLoginSuccess(remoteIP, user, reservedAt)
 	return true
 }
 
@@ -245,17 +246,20 @@ func loginFailureKey(remoteIP, username string) string {
 //     attempts rather than failures and is never cleared on success, so it
 //     cannot be reset by logging in to a second account; it expires on its own
 //     after failureWindow.
-func (c *Checker) reserveLoginAttempt(remoteIP, username string) bool {
+//
+// On success it returns the window (firstAt) the per-IP slot was reserved
+// against so completeLoginSuccess can release it from the correct window.
+func (c *Checker) reserveLoginAttempt(remoteIP, username string) (bool, time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.countLocked(c.loginFailures, loginFailureKey(remoteIP, username)) >= maxFailures {
-		return false
+		return false, time.Time{}
 	}
 	if c.countLocked(c.ipFailures, remoteIP) >= maxIPFailures {
-		return false
+		return false, time.Time{}
 	}
 	c.bumpLocked(c.ipFailures, remoteIP)
-	return true
+	return true, c.ipFailures[remoteIP].firstAt
 }
 
 // recordLoginFailure increments the per-account bucket after a failed credential
@@ -274,18 +278,21 @@ func (c *Checker) recordLoginFailure(remoteIP, username string) {
 // DESCRIBE/SETUP) cannot exhaust the cap and lock out its own IP. The
 // per-account bucket is what protects against guessing a specific account, and
 // failed attempts still fill the per-IP cap to bound a spraying flood.
-func (c *Checker) completeLoginSuccess(remoteIP, username string) {
+func (c *Checker) completeLoginSuccess(remoteIP, username string, reservedAt time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.loginFailures, loginFailureKey(remoteIP, username))
-	c.releaseLocked(c.ipFailures, remoteIP)
+	c.releaseLocked(c.ipFailures, remoteIP, reservedAt)
 }
 
 // releaseLocked rolls back one reserved attempt for key, removing the record
-// once it reaches zero. Caller must hold c.mu.
-func (c *Checker) releaseLocked(m map[string]*failureRecord, key string) {
+// once it reaches zero. It only acts when the record's window still matches the
+// one the caller reserved against (reservedAt): if the window rolled over while
+// the verify ran, the reserved slot already expired with the old record and a
+// fresh window's counter must not be decremented. Caller must hold c.mu.
+func (c *Checker) releaseLocked(m map[string]*failureRecord, key string, reservedAt time.Time) {
 	rec, ok := m[key]
-	if !ok {
+	if !ok || !rec.firstAt.Equal(reservedAt) {
 		return
 	}
 	rec.count--
@@ -346,7 +353,8 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 	if c.db == nil {
 		return nil, ErrStorageUnavailable
 	}
-	if !c.reserveLoginAttempt(remoteIP, user) {
+	ok, reservedAt := c.reserveLoginAttempt(remoteIP, user)
+	if !ok {
 		slog.Warn("login rate limited", "ip", remoteIP, "username", user)
 		return nil, ErrRateLimited
 	}
@@ -355,7 +363,7 @@ func (c *Checker) Login(user, pass, remoteIP, userAgent string, remember bool) (
 		slog.Warn("login failed", "ip", remoteIP, "username", user)
 		return nil, ErrInvalidCredentials
 	}
-	c.completeLoginSuccess(remoteIP, user)
+	c.completeLoginSuccess(remoteIP, user, reservedAt)
 
 	sessionID, err := generateOpaqueToken(32)
 	if err != nil {

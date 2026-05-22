@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/storage"
@@ -149,6 +150,53 @@ func TestLoginAggregateCapHoldsUnderConcurrency(t *testing.T) {
 	}
 	if rateLimited == 0 {
 		t.Fatalf("expected some attempts to be rate limited under a flood of %d, got none", attempts)
+	}
+}
+
+// A success releases the aggregate per-IP slot it reserved, but only within the
+// window it reserved against. If the window rolled over while the slow bcrypt
+// verify ran (the old record expired and a fresh one was created for new
+// attempts), the release must not decrement the fresh window's counter, which
+// would undercount the cap and weaken the throttle at window boundaries.
+func TestReleaseDoesNotDecrementNewerWindow(t *testing.T) {
+	c := newTwoUserChecker(t)
+	const ip = "10.0.0.1"
+
+	// A fresh window record exists (3 attempts), created after this success had
+	// reserved against an older, now-expired window.
+	fresh := time.Now()
+	c.mu.Lock()
+	c.ipFailures[ip] = &failureRecord{count: 3, firstAt: fresh}
+	c.mu.Unlock()
+
+	staleReservation := fresh.Add(-2 * failureWindow)
+	c.completeLoginSuccess(ip, "alice", staleReservation)
+
+	c.mu.Lock()
+	got := c.ipFailures[ip]
+	c.mu.Unlock()
+	if got == nil || got.count != 3 {
+		t.Fatalf("release against a stale window must not touch the fresh record; got %+v", got)
+	}
+}
+
+// Within the same window, a success releases exactly the slot it reserved.
+func TestReleaseDecrementsMatchingWindow(t *testing.T) {
+	c := newTwoUserChecker(t)
+	const ip = "10.0.0.1"
+
+	now := time.Now()
+	c.mu.Lock()
+	c.ipFailures[ip] = &failureRecord{count: 2, firstAt: now}
+	c.mu.Unlock()
+
+	c.completeLoginSuccess(ip, "alice", now)
+
+	c.mu.Lock()
+	got := c.ipFailures[ip]
+	c.mu.Unlock()
+	if got == nil || got.count != 1 {
+		t.Fatalf("matching-window release should decrement to 1; got %+v", got)
 	}
 }
 
