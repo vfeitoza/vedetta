@@ -50,6 +50,16 @@ test('same-origin absolute URL collapses to its path', () => {
   assert.equal(safeRedirectPath(ORIGIN + '/settings', ORIGIN), '/settings');
 });
 
+// Dot-segment normalization can turn a same-origin input into a pathname that
+// begins with // (a network-path reference). Returning that would still
+// redirect off-site when assigned to location.href, so it must be rejected.
+test('dot-segment normalization to a protocol-relative path is rejected', () => {
+  assert.equal(safeRedirectPath('/.//evil.com', ORIGIN), '/');
+  assert.equal(safeRedirectPath('/foo/..//evil.com', ORIGIN), '/');
+  assert.equal(safeRedirectPath('/%2e%2e//evil.com', ORIGIN), '/');
+  assert.equal(safeRedirectPath('/%2e//evil.com', ORIGIN), '/');
+});
+
 test('garbage that cannot be parsed falls back to root', () => {
   // A bare value with no scheme resolves against origin and stays same-origin,
   // so this asserts the relative-resolution branch does not throw.

@@ -23,7 +23,15 @@ function safeRedirectPath(raw, origin) {
   if (resolved.origin !== origin) {
     return '/';
   }
-  return resolved.pathname + resolved.search + resolved.hash;
+  var path = resolved.pathname + resolved.search + resolved.hash;
+  // Dot-segment normalization (e.g. '/.//evil.com', '/foo/..//evil.com') can
+  // yield a same-origin URL whose pathname begins with '//'. That is a
+  // network-path reference: assigning it to location.href is treated as
+  // protocol-relative and redirects off-site, so reject it.
+  if (path.charAt(0) !== '/' || path.charAt(1) === '/') {
+    return '/';
+  }
+  return path;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
