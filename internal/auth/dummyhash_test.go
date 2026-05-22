@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/rvben/vedetta/internal/config"
@@ -71,6 +72,55 @@ func TestDummyHashRefreshesAfterReload(t *testing.T) {
 	if got, _ := bcrypt.Cost(c.dummyHash); got != bcrypt.DefaultCost {
 		t.Fatalf("dummy hash cost after reload = %d, want %d (not refreshed)", got, bcrypt.DefaultCost)
 	}
+}
+
+// TestDummyHashConcurrentReloadAndUpdate guards against dummy-hash computation
+// iterating the published user map: a concurrent reload + password update +
+// verify must not trigger "concurrent map iteration and map write" or race.
+func TestDummyHashConcurrentReloadAndUpdate(t *testing.T) {
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	h, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err := db.SaveAuthUser("admin", string(h)); err != nil {
+		t.Fatalf("SaveAuthUser: %v", err)
+	}
+	c := NewFromDB(config.AuthConfig{}, config.APIConfig{}, db)
+	t.Cleanup(c.Close)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				c.reloadUsers()
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				c.UpdatePassword("admin", h)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				_ = c.verify("admin", "secret")
+				_ = c.verify("nobody", "secret")
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestDummyHashMatchesUserCostNonDefault(t *testing.T) {
