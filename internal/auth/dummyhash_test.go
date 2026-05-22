@@ -123,6 +123,22 @@ func TestDummyHashConcurrentReloadAndUpdate(t *testing.T) {
 	wg.Wait()
 }
 
+// makeDummyHash must skip malformed/placeholder hashes and adopt the cost of
+// the first readable one, otherwise a leading bad hash would force DefaultCost
+// and reintroduce the timing gap for non-default-cost user sets.
+func TestMakeDummyHashSkipsUnreadable(t *testing.T) {
+	const cost = bcrypt.DefaultCost + 2
+	valid, _ := bcrypt.GenerateFromPassword([]byte("x"), cost)
+	d := makeDummyHash([][]byte{[]byte("not-a-bcrypt-hash"), valid})
+	got, err := bcrypt.Cost(d)
+	if err != nil {
+		t.Fatalf("bcrypt.Cost: %v", err)
+	}
+	if got != cost {
+		t.Fatalf("dummy hash cost = %d, want %d (should skip the malformed first hash)", got, cost)
+	}
+}
+
 func TestDummyHashMatchesUserCostNonDefault(t *testing.T) {
 	const userCost = bcrypt.DefaultCost + 2
 	c := newCheckerWithUserCost(t, userCost)

@@ -91,10 +91,12 @@ func New(authCfg config.AuthConfig, apiCfg config.APIConfig, db *storage.DB) *Ch
 		proxyHeader:    authCfg.Proxy.Header,
 	}
 
-	for _, user := range authCfg.Users {
+	samples := make([][]byte, len(authCfg.Users))
+	for i, user := range authCfg.Users {
 		c.users[user.Username] = []byte(user.PasswordHash)
+		samples[i] = []byte(user.PasswordHash)
 	}
-	c.dummyHash = makeDummyHash([]byte(authCfg.Users[0].PasswordHash))
+	c.dummyHash = makeDummyHash(samples)
 
 	go c.cleanupLoop()
 	slog.Info("authentication enabled", "users", len(c.users))
@@ -144,11 +146,11 @@ func (c *Checker) reloadUsers() {
 	for _, u := range dbUsers {
 		users[u.Username] = []byte(u.PasswordHash)
 	}
-	// Grab a representative hash from the slice before publishing the map, so
-	// the dummy-hash cost is read from a value no other goroutine can mutate.
-	var sample []byte
-	if len(dbUsers) > 0 {
-		sample = []byte(dbUsers[0].PasswordHash)
+	// Collect candidate hashes from the slice before publishing the map, so the
+	// dummy-hash cost is read from values no other goroutine can mutate.
+	samples := make([][]byte, len(dbUsers))
+	for i, u := range dbUsers {
+		samples[i] = []byte(u.PasswordHash)
 	}
 
 	// Publish the new credentials immediately so rotated or removed passwords
@@ -160,7 +162,7 @@ func (c *Checker) reloadUsers() {
 	c.users = users
 	c.mu.Unlock()
 
-	dummy := makeDummyHash(sample)
+	dummy := makeDummyHash(samples)
 
 	c.mu.Lock()
 	c.dummyHash = dummy
@@ -238,7 +240,7 @@ func (c *Checker) UpdatePassword(username string, hash []byte) {
 	c.users[username] = hash
 	c.mu.Unlock()
 
-	dummy := makeDummyHash(hash)
+	dummy := makeDummyHash([][]byte{hash})
 
 	c.mu.Lock()
 	c.dummyHash = dummy
@@ -637,16 +639,20 @@ func (c *Checker) RequestIsSecure(r *http.Request) bool {
 }
 
 // makeDummyHash builds the constant fake hash that verify() compares against
-// for unknown usernames. Its bcrypt cost matches sample (a real user hash) so
-// the unknown-user comparison takes the same time as a real one; a cheaper
-// dummy would make the unknown-user path measurably faster and leak whether a
-// username exists. sample may be nil/empty (no users), falling back to
-// DefaultCost. Taking a single representative hash rather than a map avoids
-// iterating a map that may be concurrently mutated.
-func makeDummyHash(sample []byte) []byte {
+// for unknown usernames. Its bcrypt cost matches the first readable hash in
+// samples (real user hashes) so the unknown-user comparison takes the same time
+// as a real one; a cheaper dummy would make the unknown-user path measurably
+// faster and leak whether a username exists. Malformed/placeholder hashes are
+// skipped; an empty or all-unreadable samples slice falls back to DefaultCost.
+// Callers pass a private slice (never the live user map) so concurrent password
+// updates cannot race the scan.
+func makeDummyHash(samples [][]byte) []byte {
 	cost := bcrypt.DefaultCost
-	if k, err := bcrypt.Cost(sample); err == nil {
-		cost = k
+	for _, s := range samples {
+		if k, err := bcrypt.Cost(s); err == nil {
+			cost = k
+			break
+		}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte("vedetta-not-a-real-password"), cost)
 	if err != nil {
