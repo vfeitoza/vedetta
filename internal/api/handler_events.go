@@ -15,6 +15,7 @@ import (
 
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/safepath"
 	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/storage"
 )
@@ -113,7 +114,7 @@ func (s *Server) GetEventSnapshot(w http.ResponseWriter, r *http.Request, id str
 
 	// Serve raw file for downloads or if ?raw=1
 	if params.Download != nil || params.Raw != nil {
-		filename := fmt.Sprintf("%s_%s.jpg", event.ID, event.Label)
+		filename := safepath.FileComponent(event.ID+"_"+event.Label) + ".jpg"
 		if params.Download != nil {
 			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		}
@@ -161,7 +162,7 @@ func (s *Server) GetEventClip(w http.ResponseWriter, r *http.Request, id string)
 	// makes the browser treat the response as a file download and the
 	// video element stays black on iOS Safari.
 	if r.URL.Query().Get("download") == "1" {
-		filename := fmt.Sprintf("%s_%s.mp4", event.ID, event.Label)
+		filename := safepath.FileComponent(event.ID+"_"+event.Label) + ".mp4"
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	}
 	http.ServeFile(w, r, event.ClipPath)
