@@ -13,7 +13,7 @@ type principalContextKey struct{}
 
 func authMiddleware(s *Server, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		applySecurityHeaders(w)
+		applySecurityHeaders(w, s.requestIsSecure(r))
 
 		if s.auth != nil && !s.auth.RequestIsSecure(r) {
 			writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "https required"})
@@ -64,18 +64,36 @@ func authMiddleware(s *Server, next http.Handler) http.Handler {
 	})
 }
 
-func securityHeadersMiddleware(next http.Handler) http.Handler {
+func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		applySecurityHeaders(w)
+		applySecurityHeaders(w, s.requestIsSecure(r))
 		next.ServeHTTP(w, r)
 	})
 }
 
-func applySecurityHeaders(w http.ResponseWriter) {
+// requestIsSecure reports whether the client's connection to the service is
+// HTTPS. It consults the proxy-aware auth checker when one is configured and
+// otherwise falls back to the direct TLS state, so a request forwarded as
+// HTTPS by a trusted reverse proxy still counts as secure.
+func (s *Server) requestIsSecure(r *http.Request) bool {
+	if s.auth != nil {
+		return s.auth.RequestIsSecure(r)
+	}
+	return r.TLS != nil
+}
+
+// applySecurityHeaders sets the response security headers. Strict-Transport-
+// Security is emitted only for secure requests so that plain-HTTP LAN access is
+// left untouched; includeSubDomains and preload are intentionally omitted
+// because sibling subdomains may legitimately serve over HTTP.
+func applySecurityHeaders(w http.ResponseWriter, secure bool) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy())
+	if secure {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+	}
 }
 
 // isHealthProbePath reports whether r targets a health probe endpoint that

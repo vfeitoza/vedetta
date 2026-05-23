@@ -25,10 +25,17 @@ func contentSecurityPolicy() string {
 			"default-src 'self'",
 			"script-src " + strings.Join(sources, " "),
 			"script-src-attr 'none'",
+			// 'unsafe-inline' is retained for styles only: the dashboard relies on
+			// inline style="..." attributes across its pages, which CSP can only
+			// drop via a full refactor to classes. Inline scripts are already
+			// hash-pinned above, so the residual risk here is style injection, not
+			// script execution.
 			"style-src 'self' 'unsafe-inline'",
 			"img-src 'self' data: blob:",
 			"media-src 'self' data: blob:",
-			"connect-src 'self' ws: wss:",
+			// Same-origin covers the dashboard's WebSocket streams (ws:/wss: to the
+			// serving host); no wildcard scheme is needed.
+			"connect-src 'self'",
 			"worker-src 'self' blob:",
 			"frame-ancestors 'none'",
 			"object-src 'none'",

@@ -324,7 +324,7 @@ func (s *Server) Start() error {
 
 	var handler http.Handler
 	if s.setupMode {
-		handler = securityHeadersMiddleware(apiBodyLimitMiddleware(s.mux))
+		handler = s.securityHeadersMiddleware(apiBodyLimitMiddleware(s.mux))
 	} else {
 		handler = s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(s.mux)))
 	}
