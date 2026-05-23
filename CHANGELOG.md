@@ -24,6 +24,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.5.0](https://github.com/rvben/vedetta/compare/v0.4.4...v0.5.0) - 2026-05-23
+
+### Added
+
+- **api**: tighten CSP connect-src and add gated HSTS header ([71b8968](https://github.com/rvben/vedetta/commit/71b896812acec1e935e86f20320bfaead8cde37e))
+- **auth**: require admin scope for config-mutation endpoints ([bba544a](https://github.com/rvben/vedetta/commit/bba544a2f76f103197ccf80a0f8910e1d8f46047))
+- **webrtc**: make ICE servers configurable, default to none ([f47e8cf](https://github.com/rvben/vedetta/commit/f47e8cf22cccf6a767dce8f08a211f63ea91c97f))
+
+### Fixed
+
+- **api**: gate HSTS on actual transport, not exposure policy ([4c7bfd3](https://github.com/rvben/vedetta/commit/4c7bfd3de569a8095aaa2fde84e8bb3a79e17335))
+- **stream**: cancel WebRTC stats logger on HandleOffer error paths ([6260306](https://github.com/rvben/vedetta/commit/62603066b6499d9e38a43c9da5b8d39921b97d17))
+- **recording**: honor shutdown context during clip extraction ([3849695](https://github.com/rvben/vedetta/commit/3849695d30798830db19a534d9d78ba359b5d601))
+- **recording**: surface DB errors when clearing deleted clip references ([bc5c453](https://github.com/rvben/vedetta/commit/bc5c453bc23e61f2f430dd5e64a8e572577b1ba0))
+- **rtsp,camera**: jitter reconnect backoff to avoid thundering herd ([d231d60](https://github.com/rvben/vedetta/commit/d231d60641d7dce36893276431b2a5f404853a0e))
+- **storage**: make SavePushSubscription an atomic upsert ([ba3aa34](https://github.com/rvben/vedetta/commit/ba3aa342d4e32ac0b62a12829535855aa197f1f8))
+- **media**: make SnapshotConsumer.Close idempotent ([1c59a4f](https://github.com/rvben/vedetta/commit/1c59a4fc31bf7e8963c88dc27600d716783bfc00))
+- **storage**: surface swallowed errors in zone lookup and token listing ([029152b](https://github.com/rvben/vedetta/commit/029152b22a7eab8a6099cfcbbea2a4a268e8e0da))
+- **storage**: canonicalize object_references.created_at and storage_audit.ts ([ab2300d](https://github.com/rvben/vedetta/commit/ab2300d882279c736829e18a1adecc88348e4bf0))
+- **storage**: canonicalize ordered/compared timestamp columns missed by v2 ([af9d8ff](https://github.com/rvben/vedetta/commit/af9d8ff12639050a4787c9d868c554a5db99b751))
+- **storage**: tolerate concurrent legacy column backfill races ([425fa8f](https://github.com/rvben/vedetta/commit/425fa8fa3bf3abaf8fcf6011b0c065ef98af85fa))
+- **recording**: treat retain_days <= 0 as unlimited instead of deleting everything ([6387b62](https://github.com/rvben/vedetta/commit/6387b620003cccce7d0a04f1b5a23ec46e86bf73))
+- **mqtt**: guard broker dial via custom opener to bypass proxy SSRF gap ([78cb3e1](https://github.com/rvben/vedetta/commit/78cb3e1714d1b214400ba40df2dff60fec8bd7cf))
+- **netguard**: enforce SSRF policy at dial time to close DNS-rebinding gap ([e90bbed](https://github.com/rvben/vedetta/commit/e90bbed574d5c2a12a58a139d2851dda1f00a09d))
+- **api**: block link-local/metadata targets on RTSP and MQTT test endpoints ([6a67390](https://github.com/rvben/vedetta/commit/6a673903370fcf97f165dd5e21da64257acf33b5))
+- **api**: scope MQTT write-only password reuse to stored broker identity ([44f76d8](https://github.com/rvben/vedetta/commit/44f76d810d9f098e371a4e15124dc693e5f8a73b))
+- **api**: use stored MQTT password when testing without retyping ([fe3f0b1](https://github.com/rvben/vedetta/commit/fe3f0b1b515394ad917bdea247bab7ab995f548e))
+- **api**: make camera and MQTT secrets write-only ([013f949](https://github.com/rvben/vedetta/commit/013f94955ba4dcdae5eba11a5004ac31b3049762))
+- **webrtc**: drive browser ICE servers from config, not hardcoded STUN ([4a605c1](https://github.com/rvben/vedetta/commit/4a605c13b9d4069b9b454ae3489a9a21d890e1eb))
+- **auth**: release per-IP slot only within its reserved window ([6dfe569](https://github.com/rvben/vedetta/commit/6dfe5699801c10209155c25c65237791cca48adf))
+- **auth**: release the per-IP slot on successful auth ([e19d338](https://github.com/rvben/vedetta/commit/e19d3389397217ea6470b65d29f549caded38e79))
+- **auth**: reserve aggregate per-IP slot before bcrypt verify ([4a37391](https://github.com/rvben/vedetta/commit/4a37391596a0ab01d7203028a002c9c9eba29f1b))
+- **auth**: keep aggregate per-IP login throttle alongside per-account buckets ([833c36f](https://github.com/rvben/vedetta/commit/833c36fd09a9f401d0666216f6612cc21c753775))
+- **auth**: scope login rate-limit per (IP, username) ([e0b7d24](https://github.com/rvben/vedetta/commit/e0b7d241bdf6494722fd95a0b914245cb5577d65))
+- **api**: reject normalized // paths in login redirect sanitizer ([60491cc](https://github.com/rvben/vedetta/commit/60491cc971d1291609c9896702910a65c56d00b1))
+- **api**: prevent open redirect via login next param ([28c6107](https://github.com/rvben/vedetta/commit/28c6107ef0b47ed9b573529370032ed3c24b9e45))
+- **api**: add HTTP ReadTimeout to bound slow-body slowloris ([842be0c](https://github.com/rvben/vedetta/commit/842be0ce820c67e4f5b5fa1639dc5cca6ce7048d))
+- **api**: sanitize remaining 500 leak paths (embedding + HTML partials) ([863dfc8](https://github.com/rvben/vedetta/commit/863dfc818bb390654cccc4a2faffdf0199d27c43))
+- **api**: stop leaking internal error details in HTTP 500 responses ([5963ba3](https://github.com/rvben/vedetta/commit/5963ba3dda0608c69cf1688c28fbb84a5f690423))
+- **api**: sanitize event download filename to prevent header injection ([4b78f9d](https://github.com/rvben/vedetta/commit/4b78f9d3cae470bbb0be3cb4ecb07e2f87bd2d36))
+- **auth**: scan candidate hashes for a readable bcrypt cost ([edeb574](https://github.com/rvben/vedetta/commit/edeb574cbae23361f2ffff80d47317c792f369f6))
+- **auth**: derive dummy hash cost from a hash value, not the live map ([75d04ab](https://github.com/rvben/vedetta/commit/75d04abdfa56d722b016afb1353356a1a4a7cb9f))
+- **auth**: publish credential changes before dummy hashing ([d80b7c3](https://github.com/rvben/vedetta/commit/d80b7c34d7b1ff006f4651f773061455bf9a0eb3))
+- **auth**: refresh dummy hash on user reload and lock verify reads ([3ca712c](https://github.com/rvben/vedetta/commit/3ca712cf01fd886037148b123064c3113cf42f53))
+- **auth**: match dummy bcrypt hash cost to user hashes ([7b7164c](https://github.com/rvben/vedetta/commit/7b7164c2229290d99da4b04a98bb033d3bc0c026))
+- **camera**: only confirm a track when its start event is enqueued ([198f472](https://github.com/rvben/vedetta/commit/198f472524fe92b5c8af1526dc8c9678b1037910))
+- **auth**: rate-limit change-password by client IP, not empty bucket ([aa664c3](https://github.com/rvben/vedetta/commit/aa664c3dffbf2b4b66000d761073f12abd8c0ee8))
+- **camera**: never block the detector on event/event-end sends ([236268e](https://github.com/rvben/vedetta/commit/236268e2bd14b1fcd2f97e73d62bf6a727a8d42b))
+- **mqtt**: synchronize subsystems.mqttClient access to fix data race ([1f9c82b](https://github.com/rvben/vedetta/commit/1f9c82b6b57f130393e471f4888f92557c288fea))
+
+### Performance
+
+- **rtsp,stream**: dispatch to consumers without holding locks ([8f3805b](https://github.com/rvben/vedetta/commit/8f3805b57f5ea9861b57721eba7a81e9366d5b25))
+- **rtsp**: replace WaitForVideoParams busy-poll with a notification ([87fe934](https://github.com/rvben/vedetta/commit/87fe934b7e39950fd1efed05db592ef8a50246e7))
+- **storage**: drop index-defeating replace() from timestamp queries ([574112a](https://github.com/rvben/vedetta/commit/574112ad12516a3c5a0c7364f5d05cc895e62d00))
+- **recording**: skip no-op writes in event media reconciliation ([6829495](https://github.com/rvben/vedetta/commit/68294957ef0be7fd0f4764e4acd506cff7bfa177))
+- **auth**: compute dummy hash outside the auth mutex ([bda1330](https://github.com/rvben/vedetta/commit/bda1330ee81ab9403be7800192e1118766a9cee6))
+
 ## [0.4.4](https://github.com/rvben/vedetta/compare/v0.4.3...v0.4.4) - 2026-05-22
 
 ### Fixed
