@@ -1,0 +1,139 @@
+package main
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/rvben/vedetta/internal/camera"
+	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/storage"
+)
+
+// newTestTracer returns a tracer backed by an in-memory recorder so tests can
+// assert on the spans runEventLoop produces.
+func newTestTracer() (trace.Tracer, *tracetest.SpanRecorder) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	return tp.Tracer("test"), sr
+}
+
+// spanByName returns the first recorded span with the given name, or nil.
+func spanByName(spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpan {
+	for _, s := range spans {
+		if s.Name() == name {
+			return s
+		}
+	}
+	return nil
+}
+
+// waitForSpan polls the recorder until a span with the given name is ended or
+// the deadline passes.
+func waitForSpan(t *testing.T, sr *tracetest.SpanRecorder, name string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if spanByName(sr.Ended(), name) != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("span %q not recorded within deadline", name)
+}
+
+// testSubsystems builds a minimal subsystems with only the channels populated.
+// MQTT client, object embedder, recorder, notifier are left nil: the event used
+// in the test carries no snapshot image, so snapshot.save and mqtt.publish are
+// skipped, and the clip goroutine returns on ctx cancel before touching the
+// (nil) recorder.
+func testSubsystems() *subsystems {
+	sub := &subsystems{}
+	sub.events = make(chan camera.Event, 4)
+	sub.eventEnds = make(chan camera.EventEnd, 4)
+	sub.presenceEvents = make(chan camera.PresenceEvent, 4)
+	sub.faceEvents = make(chan camera.FaceEvent, 4)
+	sub.motionActivity = make(chan camera.MotionActivity, 4)
+	sub.detections = make(chan camera.DetectionFrame, 4)
+	return sub
+}
+
+func testConfig() *config.Config {
+	cfg := &config.Config{}
+	cfg.Recording.Continuous = true // skip temp-recording branch (no recorder)
+	cfg.Recording.MaxEventDuration = time.Hour
+	cfg.Events.CooldownSeconds = 0
+	return cfg
+}
+
+func TestRunEventLoopTracingRoot(t *testing.T) {
+	tracer, sr := newTestTracer()
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	sub := testSubsystems()
+	cfg := testConfig()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	runEventLoop(ctx, cfg, db, sub, nil, tracer)
+
+	sub.events <- camera.Event{
+		ID:         "cam1-t7-123",
+		CameraName: "cam1",
+		Label:      "person",
+		Score:      0.91,
+		TrackID:    7,
+		ZoneName:   "driveway",
+		Timestamp:  time.Now(),
+	}
+
+	waitForSpan(t, sr, "event")
+
+	spans := sr.Ended()
+	root := spanByName(spans, "event")
+	dbSpan := spanByName(spans, "db.save_event")
+	if root == nil || dbSpan == nil {
+		t.Fatalf("missing spans: event=%v db.save_event=%v", root != nil, dbSpan != nil)
+	}
+	if dbSpan.Parent().SpanID() != root.SpanContext().SpanID() {
+		t.Errorf("db.save_event parent = %v, want root %v", dbSpan.Parent().SpanID(), root.SpanContext().SpanID())
+	}
+	if dbSpan.SpanContext().TraceID() != root.SpanContext().TraceID() {
+		t.Errorf("db.save_event trace id != root trace id")
+	}
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range root.Attributes() {
+		attrs[kv.Key] = kv.Value
+	}
+	if got := attrs["vedetta.camera"].AsString(); got != "cam1" {
+		t.Errorf("vedetta.camera = %q, want cam1", got)
+	}
+	if got := attrs["vedetta.label"].AsString(); got != "person" {
+		t.Errorf("vedetta.label = %q, want person", got)
+	}
+	if got := attrs["vedetta.track_id"].AsInt64(); got != 7 {
+		t.Errorf("vedetta.track_id = %d, want 7", got)
+	}
+	if got := attrs["vedetta.event_id"].AsString(); got != "cam1-t7-123" {
+		t.Errorf("vedetta.event_id = %q, want cam1-t7-123", got)
+	}
+	if got := attrs["vedetta.zone"].AsString(); got != "driveway" {
+		t.Errorf("vedetta.zone = %q, want driveway", got)
+	}
+	// Score is stored as float32 in camera.Event and widened to float64 on the
+	// span; compare against the same widening to avoid float32->float64 precision
+	// mismatch (float64(float32(0.91)) != 0.91).
+	if got, want := attrs["vedetta.score"].AsFloat64(), float64(float32(0.91)); got != want {
+		t.Errorf("vedetta.score = %v, want %v", got, want)
+	}
+}

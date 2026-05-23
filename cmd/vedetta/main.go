@@ -38,6 +38,8 @@ import (
 	"github.com/rvben/vedetta/internal/update"
 	"github.com/rvben/vedetta/internal/watchdog"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -822,23 +824,48 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					"score", fmt.Sprintf("%.2f", event.Score),
 				)
 
+				evCtx, rootSpan := tracer.Start(ctx, "event", trace.WithAttributes(
+					attribute.String("vedetta.camera", event.CameraName),
+					attribute.String("vedetta.label", event.Label),
+					attribute.Int("vedetta.track_id", event.TrackID),
+					attribute.String("vedetta.event_id", event.ID),
+					attribute.Float64("vedetta.score", float64(event.Score)),
+				))
+				if event.ZoneName != "" {
+					rootSpan.SetAttributes(attribute.String("vedetta.zone", event.ZoneName))
+				}
+
+				_, dbSpan := tracer.Start(evCtx, "db.save_event")
 				saveErr := db.SaveEvent(event)
 				if saveErr != nil {
+					dbSpan.RecordError(saveErr)
+					dbSpan.SetStatus(codes.Error, "save event")
+					dbSpan.End()
 					slog.Error("failed to save event", "error", saveErr)
-				} else if event.SnapshotImage != nil && event.SnapshotPath != "" {
-					resolved, err := sub.recorder.SaveEventSnapshot(event, event.SnapshotImage, event.SnapshotPath)
-					if err != nil {
-						slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
-					} else {
-						// Update resolved path and availability so downstream
-						// consumers (MQTT, push) see the correct values.
-						event.SnapshotPath = resolved
-						event.SnapshotAvailable = true
+				} else {
+					dbSpan.End()
+					if event.SnapshotImage != nil && event.SnapshotPath != "" {
+						_, snapSpan := tracer.Start(evCtx, "snapshot.save")
+						resolved, err := sub.recorder.SaveEventSnapshot(event, event.SnapshotImage, event.SnapshotPath)
+						if err != nil {
+							snapSpan.RecordError(err)
+							snapSpan.SetStatus(codes.Error, "save snapshot")
+							slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
+						} else {
+							// Update resolved path and availability so downstream
+							// consumers (MQTT, push) see the correct values.
+							event.SnapshotPath = resolved
+							event.SnapshotAvailable = true
+						}
+						snapSpan.End()
 					}
 				}
 
 				if mc := sub.mqttClient.Load(); mc != nil {
+					_, mqttSpan := tracer.Start(evCtx, "mqtt.publish")
 					if err := mc.PublishEvent(event, nil); err != nil {
+						mqttSpan.RecordError(err)
+						mqttSpan.SetStatus(codes.Error, "publish event")
 						slog.Error("failed to publish event", "error", err)
 					}
 
@@ -859,6 +886,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 							mc.PublishSnapshot(event.CameraName, event.Label, jpegData)
 						}
 					}
+					mqttSpan.End()
 				}
 
 				if sub.objectEmbedder != nil && event.SnapshotImage != nil {
@@ -876,6 +904,9 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 						}
 					}(event)
 				}
+
+				rootSpanCtx := rootSpan.SpanContext()
+				rootSpan.End()
 
 				// Start temporary recording if continuous is off
 				var tempCancel context.CancelFunc
@@ -897,9 +928,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				})
 
 				active[evID] = &activeEvent{
-					event:      event,
-					timer:      timer,
-					tempCancel: tempCancel,
+					event:       event,
+					timer:       timer,
+					tempCancel:  tempCancel,
+					rootSpanCtx: rootSpanCtx,
 				}
 
 				// Fan out to push notification subscribers. Enqueue is
