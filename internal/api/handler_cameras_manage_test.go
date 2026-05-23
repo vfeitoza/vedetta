@@ -54,6 +54,100 @@ func TestListCamerasManage(t *testing.T) {
 	}
 }
 
+// The management list must never ship RTSP credentials to the browser: it
+// returns the credential-stripped URL plus a has_credentials flag so the UI
+// can show that a secret exists without exposing it.
+func TestListCamerasManage_StripsCredentials(t *testing.T) {
+	srv, _ := newTestServerWithCameras(t)
+	enabled := true
+	srv.cameraConfigs = []config.CameraConfig{
+		{Name: "front", URL: "rtsp://admin:s3cret@front.lan/stream1", RecordURL: "rtsp://admin:s3cret@front.lan/stream0", Enabled: &enabled},
+		{Name: "plain", URL: "rtsp://plain.lan/stream1", Enabled: &enabled},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/manage", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("s3cret")) {
+		t.Fatalf("response leaked credentials: %s", w.Body.String())
+	}
+
+	var body struct {
+		Cameras []struct {
+			Name           string `json:"name"`
+			URL            string `json:"url"`
+			RecordURL      string `json:"record_url"`
+			HasCredentials bool   `json:"has_credentials"`
+		} `json:"cameras"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Cameras[0].URL != "rtsp://front.lan/stream1" {
+		t.Errorf("url not stripped: %q", body.Cameras[0].URL)
+	}
+	if body.Cameras[0].RecordURL != "rtsp://front.lan/stream0" {
+		t.Errorf("record_url not stripped: %q", body.Cameras[0].RecordURL)
+	}
+	if !body.Cameras[0].HasCredentials {
+		t.Error("expected has_credentials=true for camera with userinfo")
+	}
+	if body.Cameras[1].HasCredentials {
+		t.Error("expected has_credentials=false for camera without userinfo")
+	}
+}
+
+// When the UI saves the credential-stripped URL unchanged, the server must
+// re-attach the stored credentials so editing other fields does not silently
+// wipe the camera's secret.
+func TestUpdateCameraManage_PreservesStrippedCredentials(t *testing.T) {
+	srv, _ := newTestServerWithCameras(t)
+	enabled := true
+	srv.cameraConfigs[0] = config.CameraConfig{
+		Name: "front", URL: "rtsp://admin:s3cret@front.lan/stream1", Enabled: &enabled,
+	}
+
+	// UI sends back the stripped URL (no userinfo).
+	payload := `{"name":"front","url":"rtsp://front.lan/stream1","enabled":true,"detect":{"width":640,"height":480,"fps":5},"record":{"width":1920,"height":1080,"fps":15}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/cameras/manage/0", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.cameraConfigs[0].URL != "rtsp://admin:s3cret@front.lan/stream1" {
+		t.Fatalf("credentials not preserved on update: %q", srv.cameraConfigs[0].URL)
+	}
+}
+
+// When the operator types a URL with fresh userinfo, the new credentials win.
+func TestUpdateCameraManage_AcceptsNewCredentials(t *testing.T) {
+	srv, _ := newTestServerWithCameras(t)
+	enabled := true
+	srv.cameraConfigs[0] = config.CameraConfig{
+		Name: "front", URL: "rtsp://admin:s3cret@front.lan/stream1", Enabled: &enabled,
+	}
+
+	payload := `{"name":"front","url":"rtsp://newuser:newpass@front.lan/stream1","enabled":true,"detect":{"width":640,"height":480,"fps":5},"record":{"width":1920,"height":1080,"fps":15}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/cameras/manage/0", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.cameraConfigs[0].URL != "rtsp://newuser:newpass@front.lan/stream1" {
+		t.Fatalf("new credentials not applied: %q", srv.cameraConfigs[0].URL)
+	}
+}
+
 func TestAddCameraManage(t *testing.T) {
 	srv, _ := newTestServerWithCameras(t)
 

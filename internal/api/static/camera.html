@@ -291,6 +291,7 @@
               <button type="button" class="btn btn-sm btn-ghost" data-action-click="testRtspFromInput('cam-set-url','cam-set-url-result')">Test</button>
             </div>
             <div id="cam-set-url-result" class="rtsp-test-result" aria-live="polite"></div>
+            <div id="cam-set-creds-hint" class="form-meta" hidden>Stored credentials are hidden. Leave the URL as-is to keep them, or type a new <code>user:pass@</code> to replace them.</div>
           </div>
 
           <div class="form-field">
@@ -424,6 +425,7 @@
         document.getElementById('cam-set-name').value = match.name || '';
         document.getElementById('cam-set-url').value = match.url || '';
         document.getElementById('cam-set-recurl').value = match.record_url || '';
+        document.getElementById('cam-set-creds-hint').hidden = !match.has_credentials;
         document.getElementById('cam-set-enabled').checked = !!match.enabled;
         var det = match.detect || {};
         document.getElementById('cam-set-dw').value = det.width || 640;

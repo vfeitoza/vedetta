@@ -11,25 +11,32 @@ import (
 
 func (s *Server) ListCamerasManage(w http.ResponseWriter, _ *http.Request) {
 	type cameraEntry struct {
-		Index     int                       `json:"index"`
-		Name      string                    `json:"name"`
-		URL       string                    `json:"url"`
-		RecordURL string                    `json:"record_url"`
-		Enabled   bool                      `json:"enabled"`
-		Detect    config.DetectStreamConfig `json:"detect"`
-		Record    config.StreamConfig       `json:"record"`
+		Index          int                       `json:"index"`
+		Name           string                    `json:"name"`
+		URL            string                    `json:"url"`
+		RecordURL      string                    `json:"record_url"`
+		HasCredentials bool                      `json:"has_credentials"`
+		Enabled        bool                      `json:"enabled"`
+		Detect         config.DetectStreamConfig `json:"detect"`
+		Record         config.StreamConfig       `json:"record"`
 	}
 
 	entries := make([]cameraEntry, len(s.cameraConfigs))
 	for i, cam := range s.cameraConfigs {
+		// Never ship RTSP credentials to the browser. Return the
+		// credential-stripped URLs plus a flag so the UI can show that a
+		// secret exists; the server re-attaches it on save.
+		cleanURL, urlHasCred := config.StripURLCredentials(cam.URL)
+		cleanRecordURL, recordHasCred := config.StripURLCredentials(cam.RecordURL)
 		entries[i] = cameraEntry{
-			Index:     i,
-			Name:      cam.Name,
-			URL:       cam.URL,
-			RecordURL: cam.RecordURL,
-			Enabled:   cam.IsEnabled(),
-			Detect:    cam.Detect,
-			Record:    cam.Record,
+			Index:          i,
+			Name:           cam.Name,
+			URL:            cleanURL,
+			RecordURL:      cleanRecordURL,
+			HasCredentials: urlHasCred || recordHasCred,
+			Enabled:        cam.IsEnabled(),
+			Detect:         cam.Detect,
+			Record:         cam.Record,
 		}
 	}
 
@@ -121,10 +128,14 @@ func (s *Server) UpdateCameraManage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The UI edits credential-stripped URLs. Re-attach the stored secret when
+	// the operator left the userinfo blank; a URL with fresh userinfo replaces
+	// the credentials instead.
+	existing := s.cameraConfigs[index]
 	cam := config.CameraConfig{
 		Name:      name,
-		URL:       req.URL,
-		RecordURL: req.RecordURL,
+		URL:       config.MergeURLCredentials(req.URL, existing.URL),
+		RecordURL: config.MergeURLCredentials(req.RecordURL, existing.RecordURL),
 		Enabled:   &req.Enabled,
 		Detect:    req.Detect,
 		Record:    req.Record,

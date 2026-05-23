@@ -128,6 +128,96 @@ func TestUpdateMQTTSettings(t *testing.T) {
 	}
 }
 
+// The MQTT broker password is write-only: GET never returns it, so the UI
+// submits a blank password unless the operator typed a new one. A blank
+// password on save must therefore keep the stored secret, not wipe it.
+func TestUpdateMQTTSettings_PreservesPasswordWhenBlank(t *testing.T) {
+	srv, _ := newTestServer(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	initial := "auth:\n  users:\n    - username: admin\n      password_hash: \"$2a$10$7EqJtq98hPqEX7fNZaFWoOHi8V6I5WJFlQ7Y7S6d6n9zQ0jD4S3yu\"\napi:\n  host: 0.0.0.0\n  port: 5050\n  exposure: lan\n"
+	if err := os.WriteFile(cfgPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	srv.SetConfigPath(cfgPath)
+	srv.SetMQTTConfig(config.MQTTConfig{
+		Enabled: true, Host: "10.0.0.1", Port: 1883, Username: "u", Password: "stored-secret", Topic: "vedetta",
+	})
+
+	// UI saves with a blank password (it never received the stored one).
+	payload := `{"enabled":false,"host":"10.0.0.9","port":1883,"username":"u","password":"","topic":"vedetta"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/mqtt", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.mqttConfig.Password != "stored-secret" {
+		t.Fatalf("blank password must preserve stored secret, got %q", srv.mqttConfig.Password)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("stored-secret")) {
+		t.Error("config file should retain the stored password after a blank-password save")
+	}
+}
+
+// A non-blank password replaces the stored secret.
+func TestUpdateMQTTSettings_SetsNewPassword(t *testing.T) {
+	srv, _ := newTestServer(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	initial := "auth:\n  users:\n    - username: admin\n      password_hash: \"$2a$10$7EqJtq98hPqEX7fNZaFWoOHi8V6I5WJFlQ7Y7S6d6n9zQ0jD4S3yu\"\napi:\n  host: 0.0.0.0\n  port: 5050\n  exposure: lan\n"
+	if err := os.WriteFile(cfgPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	srv.SetConfigPath(cfgPath)
+	srv.SetMQTTConfig(config.MQTTConfig{
+		Enabled: true, Host: "10.0.0.1", Port: 1883, Username: "u", Password: "old-secret", Topic: "vedetta",
+	})
+
+	payload := `{"enabled":false,"host":"10.0.0.1","port":1883,"username":"u","password":"new-secret","topic":"vedetta"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/mqtt", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.mqttConfig.Password != "new-secret" {
+		t.Fatalf("expected new password to be applied, got %q", srv.mqttConfig.Password)
+	}
+}
+
+// GET must expose whether a password is stored (so the UI can show that a
+// secret exists) without ever returning the secret itself.
+func TestGetMQTTSettings_ReportsHasPassword(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.SetMQTTConfig(config.MQTTConfig{
+		Enabled: true, Host: "10.0.0.1", Port: 1883, Username: "u", Password: "secret", Topic: "vedetta",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/mqtt", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := body["password"]; ok {
+		t.Error("password must not be returned")
+	}
+	if body["has_password"] != true {
+		t.Errorf("expected has_password=true, got %v", body["has_password"])
+	}
+}
+
 func TestUpdateMQTTSettings_InvalidPort(t *testing.T) {
 	srv, _ := newTestServer(t)
 	srv.SetConfigPath("/dev/null")

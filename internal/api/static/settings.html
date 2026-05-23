@@ -460,6 +460,10 @@
       $('mqtt-port').value = data.port || '';
       $('mqtt-username').value = data.username || '';
       $('mqtt-topic').value = data.topic || '';
+      // The password is write-only: it is never returned. Signal that one is
+      // stored and leave the field blank so saving keeps it unless retyped.
+      $('mqtt-password').value = '';
+      $('mqtt-password').placeholder = data.has_password ? '•••••••• (unchanged)' : 'optional';
       updateMQTTBadge(data.status);
     });
   }

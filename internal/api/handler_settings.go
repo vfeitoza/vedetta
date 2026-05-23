@@ -19,12 +19,13 @@ func (s *Server) GetMQTTSettings(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":  s.mqttConfig.Enabled,
-		"host":     s.mqttConfig.Host,
-		"port":     s.mqttConfig.Port,
-		"username": s.mqttConfig.Username,
-		"topic":    s.mqttConfig.Topic,
-		"status":   status,
+		"enabled":      s.mqttConfig.Enabled,
+		"host":         s.mqttConfig.Host,
+		"port":         s.mqttConfig.Port,
+		"username":     s.mqttConfig.Username,
+		"topic":        s.mqttConfig.Topic,
+		"has_password": s.mqttConfig.Password != "",
+		"status":       status,
 	})
 }
 
@@ -50,12 +51,19 @@ func (s *Server) UpdateMQTTSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The password is write-only: the UI submits a blank value unless the
+	// operator typed a new one, so an empty password keeps the stored secret.
+	password := req.Password
+	if password == "" {
+		password = s.mqttConfig.Password
+	}
+
 	mqttCfg := config.MQTTConfig{
 		Enabled:  req.Enabled,
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: req.Password,
+		Password: password,
 		Topic:    req.Topic,
 	}
 
