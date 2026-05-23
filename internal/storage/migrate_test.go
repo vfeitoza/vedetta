@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,6 +169,80 @@ func TestMigrate_ConcurrentLegacyUpgrade(t *testing.T) {
 
 	if got := mustUserVersion(t, seed); got != currentSchemaVersion {
 		t.Errorf("user_version = %d, want %d", got, currentSchemaVersion)
+	}
+}
+
+// TestMigrate_V2CanonicalizesLegacyRFC3339 simulates a database that reached
+// version 1 while still holding timestamps in RFC3339 ("T"-separated) form -
+// rows that version 1's needsNormalization check does not match because they
+// carry no "+offset"/monotonic marker. The version 2 migration must rewrite
+// every timestamp column into the canonical driver format (space-separated, no
+// "T") so that index-friendly bare comparisons are correct.
+func TestMigrate_V2CanonicalizesLegacyRFC3339(t *testing.T) {
+	db, _ := openRaw(t)
+
+	// Build the baseline schema, then mark the DB as already at version 1 so the
+	// version 0 backfill/normalize path is skipped and only the v2 step runs.
+	if err := migrate(db); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert RFC3339 "T"-format rows as raw text (bypassing the driver's
+	// time.Time serialization) to mimic legacy data the v1 path missed.
+	if _, err := db.Exec(
+		`INSERT INTO segments (camera, path, start_time, end_time, size_bytes) VALUES (?, ?, ?, ?, ?)`,
+		"cam1", "cam1/2024/seg.mp4", "2024-01-02T03:04:05Z", "2024-01-02T03:05:05Z", 100,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO events (id, camera, label, score, timestamp, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"e1", "cam1", "person", 0.9, "2024-01-02T03:04:05Z", "2024-01-02T03:05:05Z",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO motion_activity (camera, bucket, score) VALUES (?, ?, ?)`,
+		"cam1", "2024-01-02T03:04:00Z", 0.5,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("v2 migrate: %v", err)
+	}
+
+	if got := mustUserVersion(t, db); got != currentSchemaVersion {
+		t.Errorf("user_version = %d, want %d", got, currentSchemaVersion)
+	}
+
+	// After migration no on-disk timestamp may retain the "T" separator: a bare
+	// string comparison against a canonical (space-separated) parameter would
+	// otherwise be wrong. CAST(... AS TEXT) reveals the true stored bytes, which
+	// the driver would otherwise reformat when scanning into a string.
+	for _, q := range []string{
+		"SELECT CAST(start_time AS TEXT) FROM segments",
+		"SELECT CAST(end_time AS TEXT) FROM segments",
+		"SELECT CAST(timestamp AS TEXT) FROM events",
+		"SELECT CAST(end_time AS TEXT) FROM events",
+		"SELECT CAST(bucket AS TEXT) FROM motion_activity",
+	} {
+		var raw string
+		if err := db.QueryRow(q).Scan(&raw); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		// Canonical form separates date and time with a space at index 10; an
+		// RFC3339 value has a "T" there. (The "UTC" suffix also contains a "T",
+		// so a substring search would give a false positive.)
+		if len(raw) <= 10 || raw[10] != ' ' {
+			t.Errorf("%s still holds non-canonical %q after v2 migration", q, raw)
+		}
+		if !strings.HasSuffix(raw, " +0000 UTC") {
+			t.Errorf("%s = %q, expected canonical UTC form", q, raw)
+		}
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 // currentSchemaVersion is the schema version this build expects. It is stored
 // in SQLite's PRAGMA user_version. A database reporting a lower version is
 // upgraded by migrate; databases created before versioning report 0.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // baselineSchema creates every table and index for a fresh database. It is
 // idempotent (CREATE ... IF NOT EXISTS) and a cheap no-op for existing DBs.
@@ -261,6 +261,16 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	// Version 2: re-canonicalize every timestamp column into the driver's
+	// native Go String() form. Version 1's normalize step only matched non-UTC
+	// or monotonic timestamps, so RFC3339 ("T"-separated) rows slipped through.
+	// Bare (index-using) comparisons require one uniform on-disk format.
+	if version < 2 {
+		if err := recanonicalizeTimestamps(db); err != nil {
+			return fmt.Errorf("recanonicalize timestamps: %w", err)
+		}
+	}
+
 	// Future ordered migrations go here, each guarded by `if version < N`.
 
 	if version < currentSchemaVersion {
@@ -424,4 +434,108 @@ func normalizeTimestamps(db *sql.DB) error {
 func needsNormalization(s string) bool {
 	return strings.Contains(s, "m=+") || strings.Contains(s, "m=-") ||
 		(strings.Contains(s, "+") && !strings.HasSuffix(strings.TrimSpace(s), "+0000 UTC"))
+}
+
+// timestampColumns lists every DATETIME column whose stored text is compared or
+// ordered as a string. recanonicalizeTimestamps rewrites them into one uniform
+// format so bare (index-using) comparisons are correct.
+var timestampColumns = []struct {
+	table  string
+	column string
+}{
+	{"segments", "start_time"},
+	{"segments", "end_time"},
+	{"events", "timestamp"},
+	{"events", "end_time"},
+	{"motion_activity", "bucket"},
+	{"faces", "timestamp"},
+}
+
+// storedTimeLayouts are the historical on-disk timestamp formats, tried in turn
+// when parsing a stored value back into a time.Time.
+var storedTimeLayouts = []string{
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02 15:04:05.999999999-07:00",
+	"2006-01-02T15:04:05.999999999Z",
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05",
+}
+
+// parseStoredTime parses a timestamp stored by any historical code path.
+func parseStoredTime(s string) (time.Time, error) {
+	for _, layout := range storedTimeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unparseable timestamp: %s", s)
+}
+
+// isCanonicalTimestamp reports whether s is already in the driver's native UTC
+// form: "2006-01-02 15:04:05[.fraction] +0000 UTC". The date and time are
+// separated by a space at index 10 (an RFC3339 value has a "T" there); the
+// "UTC" suffix legitimately contains a "T", so the separator position - not a
+// substring search - is what distinguishes the two. Canonical rows are skipped
+// to avoid needless writes on an already-normalized database.
+func isCanonicalTimestamp(s string) bool {
+	return len(s) > 10 && s[10] == ' ' && strings.HasSuffix(s, " +0000 UTC")
+}
+
+// recanonicalizeTimestamps rewrites any non-canonical timestamp into the
+// driver's native format by round-tripping it through time.Time. Rows already
+// canonical are left untouched. Unparseable values are logged and skipped so a
+// single bad row cannot abort startup.
+func recanonicalizeTimestamps(db *sql.DB) error {
+	for _, tc := range timestampColumns {
+		if err := recanonicalizeColumn(db, tc.table, tc.column); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recanonicalizeColumn(db *sql.DB, table, column string) error {
+	// table/column are internal constants from timestampColumns, never user
+	// input, so string interpolation is safe here. CAST(... AS TEXT) returns the
+	// true on-disk bytes; scanning a DATETIME column into a string instead makes
+	// the driver reformat the value, masking the stored representation.
+	query := fmt.Sprintf("SELECT rowid, CAST(%s AS TEXT) FROM %s WHERE %s IS NOT NULL", column, table, column)
+	rows, err := db.Query(query)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		rowid int64
+		raw   string
+	}
+	var stale []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.rowid, &r.raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if !isCanonicalTimestamp(r.raw) {
+			stale = append(stale, r)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+
+	update := fmt.Sprintf("UPDATE %s SET %s = ? WHERE rowid = ?", table, column)
+	for _, r := range stale {
+		t, perr := parseStoredTime(r.raw)
+		if perr != nil {
+			slog.Warn("recanonicalize timestamp: unparseable value skipped", "table", table, "column", column, "rowid", r.rowid, "value", r.raw)
+			continue
+		}
+		if _, err := db.Exec(update, utc(t), r.rowid); err != nil {
+			slog.Warn("recanonicalize timestamp: update failed", "table", table, "column", column, "rowid", r.rowid, "error", err)
+		}
+	}
+	return nil
 }
