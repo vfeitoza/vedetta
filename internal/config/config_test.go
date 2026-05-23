@@ -839,6 +839,39 @@ func TestOpenH264ConfigShouldAutoInstall(t *testing.T) {
 	}
 }
 
+func TestTracingDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Tracing.Enabled {
+		t.Errorf("tracing should default disabled")
+	}
+	if cfg.Tracing.Protocol != "http" {
+		t.Errorf("protocol default = %q, want \"http\"", cfg.Tracing.Protocol)
+	}
+	if !cfg.Tracing.Insecure {
+		t.Errorf("insecure should default true")
+	}
+	if cfg.Tracing.SampleRatio != 0.05 {
+		t.Errorf("sample_ratio default = %v, want 0.05", cfg.Tracing.SampleRatio)
+	}
+	if cfg.Tracing.ServiceName != "vedetta" {
+		t.Errorf("service_name default = %q, want \"vedetta\"", cfg.Tracing.ServiceName)
+	}
+}
+
+func TestTracingValidationRejectsBadProtocol(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"tracing:\n  enabled: true\n  endpoint: otel:4318\n  protocol: smoke\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid tracing.protocol")
+	}
+}
+
 func TestOpenH264ConfigYAMLParsing(t *testing.T) {
 	tests := []struct {
 		name    string
