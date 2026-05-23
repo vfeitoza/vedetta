@@ -10,6 +10,16 @@ import (
 	"github.com/rvben/vedetta/internal/mqtt"
 )
 
+// resolveWriteOnlySecret implements the write-only secret convention: a blank
+// submitted value means "keep the stored secret" (the UI never receives it), a
+// non-blank value overrides it.
+func resolveWriteOnlySecret(submitted, stored string) string {
+	if submitted == "" {
+		return stored
+	}
+	return submitted
+}
+
 func (s *Server) GetMQTTSettings(w http.ResponseWriter, _ *http.Request) {
 	status := "disabled"
 	if s.mqttClient != nil {
@@ -53,17 +63,12 @@ func (s *Server) UpdateMQTTSettings(w http.ResponseWriter, r *http.Request) {
 
 	// The password is write-only: the UI submits a blank value unless the
 	// operator typed a new one, so an empty password keeps the stored secret.
-	password := req.Password
-	if password == "" {
-		password = s.mqttConfig.Password
-	}
-
 	mqttCfg := config.MQTTConfig{
 		Enabled:  req.Enabled,
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: password,
+		Password: resolveWriteOnlySecret(req.Password, s.mqttConfig.Password),
 		Topic:    req.Topic,
 	}
 
@@ -107,12 +112,15 @@ func (s *Server) TestMQTTConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mirror the write-only password convention: a blank password means "test
+	// with the stored secret", so the operator can verify saved settings
+	// without retyping the hidden password.
 	cfg := config.MQTTConfig{
 		Enabled:  true,
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: req.Password,
+		Password: resolveWriteOnlySecret(req.Password, s.mqttConfig.Password),
 	}
 
 	client, err := mqtt.New(cfg)

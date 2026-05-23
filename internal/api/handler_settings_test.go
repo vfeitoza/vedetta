@@ -166,6 +166,29 @@ func TestUpdateMQTTSettings_PreservesPasswordWhenBlank(t *testing.T) {
 	}
 }
 
+// Both the save and the test paths treat a blank submitted secret as "keep
+// the stored one"; a non-blank value overrides it.
+func TestResolveWriteOnlySecret(t *testing.T) {
+	tests := []struct {
+		name      string
+		submitted string
+		stored    string
+		want      string
+	}{
+		{"blank keeps stored", "", "stored", "stored"},
+		{"submitted overrides", "typed", "stored", "typed"},
+		{"blank with no stored stays blank", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveWriteOnlySecret(tt.submitted, tt.stored); got != tt.want {
+				t.Fatalf("resolveWriteOnlySecret(%q, %q) = %q, want %q",
+					tt.submitted, tt.stored, got, tt.want)
+			}
+		})
+	}
+}
+
 // A non-blank password replaces the stored secret.
 func TestUpdateMQTTSettings_SetsNewPassword(t *testing.T) {
 	srv, _ := newTestServer(t)
