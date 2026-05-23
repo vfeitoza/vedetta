@@ -104,6 +104,10 @@ type Server struct {
 
 	// ctx is the application lifetime context (cancelled on shutdown).
 	ctx context.Context
+
+	// tracingEnabled gates otelhttp request spans. False by default so there
+	// is zero overhead when tracing is not configured.
+	tracingEnabled bool
 }
 
 func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Server {
@@ -329,6 +333,7 @@ func (s *Server) Start() error {
 		handler = s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(s.mux)))
 	}
 	handler = requestLogMiddleware(handler)
+	handler = s.withTracing(handler)
 
 	s.httpSrv = s.buildHTTPServer(addr, handler)
 
@@ -367,6 +372,12 @@ func (s *Server) SetVersion(v string) {
 	// --dirty`. The full string (with -dirty) is useful for local diagnostics
 	// but should not be shown to end users in the settings panel.
 	s.version = strings.TrimSuffix(v, "-dirty")
+}
+
+// SetTracingEnabled toggles otelhttp request spans on the API handler. When
+// false (the default) the handler is not wrapped, so there is zero overhead.
+func (s *Server) SetTracingEnabled(enabled bool) {
+	s.tracingEnabled = enabled
 }
 
 func (s *Server) SetUpdateChecker(checker *update.Checker) {
@@ -439,7 +450,7 @@ func (s *Server) TransitionToFull(authChecker *auth.Checker) {
 	s.mux = newMux
 	s.registerRoutes()
 
-	s.httpSrv.Handler = requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux))))
+	s.httpSrv.Handler = s.withTracing(requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux)))))
 }
 
 func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient, webrtcCfg config.WebRTCConfig) {
