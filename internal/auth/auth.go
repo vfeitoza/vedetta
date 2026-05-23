@@ -721,6 +721,18 @@ func (c *Checker) RequestIsSecure(r *http.Request) bool {
 	return c.cookieSecure(r)
 }
 
+// TransportIsSecure reports whether the client's connection actually arrived
+// over HTTPS - either direct TLS or HTTPS forwarded by a trusted proxy.
+// Unlike RequestIsSecure it ignores the exposure policy, so it stays false for
+// plain-HTTP LAN requests. It is the correct gate for transport-only decisions
+// such as emitting HSTS, which must never pin an HTTP-only host to TLS.
+func (c *Checker) TransportIsSecure(r *http.Request) bool {
+	if c == nil {
+		return r != nil && r.TLS != nil
+	}
+	return c.cookieSecure(r)
+}
+
 // makeDummyHash builds the constant fake hash that verify() compares against
 // for unknown usernames. Its bcrypt cost matches the first readable hash in
 // samples (real user hashes) so the unknown-user comparison takes the same time

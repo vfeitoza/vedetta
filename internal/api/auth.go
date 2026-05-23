@@ -13,7 +13,7 @@ type principalContextKey struct{}
 
 func authMiddleware(s *Server, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		applySecurityHeaders(w, s.requestIsSecure(r))
+		applySecurityHeaders(w, s.requestTransportIsSecure(r))
 
 		if s.auth != nil && !s.auth.RequestIsSecure(r) {
 			writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "https required"})
@@ -66,18 +66,19 @@ func authMiddleware(s *Server, next http.Handler) http.Handler {
 
 func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		applySecurityHeaders(w, s.requestIsSecure(r))
+		applySecurityHeaders(w, s.requestTransportIsSecure(r))
 		next.ServeHTTP(w, r)
 	})
 }
 
-// requestIsSecure reports whether the client's connection to the service is
-// HTTPS. It consults the proxy-aware auth checker when one is configured and
-// otherwise falls back to the direct TLS state, so a request forwarded as
-// HTTPS by a trusted reverse proxy still counts as secure.
-func (s *Server) requestIsSecure(r *http.Request) bool {
+// requestTransportIsSecure reports whether the client reached the service over
+// HTTPS, consulting the proxy-aware auth checker when one is configured and
+// otherwise falling back to the direct TLS state. It deliberately uses the
+// transport signal rather than the exposure policy: HSTS must only be emitted
+// over genuine HTTPS so plain-HTTP LAN hosts are never pinned to TLS.
+func (s *Server) requestTransportIsSecure(r *http.Request) bool {
 	if s.auth != nil {
-		return s.auth.RequestIsSecure(r)
+		return s.auth.TransportIsSecure(r)
 	}
 	return r.TLS != nil
 }

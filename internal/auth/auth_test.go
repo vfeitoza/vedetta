@@ -137,6 +137,27 @@ func TestSetSessionCookies_SecureTransportUsesSecureCookies(t *testing.T) {
 	}
 }
 
+func TestTransportIsSecure_IgnoresExposurePolicy(t *testing.T) {
+	c := newChecker(t, config.APIConfig{Exposure: "lan"})
+
+	// On a lan-exposure deployment RequestIsSecure returns true by policy even
+	// for plain HTTP. TransportIsSecure must instead reflect the actual
+	// transport so it can gate HSTS without pinning HTTP-only LAN hosts to TLS.
+	httpReq := httptest.NewRequest(http.MethodGet, "http://vedetta.local/", nil)
+	if !c.RequestIsSecure(httpReq) {
+		t.Fatal("precondition: lan exposure should treat a plain HTTP request as policy-secure")
+	}
+	if c.TransportIsSecure(httpReq) {
+		t.Fatal("plain HTTP must not be transport-secure even under lan exposure")
+	}
+
+	tlsReq := httptest.NewRequest(http.MethodGet, "https://vedetta.local/", nil)
+	tlsReq.TLS = &tls.ConnectionState{}
+	if !c.TransportIsSecure(tlsReq) {
+		t.Fatal("direct TLS request must be transport-secure")
+	}
+}
+
 func TestBearerTokenAuthentication(t *testing.T) {
 	c := newChecker(t, config.APIConfig{Exposure: "lan"})
 
