@@ -34,6 +34,7 @@ import (
 	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/storage"
 	"github.com/rvben/vedetta/internal/stream"
+	"github.com/rvben/vedetta/internal/tracing"
 	"github.com/rvben/vedetta/internal/update"
 	"github.com/rvben/vedetta/internal/watchdog"
 	"golang.org/x/crypto/bcrypt"
@@ -170,6 +171,13 @@ func main() {
 			cfg = config.Defaults()
 		}
 
+		tp, _ := tracing.Init(ctx, tracing.Config(cfg.Tracing), Version)
+		defer func() {
+			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer scancel()
+			_ = tp.Shutdown(sctx)
+		}()
+
 		// Seed auth users from config into DB
 		for _, user := range cfg.Auth.Users {
 			if err := db.SeedAuthUser(user.Username, user.PasswordHash); err != nil {
@@ -193,6 +201,7 @@ func main() {
 		startOnvifSubscribers(ctx, cfg, server)
 
 		// Transition the running server to full mode
+		server.SetTracingEnabled(cfg.Tracing.Enabled)
 		server.TransitionToFull(authChecker)
 		server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients, cfg.WebRTC)
 		server.ObjectMatchThreshold = cfg.Detect.ObjectMatchThreshold
@@ -274,6 +283,15 @@ func main() {
 		server.SetUpdateChecker(checker)
 	}
 	server.SetContext(ctx)
+
+	tp, _ := tracing.Init(ctx, tracing.Config(cfg.Tracing), Version)
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = tp.Shutdown(sctx)
+	}()
+	server.SetTracingEnabled(cfg.Tracing.Enabled)
+
 	go func() {
 		if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("API server failed", "error", err)
