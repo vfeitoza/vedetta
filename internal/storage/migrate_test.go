@@ -210,6 +210,34 @@ func TestMigrate_V2CanonicalizesLegacyRFC3339(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// object_sightings.timestamp is ordered by ListObjectSightings;
+	// auth_sessions.expires_at is text-compared by DeleteExpiredSessions;
+	// api_tokens.created_at is ordered by ListAPITokensByUser. All three are
+	// written via utc() in production, so legacy "T" rows must be canonicalized.
+	if _, err := db.Exec(
+		`INSERT INTO known_objects (id, name, label) VALUES (?, ?, ?)`,
+		1, "car1", "car",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO object_sightings (event_id, camera, object_id, similarity, timestamp) VALUES (?, ?, ?, ?, ?)`,
+		"e1", "cam1", 1, 0.5, "2024-01-02T03:04:05Z",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO auth_sessions (id, username, csrf_token, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"s1", "admin", "csrf", "2024-01-02T03:04:05Z", "2024-01-02T03:04:05Z", "2024-01-02T04:04:05Z",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO api_tokens (username, name, token_prefix, token_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"admin", "tok", "abcd", []byte("hash"), "2024-01-02T03:04:05Z",
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := migrate(db); err != nil {
 		t.Fatalf("v2 migrate: %v", err)
@@ -229,6 +257,9 @@ func TestMigrate_V2CanonicalizesLegacyRFC3339(t *testing.T) {
 		"SELECT CAST(timestamp AS TEXT) FROM events",
 		"SELECT CAST(end_time AS TEXT) FROM events",
 		"SELECT CAST(bucket AS TEXT) FROM motion_activity",
+		"SELECT CAST(timestamp AS TEXT) FROM object_sightings",
+		"SELECT CAST(expires_at AS TEXT) FROM auth_sessions",
+		"SELECT CAST(created_at AS TEXT) FROM api_tokens",
 	} {
 		var raw string
 		if err := db.QueryRow(q).Scan(&raw); err != nil {

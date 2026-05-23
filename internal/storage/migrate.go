@@ -438,9 +438,16 @@ func needsNormalization(s string) bool {
 		(strings.Contains(s, "+") && !strings.HasSuffix(strings.TrimSpace(s), "+0000 UTC"))
 }
 
-// timestampColumns lists every DATETIME column whose stored text is compared or
-// ordered as a string. recanonicalizeTimestamps rewrites them into one uniform
-// format so bare (index-using) comparisons are correct.
+// timestampColumns lists every DATETIME column that the application writes via
+// utc() AND that is compared or ordered as a string (range query, WHERE, or
+// ORDER BY). recanonicalizeTimestamps rewrites them into one uniform format so
+// bare (index-using) comparisons are correct.
+//
+// Columns defaulting to CURRENT_TIMESTAMP (e.g. people.created_at,
+// object_references.created_at) are deliberately excluded: SQLite writes those
+// as "2006-01-02 15:04:05" with no zone suffix, so recanonicalizing existing
+// rows to the " +0000 UTC" form would make them sort in a different
+// lexicographic group than every future CURRENT_TIMESTAMP insert.
 var timestampColumns = []struct {
 	table  string
 	column string
@@ -451,6 +458,9 @@ var timestampColumns = []struct {
 	{"events", "end_time"},
 	{"motion_activity", "bucket"},
 	{"faces", "timestamp"},
+	{"object_sightings", "timestamp"},
+	{"auth_sessions", "expires_at"},
+	{"api_tokens", "created_at"},
 }
 
 // storedTimeLayouts are the historical on-disk timestamp formats, tried in turn
