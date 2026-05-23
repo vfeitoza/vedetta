@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rvben/vedetta/internal/backoff"
 )
 
 // OnvifEventType classifies ONVIF events.
@@ -78,10 +81,12 @@ func (s *OnvifEventSubscriber) Run(ctx context.Context) {
 		if err := s.subscribe(ctx); err != nil {
 			slog.Warn("ONVIF subscribe failed, retrying", "camera", s.cameraName, "error", err)
 		}
+		// Jitter the retry so cameras that fail their subscription together (e.g.
+		// a switch reboot) do not all re-subscribe in lockstep.
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(10 * time.Second):
+		case <-time.After(backoff.Jitter(10*time.Second, rand.Float64())):
 		}
 	}
 }

@@ -3,6 +3,7 @@ package rtsp
 import (
 	"context"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
+
+	"github.com/rvben/vedetta/internal/backoff"
 )
 
 // Source wraps a gortsplib RTSP client, providing reconnection and consumer fan-out.
@@ -125,7 +128,7 @@ func (s *Source) WaitForVideoParams(ctx context.Context) bool {
 // Connect starts reading from the RTSP stream, reconnecting on failure.
 // Blocks until ctx is cancelled.
 func (s *Source) Connect(ctx context.Context) {
-	backoff := 5 * time.Second
+	b := 5 * time.Second
 	const maxBackoff = 2 * time.Minute
 
 	for {
@@ -142,14 +145,14 @@ func (s *Source) Connect(ctx context.Context) {
 		if err == nil {
 			// Successful connection ended cleanly (e.g., server closed).
 			// Reset backoff for quick reconnect.
-			backoff = time.Second
+			b = time.Second
 		}
 
 		if err != nil {
 			slog.Error("RTSP connection error, reconnecting",
 				"url", SanitizeURL(s.url),
 				"error", err,
-				"retry_in", backoff,
+				"retry_in", b,
 			)
 		} else {
 			slog.Info("RTSP connection closed, reconnecting", "url", SanitizeURL(s.url))
@@ -157,15 +160,17 @@ func (s *Source) Connect(ctx context.Context) {
 
 		s.notifyDisconnect()
 
+		// Jitter the wait so a fleet of sources that drop together (NVR restart,
+		// switch reboot) does not reconnect in lockstep.
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-time.After(backoff.Jitter(b, rand.Float64())):
 		}
 
-		backoff = time.Duration(float64(backoff) * 1.5)
-		if backoff > maxBackoff {
-			backoff = maxBackoff
+		b = time.Duration(float64(b) * 1.5)
+		if b > maxBackoff {
+			b = maxBackoff
 		}
 	}
 }
@@ -255,8 +260,8 @@ func (s *Source) extractTracks(desc *description.Session) {
 			switch f := forma.(type) {
 			case *format.H264:
 				ti := &TrackInfo{
-					Codec:     "H264",
-					ClockRate: f.ClockRate(),
+					Codec:       "H264",
+					ClockRate:   f.ClockRate(),
 					IsVideo:     true,
 					PayloadType: f.PayloadType(),
 				}
