@@ -3,11 +3,25 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
+	"github.com/rvben/vedetta/internal/netguard"
 	"github.com/rvben/vedetta/internal/rtsp"
 )
+
+// validateRTSPTarget extracts the host from an RTSP URL and runs it through the
+// SSRF guard so the "test connection" endpoints cannot be pointed at the cloud
+// metadata / link-local range. Private and loopback hosts (real cameras) pass.
+func validateRTSPTarget(ctx context.Context, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("invalid URL")
+	}
+	return netguard.CheckHost(ctx, u.Hostname())
+}
 
 // TestRTSPConnection dials an RTSP URL (DESCRIBE only) and reports codec,
 // resolution, and audio info. Used by the UI "Test connection" button.
@@ -35,6 +49,11 @@ func (s *Server) TestRTSPConnection(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+
+	if err := validateRTSPTarget(ctx, req.URL); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 
 	result, err := rtsp.Probe(ctx, req.URL)
 	if err != nil {

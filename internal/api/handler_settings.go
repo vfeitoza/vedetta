@@ -8,6 +8,7 @@ import (
 
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/mqtt"
+	"github.com/rvben/vedetta/internal/netguard"
 )
 
 // resolveBrokerSecret implements the write-only MQTT password convention. A
@@ -115,6 +116,13 @@ func (s *Server) TestMQTTConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	// Refuse to dial the cloud-metadata / link-local range so the test endpoint
+	// cannot be abused as an SSRF pivot. Private and loopback brokers pass.
+	if err := netguard.CheckHost(r.Context(), req.Host); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"status": "error", "error": err.Error()})
 		return
 	}
 

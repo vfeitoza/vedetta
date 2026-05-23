@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -262,6 +263,33 @@ func TestUpdateMQTTSettings_SetsNewPassword(t *testing.T) {
 	}
 	if srv.mqttConfig.Password != "new-secret" {
 		t.Fatalf("expected new password to be applied, got %q", srv.mqttConfig.Password)
+	}
+}
+
+// The MQTT test endpoint must refuse to dial the cloud-metadata / link-local
+// range before connecting, so it cannot be abused as an SSRF pivot.
+func TestTestMQTTConnection_BlocksLinkLocal(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	payload := `{"host":"169.254.169.254","port":1883,"username":"","password":""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/mqtt/test", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.TestMQTTConnection(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for blocked target, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "error" {
+		t.Fatalf("expected status=error, got %v", resp)
+	}
+	if msg, _ := resp["error"].(string); !strings.Contains(msg, "not allowed") {
+		t.Fatalf("expected error to mention 'not allowed', got %q", msg)
 	}
 }
 

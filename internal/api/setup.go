@@ -425,6 +425,11 @@ func (h *SetupHandler) HandleTestRTSP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
+	if err := validateRTSPTarget(ctx, req.URL); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
 	result, err := rtsp.Probe(ctx, req.URL)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
