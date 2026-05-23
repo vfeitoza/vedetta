@@ -14,7 +14,35 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
+	"time"
 )
+
+// Dialer returns a *net.Dialer that refuses, at connect time, to dial a blocked
+// address. Its Control hook runs after DNS resolution on the concrete IP about
+// to be dialed, so it closes the DNS-rebinding window that a pre-dial hostname
+// check leaves open. timeout bounds each connection attempt (0 = no per-dial
+// timeout; rely on the context).
+func Dialer(timeout time.Duration) *net.Dialer {
+	return &net.Dialer{Timeout: timeout, Control: dialControl}
+}
+
+// dialControl is the net.Dialer.Control hook enforcing the same policy as
+// CheckHost against the concrete address the dialer is about to connect to.
+func dialControl(_ string, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("connection to %q is not allowed: unresolved address", address)
+	}
+	if reason := blockedReason(ip); reason != "" {
+		return fmt.Errorf("connection to %s is not allowed: %s", ip, reason)
+	}
+	return nil
+}
 
 // CheckHost resolves host (a hostname or IP literal) and returns an error if it,
 // or any address it resolves to, falls in a blocked range. A blank host is an

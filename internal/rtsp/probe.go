@@ -9,6 +9,8 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+
+	"github.com/rvben/vedetta/internal/netguard"
 )
 
 // ProbeResult summarizes what an RTSP DESCRIBE returned.
@@ -38,6 +40,10 @@ func Probe(ctx context.Context, rawURL string) (ProbeResult, error) {
 		Scheme:   u.Scheme,
 		Host:     u.Host,
 		Protocol: &proto,
+		// Probe dials a user-supplied URL, so enforce the SSRF policy at
+		// connect time against the resolved address (closes the DNS-rebinding
+		// window left by a hostname pre-check). ctx carries the deadline.
+		DialContext: netguard.Dialer(0).DialContext,
 	}
 
 	done := make(chan error, 1)

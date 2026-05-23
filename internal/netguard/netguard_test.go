@@ -3,7 +3,9 @@ package netguard
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
+	"time"
 )
 
 // IP literals short-circuit the resolver, so these cases stay hermetic (no DNS).
@@ -41,6 +43,47 @@ func TestCheckHost_IPLiterals(t *testing.T) {
 func TestCheckHost_EmptyHost(t *testing.T) {
 	if err := CheckHost(context.Background(), "  "); err == nil {
 		t.Fatal("CheckHost with blank host = nil, want error")
+	}
+}
+
+// The dial-time Control hook is the authoritative guard: it inspects the
+// concrete post-resolution address, closing the DNS-rebinding window a
+// hostname pre-check leaves open.
+func TestDialControl(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		blocked bool
+	}{
+		{"private allowed", "192.168.1.5:554", false},
+		{"loopback allowed", "127.0.0.1:1883", false},
+		{"metadata blocked", "169.254.169.254:80", true},
+		{"link-local v6 blocked", "[fe80::1]:80", true},
+		{"unspecified blocked", "0.0.0.0:80", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := dialControl("tcp", tt.address, nil)
+			if tt.blocked && err == nil {
+				t.Fatalf("dialControl(%q) = nil, want blocked", tt.address)
+			}
+			if !tt.blocked && err != nil {
+				t.Fatalf("dialControl(%q) = %v, want allowed", tt.address, err)
+			}
+		})
+	}
+}
+
+// A net.Dialer built by Dialer refuses link-local targets at connect time
+// (the Control hook fires before the socket connects, so this stays hermetic).
+func TestDialer_RefusesLinkLocal(t *testing.T) {
+	d := Dialer(2 * time.Second)
+	_, err := d.DialContext(context.Background(), "tcp", "169.254.169.254:9")
+	if err == nil {
+		t.Fatal("expected dial to be refused")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("expected error to mention 'not allowed', got %v", err)
 	}
 }
 

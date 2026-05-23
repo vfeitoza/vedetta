@@ -11,6 +11,7 @@ import (
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/netguard"
 )
 
 // Publisher defines the interface for MQTT publishing operations.
@@ -45,7 +46,11 @@ func New(cfg config.MQTTConfig) (*Client, error) {
 		AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.Host, cfg.Port)).
 		SetClientID("vedetta").
 		SetAutoReconnect(true).
-		SetWill(availabilityTopic, "offline", 1, true)
+		SetWill(availabilityTopic, "offline", 1, true).
+		// Enforce the SSRF policy at connect time against the resolved broker
+		// address. The dial timeout matches paho's default so the connection
+		// behavior is otherwise unchanged.
+		SetDialer(netguard.Dialer(30 * time.Second))
 
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
