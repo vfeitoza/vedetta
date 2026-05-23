@@ -327,6 +327,14 @@ func ensureColumn(db *sql.DB, table, column, ddl string) error {
 		return nil
 	}
 	if _, err := db.Exec(ddl); err != nil {
+		// A concurrent migrator (e.g. a second process during a restart) may
+		// have added the column between our check and our ALTER, in which case
+		// SQLite returns a duplicate-column error. Re-check: a column that now
+		// exists means the race was benign; a still-missing column is a real
+		// failure that must surface.
+		if present, checkErr := columnExists(db, table, column); checkErr == nil && present {
+			return nil
+		}
 		return err
 	}
 	return nil

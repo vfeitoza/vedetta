@@ -116,6 +116,61 @@ func TestMigrate_UpgradesLegacySchema(t *testing.T) {
 	}
 }
 
+// TestMigrate_ConcurrentLegacyUpgrade reproduces two processes migrating the
+// same pre-versioned database at once. Both can read user_version=0 and observe
+// a legacy column as missing before either ALTER commits; the loser must
+// tolerate the resulting duplicate-column error rather than fail startup.
+func TestMigrate_ConcurrentLegacyUpgrade(t *testing.T) {
+	seed, path := openRaw(t)
+	// Legacy events table missing every later-added column, so all 13
+	// backfill ALTERs contend.
+	if _, err := seed.Exec(`
+		CREATE TABLE events (
+			id TEXT PRIMARY KEY,
+			camera TEXT NOT NULL,
+			label TEXT NOT NULL,
+			score REAL NOT NULL,
+			box_x1 INTEGER, box_y1 INTEGER, box_x2 INTEGER, box_y2 INTEGER,
+			timestamp DATETIME NOT NULL,
+			snapshot_path TEXT,
+			clip_path TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each worker opens its own *sql.DB (its own connection pool) on the same
+	// file, mirroring separate processes: WAL lets them all read table_info
+	// concurrently and observe the same missing columns before any ALTER wins.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+
+	const workers = 8
+	errs := make(chan error, workers)
+	start := make(chan struct{})
+	for i := 0; i < workers; i++ {
+		go func() {
+			conn, err := sql.Open("sqlite", dsn)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			<-start // align goroutines to maximize the check-then-alter race
+			errs <- migrate(conn)
+		}()
+	}
+	close(start)
+	for i := 0; i < workers; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent migrate failed: %v", err)
+		}
+	}
+
+	if got := mustUserVersion(t, seed); got != currentSchemaVersion {
+		t.Errorf("user_version = %d, want %d", got, currentSchemaVersion)
+	}
+}
+
 // TestColumnExists verifies detection of present and absent columns.
 func TestColumnExists(t *testing.T) {
 	db, _ := openRaw(t)
