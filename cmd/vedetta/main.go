@@ -909,7 +909,11 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if mc := sub.mqttClient.Load(); mc != nil {
 					var objectName string
 					if pe.Type == "zone_enter" {
-						objectName = db.LatestObjectNameForZone(pe.ZoneName, pe.Label)
+						var err error
+						objectName, err = db.LatestObjectNameForZone(pe.ZoneName, pe.Label)
+						if err != nil {
+							slog.Error("failed to look up latest object name for zone", "zone", pe.ZoneName, "label", pe.Label, "error", err)
+						}
 					}
 					mc.PublishPresence(pe, objectName)
 				}

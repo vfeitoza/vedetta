@@ -1085,11 +1085,19 @@ func (d *DB) UpdateZonePresence(zoneID int, label string, present bool) error {
 }
 
 // LatestObjectNameForZone returns the object_name from the most recent event
-// matching the given zone and label, or "" if none found.
-func (d *DB) LatestObjectNameForZone(zoneName, label string) string {
+// matching the given zone and label. A clean absence of matching events yields
+// ("", nil); a genuine query failure is returned so callers do not mistake an
+// error for "no object".
+func (d *DB) LatestObjectNameForZone(zoneName, label string) (string, error) {
 	var name sql.NullString
-	d.db.QueryRow(`SELECT object_name FROM events WHERE zone_name = ? AND label = ? AND object_name IS NOT NULL AND object_name != '' ORDER BY timestamp DESC LIMIT 1`, zoneName, label).Scan(&name)
-	return name.String
+	err := d.db.QueryRow(`SELECT object_name FROM events WHERE zone_name = ? AND label = ? AND object_name IS NOT NULL AND object_name != '' ORDER BY timestamp DESC LIMIT 1`, zoneName, label).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return name.String, nil
 }
 
 // UpdateEventZone sets the zone_name on an event.
@@ -1523,7 +1531,9 @@ func (d *DB) ListAPITokensByUser(username string) ([]APIToken, error) {
 			return nil, err
 		}
 		if scopesJSON != "" {
-			_ = json.Unmarshal([]byte(scopesJSON), &token.Scopes)
+			if err := json.Unmarshal([]byte(scopesJSON), &token.Scopes); err != nil {
+				return nil, fmt.Errorf("unmarshal scopes for token %d: %w", token.ID, err)
+			}
 		}
 		if lastUsedAt.Valid {
 			token.LastUsedAt = lastUsedAt.Time
