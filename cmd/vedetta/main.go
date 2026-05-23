@@ -702,6 +702,29 @@ func closeSubsystems(sub *subsystems) {
 	sub.hub.Close()
 }
 
+// clipSaver is the subset of *recording.Recorder that clip extraction needs,
+// extracted so the clip.extract span can be unit-tested with a stub.
+type clipSaver interface {
+	SaveClip(ctx context.Context, ev camera.Event) error
+}
+
+// Compile-time check that *recording.Recorder satisfies clipSaver.
+var _ clipSaver = (*recording.Recorder)(nil)
+
+// extractClipSpan runs one clip-extraction attempt inside a clip.extract span,
+// recording an error status when the attempt fails. The retry loop in the
+// event loop calls this per attempt.
+func extractClipSpan(ctx context.Context, tracer trace.Tracer, saver clipSaver, ev camera.Event) error {
+	_, span := tracer.Start(ctx, "clip.extract")
+	defer span.End()
+	err := saver.SaveClip(ctx, ev)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "save clip")
+	}
+	return err
+}
+
 // runEventLoop starts the goroutine that manages event lifecycles, including
 // clip extraction scheduling, cooldowns, presence updates, MQTT publishing,
 // face recognition, and object re-identification.
@@ -778,6 +801,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				}()
 			}
 
+			// Capture the parented context before launching the goroutine so the
+			// clip.extract spans share the same trace as the originating event.
+			clipCtx := trace.ContextWithSpanContext(ctx, ae.rootSpanCtx)
+
 			// Schedule clip extraction after post-capture + segment finalization buffer
 			go func() {
 				delay := cfg.Recording.PostCapture + 15*time.Second
@@ -787,7 +814,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					return
 				}
 				for attempt := range 5 {
-					err := sub.recorder.SaveClip(ctx, ev)
+					err := extractClipSpan(clipCtx, tracer, sub.recorder, ev)
 					if err == nil {
 						return
 					}

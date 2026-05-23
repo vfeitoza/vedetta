@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -190,5 +192,47 @@ func TestRunEventLoopTracingEnd(t *testing.T) {
 	}
 	if endSpan.SpanContext().TraceID() != root.SpanContext().TraceID() {
 		t.Errorf("event.end trace id != root trace id")
+	}
+}
+
+type stubClipSaver struct{ err error }
+
+func (s stubClipSaver) SaveClip(ctx context.Context, ev camera.Event) error { return s.err }
+
+func TestExtractClipSpanSuccess(t *testing.T) {
+	tracer, sr := newTestTracer()
+	err := extractClipSpan(context.Background(), tracer, stubClipSaver{}, camera.Event{ID: "e1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	span := spanByName(sr.Ended(), "clip.extract")
+	if span == nil {
+		t.Fatal("clip.extract span not recorded")
+	}
+	if span.Status().Code == codes.Error {
+		t.Errorf("status = Error, want unset on success")
+	}
+}
+
+func TestExtractClipSpanError(t *testing.T) {
+	tracer, sr := newTestTracer()
+	wantErr := errors.New("clip not ready")
+	err := extractClipSpan(context.Background(), tracer, stubClipSaver{err: wantErr}, camera.Event{ID: "e2"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	span := spanByName(sr.Ended(), "clip.extract")
+	if span == nil {
+		t.Fatal("clip.extract span not recorded")
+	}
+	if span.Status().Code != codes.Error {
+		t.Errorf("status = %v, want Error", span.Status().Code)
+	}
+	if span.Status().Description != "save clip" {
+		t.Errorf("status description = %q, want %q", span.Status().Description, "save clip")
+	}
+	events := span.Events()
+	if len(events) == 0 || events[0].Name != "exception" {
+		t.Errorf("expected exception event from RecordError, got %v", events)
 	}
 }
