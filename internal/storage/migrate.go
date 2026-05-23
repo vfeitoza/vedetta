@@ -40,6 +40,7 @@ const baselineSchema = `
 	CREATE INDEX IF NOT EXISTS idx_events_camera ON events(camera);
 	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_events_label ON events(label);
+	CREATE INDEX IF NOT EXISTS idx_events_camera_timestamp ON events(camera, timestamp);
 
 	CREATE TABLE IF NOT EXISTS segments (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +52,7 @@ const baselineSchema = `
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_segments_camera_time ON segments(camera, start_time);
+	CREATE INDEX IF NOT EXISTS idx_segments_end_time ON segments(end_time);
 
 	CREATE TABLE IF NOT EXISTS zones (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

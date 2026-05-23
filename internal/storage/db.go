@@ -248,6 +248,32 @@ func utc(t time.Time) time.Time {
 	return t.UTC().Round(0)
 }
 
+// Timestamp columns are stored in the driver's canonical UTC text form (the v2
+// migration guarantees this), so timestamp predicates compare the column
+// directly against a utc()-bound time.Time. No replace() wrapper is used: it
+// would force a full table scan instead of an index search. These constants
+// hold the exact SQL the corresponding methods run so the query-plan tests can
+// assert index usage against the production statement.
+const (
+	sqlSegmentsForDateByCamera = `
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE camera = ? AND start_time >= ? AND start_time < ?
+		ORDER BY start_time`
+
+	sqlEventsForDateByCamera = `
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
+		FROM events
+		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
+		ORDER BY timestamp`
+
+	sqlSegmentsEndingBefore = `
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE end_time < ?
+		ORDER BY end_time ASC`
+)
+
 // SaveSegment inserts or updates a segment record in the database.
 // On conflict with an existing path, only the mutable fields (start_time, end_time,
 // size_bytes) are updated — recompression state is preserved.
@@ -274,9 +300,8 @@ func (d *DB) SaveMotionActivity(camera string, bucket time.Time, score float64) 
 func (d *DB) GetMotionActivity(camera string, date time.Time) ([]MotionBucket, error) {
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	const layout = "2006-01-02 15:04:05"
-	rows, err := d.db.Query("SELECT bucket, score FROM motion_activity WHERE camera = ? AND replace(bucket, 'T', ' ') >= ? AND replace(bucket, 'T', ' ') < ? ORDER BY bucket",
-		camera, dayStart.Format(layout), dayEnd.Format(layout))
+	rows, err := d.db.Query("SELECT bucket, score FROM motion_activity WHERE camera = ? AND bucket >= ? AND bucket < ? ORDER BY bucket",
+		camera, utc(dayStart), utc(dayEnd))
 	if err != nil {
 		return nil, err
 	}
@@ -300,15 +325,12 @@ func (d *DB) DeleteMotionActivityBefore(cutoff time.Time) error {
 
 // QuerySegments returns segments for a camera that overlap the given time range.
 func (d *DB) QuerySegments(cameraName string, from, to time.Time) ([]SegmentRecord, error) {
-	// Use replace() to normalize the stored timestamps so that string comparison
-	// works regardless of whether they were stored in Go's String() format
-	// ("2006-01-02 15:04:05 +0000 UTC") or RFC3339 ("2006-01-02T15:04:05Z").
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
-		  AND replace(start_time, 'T', ' ') < replace(?, 'T', ' ')
-		  AND replace(end_time, 'T', ' ') > replace(?, 'T', ' ')
+		  AND start_time < ?
+		  AND end_time > ?
 		ORDER BY start_time`,
 		cameraName, utc(to), utc(from),
 	)
@@ -395,7 +417,7 @@ func (d *DB) GetSegmentByID(id int64) (*SegmentRecord, error) {
 func (d *DB) CountEventsToday() (int, error) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM events WHERE replace(timestamp, 'T', ' ') >= ?", today.Format("2006-01-02 15:04:05")).Scan(&count)
+	err := d.db.QueryRow("SELECT COUNT(*) FROM events WHERE timestamp >= ?", utc(today)).Scan(&count)
 	return count, err
 }
 
@@ -448,29 +470,17 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
-	// Use replace() to normalize timestamps for comparison — the DB may store
-	// timestamps in Go's String() format or RFC3339 format.
-	const layout = "2006-01-02 15:04:05"
-	dayStartStr := dayStart.Format(layout)
-	dayEndStr := dayEnd.Format(layout)
-
 	var rows *sql.Rows
 	var err error
 	if cameraName != "" {
-		rows, err = d.db.Query(`
-			SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
-			FROM segments
-			WHERE camera = ? AND replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
-			ORDER BY start_time`,
-			cameraName, dayStartStr, dayEndStr,
-		)
+		rows, err = d.db.Query(sqlSegmentsForDateByCamera, cameraName, utc(dayStart), utc(dayEnd))
 	} else {
 		rows, err = d.db.Query(`
 			SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 			FROM segments
-			WHERE replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
+			WHERE start_time >= ? AND start_time < ?
 			ORDER BY start_time`,
-			dayStartStr, dayEndStr,
+			utc(dayStart), utc(dayEnd),
 		)
 	}
 	if err != nil {
@@ -486,14 +496,7 @@ func (d *DB) QueryEventsForDate(cameraName string, date time.Time) ([]camera.Eve
 	dayStart := date.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
-	const evLayout = "2006-01-02 15:04:05"
-	rows, err := d.db.Query(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
-		FROM events
-		WHERE camera = ? AND replace(timestamp, 'T', ' ') >= ? AND replace(timestamp, 'T', ' ') < ?
-		ORDER BY timestamp`,
-		cameraName, dayStart.Format(evLayout), dayEnd.Format(evLayout),
-	)
+	rows, err := d.db.Query(sqlEventsForDateByCamera, cameraName, utc(dayStart), utc(dayEnd))
 	if err != nil {
 		return nil, err
 	}
@@ -539,13 +542,7 @@ func (d *DB) SegmentBytesByCamera() (map[string]int64, error) {
 // in the current config. Used by retention cleanup to catch orphaned segments
 // that filesystem-based iteration would miss.
 func (d *DB) GetSegmentsEndingBefore(cutoff time.Time) ([]SegmentRecord, error) {
-	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
-		FROM segments
-		WHERE replace(end_time, 'T', ' ') < replace(?, 'T', ' ')
-		ORDER BY end_time ASC`,
-		cutoff.UTC().Format(time.RFC3339Nano),
-	)
+	rows, err := d.db.Query(sqlSegmentsEndingBefore, utc(cutoff))
 	if err != nil {
 		return nil, err
 	}
@@ -560,10 +557,10 @@ func (d *DB) GetSegmentsEndingBeforeForCamera(camera string, cutoff time.Time) (
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
-		WHERE camera = ? AND replace(end_time, 'T', ' ') < replace(?, 'T', ' ')
+		WHERE camera = ? AND end_time < ?
 		ORDER BY end_time ASC`,
 		camera,
-		cutoff.UTC().Format(time.RFC3339Nano),
+		utc(cutoff),
 	)
 	if err != nil {
 		return nil, err
@@ -593,14 +590,13 @@ func (d *DB) GetOldestSegments(limit int) ([]SegmentRecord, error) {
 // delete (the oldest of what remains), while leaving anything younger
 // than cutoff untouched as the minimum-retention safety floor.
 func (d *DB) GetOldestSegmentsOlderThan(limit int, cutoff time.Time) ([]SegmentRecord, error) {
-	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
-		WHERE replace(end_time, 'T', ' ') < ?
+		WHERE end_time < ?
 		ORDER BY start_time ASC
 		LIMIT ?`,
-		utc(cutoff).Format(layout),
+		utc(cutoff),
 		limit,
 	)
 	if err != nil {
@@ -615,12 +611,11 @@ func (d *DB) GetOldestSegmentsOlderThan(limit int, cutoff time.Time) ([]SegmentR
 // threshold so it covers at least one full segment. Returns 0 if no segments
 // match.
 func (d *DB) GetLargestSegmentSizeSince(since time.Time) (int64, error) {
-	const layout = "2006-01-02 15:04:05"
 	var max sql.NullInt64
 	err := d.db.QueryRow(`
 		SELECT MAX(size_bytes) FROM segments
-		WHERE replace(start_time, 'T', ' ') > ?`,
-		utc(since).Format(layout),
+		WHERE start_time > ?`,
+		utc(since),
 	).Scan(&max)
 	if err != nil {
 		return 0, err
@@ -633,18 +628,17 @@ func (d *DB) GetLargestSegmentSizeSince(since time.Time) (int64, error) {
 // failures. Results are ordered by size_bytes DESC so the largest segments are
 // compressed first, maximising recovered disk space per operation.
 func (d *DB) GetRecompressionCandidatesBySize(camera string, cutoff time.Time, limit int) ([]SegmentRecord, error) {
-	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
-		  AND replace(end_time, 'T', ' ') < ?
+		  AND end_time < ?
 		  AND recompressed = 0
 		  AND recompress_failures < 3
 		ORDER BY size_bytes DESC, start_time ASC
 		LIMIT ?`,
 		camera,
-		utc(cutoff).Format(layout),
+		utc(cutoff),
 		limit,
 	)
 	if err != nil {
@@ -658,16 +652,15 @@ func (d *DB) GetRecompressionCandidatesBySize(camera string, cutoff time.Time, l
 // not yet recompressed, fewer than 3 failures, end_time before olderThan,
 // ordered oldest first.
 func (d *DB) GetSegmentsForRecompression(cameraName string, olderThan time.Time) ([]SegmentRecord, error) {
-	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
 		  AND recompressed = FALSE
 		  AND recompress_failures < 3
-		  AND replace(end_time, 'T', ' ') < ?
+		  AND end_time < ?
 		ORDER BY end_time ASC`,
-		cameraName, utc(olderThan).Format(layout),
+		cameraName, utc(olderThan),
 	)
 	if err != nil {
 		return nil, err
@@ -679,13 +672,12 @@ func (d *DB) GetSegmentsForRecompression(cameraName string, olderThan time.Time)
 // SegmentsByCameraOlderThan returns all segments for the given camera whose
 // start_time is before cutoff, ordered oldest first.
 func (d *DB) SegmentsByCameraOlderThan(camera string, cutoff time.Time) ([]SegmentRecord, error) {
-	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
-		WHERE camera = ? AND replace(start_time, 'T', ' ') < ?
+		WHERE camera = ? AND start_time < ?
 		ORDER BY start_time ASC`,
-		camera, utc(cutoff).Format(layout),
+		camera, utc(cutoff),
 	)
 	if err != nil {
 		return nil, err
@@ -697,15 +689,14 @@ func (d *DB) SegmentsByCameraOlderThan(camera string, cutoff time.Time) ([]Segme
 // SegmentsByCameraInRange returns all segments for the given camera whose
 // start_time falls in the half-open interval [from, to), ordered oldest first.
 func (d *DB) SegmentsByCameraInRange(camera string, from, to time.Time) ([]SegmentRecord, error) {
-	const layout = "2006-01-02 15:04:05"
 	rows, err := d.db.Query(`
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
 		WHERE camera = ?
-		  AND replace(start_time, 'T', ' ') >= ?
-		  AND replace(start_time, 'T', ' ') < ?
+		  AND start_time >= ?
+		  AND start_time < ?
 		ORDER BY start_time ASC`,
-		camera, utc(from).Format(layout), utc(to).Format(layout),
+		camera, utc(from), utc(to),
 	)
 	if err != nil {
 		return nil, err
@@ -802,24 +793,20 @@ func (d *DB) GetRecordingDays(camera string, year int, month int) ([]int, error)
 	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
-	const layout = "2006-01-02 15:04:05"
-	startStr := monthStart.Format(layout)
-	endStr := monthEnd.Format(layout)
-
 	var rows *sql.Rows
 	var err error
 	if camera != "" {
 		rows, err = d.db.Query(`
 			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
 			FROM segments
-			WHERE camera = ? AND replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
-			ORDER BY day`, camera, startStr, endStr)
+			WHERE camera = ? AND start_time >= ? AND start_time < ?
+			ORDER BY day`, camera, utc(monthStart), utc(monthEnd))
 	} else {
 		rows, err = d.db.Query(`
 			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
 			FROM segments
-			WHERE replace(start_time, 'T', ' ') >= ? AND replace(start_time, 'T', ' ') < ?
-			ORDER BY day`, startStr, endStr)
+			WHERE start_time >= ? AND start_time < ?
+			ORDER BY day`, utc(monthStart), utc(monthEnd))
 	}
 	if err != nil {
 		return nil, err
@@ -1939,8 +1926,8 @@ func (d *DB) CountObjectReferences(objectID int64) (int, error) {
 func (d *DB) SegmentBytesSince(cutoff time.Time) (int64, error) {
 	var bytes sql.NullInt64
 	err := d.db.QueryRow(
-		"SELECT COALESCE(SUM(size_bytes), 0) FROM segments WHERE replace(start_time, 'T', ' ') > replace(?, 'T', ' ')",
-		utc(cutoff).Format("2006-01-02 15:04:05"),
+		"SELECT COALESCE(SUM(size_bytes), 0) FROM segments WHERE start_time > ?",
+		utc(cutoff),
 	).Scan(&bytes)
 	if err != nil {
 		return 0, err
@@ -1959,19 +1946,7 @@ func (d *DB) OldestSegmentTime() (time.Time, error) {
 	if !oldest.Valid {
 		return time.Time{}, nil
 	}
-	for _, layout := range []string{
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02T15:04:05.999999999Z",
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-	} {
-		if t, err := time.Parse(layout, oldest.String); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unparseable start_time: %s", oldest.String)
+	return parseStoredTime(oldest.String)
 }
 
 // GetSetting retrieves the value for a key from the kv_store.
@@ -2372,16 +2347,16 @@ func (d *DB) PerDayCameraSegmentBytes(camera string, days int) ([]DayBytes, erro
 	}
 	// The modernc.org/sqlite driver serializes time.Time via Go's String()
 	// ("2006-01-02 15:04:05.999999999 +0000 UTC"), which SQLite's date
-	// functions cannot parse. Mirror the rest of this file: normalize the
-	// 'T' separator and compare/group as fixed-width text, deriving the day
-	// from the leading "YYYY-MM-DD" rather than strftime/datetime.
+	// functions cannot parse. Derive the day from the fixed-width leading
+	// "YYYY-MM-DD" instead of strftime/datetime, and compare start_time
+	// directly against the canonical (utc-bound) cutoff.
 	cutoff := utc(time.Now().AddDate(0, 0, -days))
 	rows, err := d.db.Query(`
-		SELECT substr(replace(start_time, 'T', ' '), 1, 10) AS day,
+		SELECT substr(start_time, 1, 10) AS day,
 		       COALESCE(SUM(size_bytes), 0) AS bytes
 		FROM segments
 		WHERE camera = ?
-		  AND replace(start_time, 'T', ' ') >= replace(?, 'T', ' ')
+		  AND start_time >= ?
 		GROUP BY day
 		ORDER BY day ASC`,
 		camera, cutoff)
