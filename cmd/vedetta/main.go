@@ -9,7 +9,6 @@ import (
 	"image"
 	"image/jpeg"
 	"log/slog"
-	"math"
 	"net/http"
 
 	"os"
@@ -30,6 +29,7 @@ import (
 	"github.com/rvben/vedetta/internal/mqtt"
 	"github.com/rvben/vedetta/internal/notify"
 	"github.com/rvben/vedetta/internal/recording"
+	"github.com/rvben/vedetta/internal/reid"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/snapshot"
 	"github.com/rvben/vedetta/internal/storage"
@@ -1061,26 +1061,15 @@ func matchFaceToPerson(db *storage.DB, embedding []float32, fr *detect.FaceRecog
 		return 0, 0
 	}
 
-	var bestID int64
-	var bestSim float64
-	threshold := fr.MatchThreshold()
-
-	for _, p := range people {
-		if p.Ignore || len(p.Centroid) == 0 {
-			continue
-		}
-		centroid := detect.BytesToFloat32(p.Centroid)
-		sim := detect.CosineSimilarity(embedding, centroid)
-		if sim > bestSim {
-			bestSim = sim
-			bestID = p.ID
+	candidates := make([]reid.Candidate, len(people))
+	for i, p := range people {
+		candidates[i] = reid.Candidate{
+			ID:       p.ID,
+			Centroid: detect.BytesToFloat32(p.Centroid),
+			Ignore:   p.Ignore,
 		}
 	}
-
-	if bestSim >= threshold {
-		return bestID, bestSim
-	}
-	return 0, 0
+	return reid.BestMatch(embedding, candidates, fr.MatchThreshold())
 }
 
 // updatePersonCentroid updates a person's centroid with a running average.
@@ -1090,31 +1079,8 @@ func updatePersonCentroid(db *storage.DB, personID int64, newEmbedding []float32
 		return
 	}
 
-	if len(p.Centroid) == 0 {
-		_ = db.UpdatePersonCentroid(personID, detect.Float32ToBytes(newEmbedding))
-		return
-	}
-
 	old := detect.BytesToFloat32(p.Centroid)
-	if len(old) != len(newEmbedding) {
-		_ = db.UpdatePersonCentroid(personID, detect.Float32ToBytes(newEmbedding))
-		return
-	}
-
-	alpha := float32(0.3)
-	merged := make([]float32, len(old))
-	var norm float64
-	for i := range merged {
-		merged[i] = (1-alpha)*old[i] + alpha*newEmbedding[i]
-		norm += float64(merged[i]) * float64(merged[i])
-	}
-	if norm > 1e-10 {
-		invNorm := float32(1.0 / math.Sqrt(norm))
-		for i := range merged {
-			merged[i] *= invNorm
-		}
-	}
-
+	merged := reid.BlendCentroid(old, newEmbedding, 0.3)
 	_ = db.UpdatePersonCentroid(personID, detect.Float32ToBytes(merged))
 }
 
@@ -1147,7 +1113,7 @@ func clusterUnmatchedFace(db *storage.DB, newFaceID int64, embedding []float32, 
 		return
 	}
 
-	centroid := averageEmbeddings(embedding, detect.BytesToFloat32(bestFace.Embedding))
+	centroid := reid.AverageNormalized(embedding, detect.BytesToFloat32(bestFace.Embedding))
 	personID, err := db.SavePerson("", false, detect.Float32ToBytes(centroid))
 	if err != nil {
 		slog.Error("failed to create person from cluster", "error", err)
@@ -1156,25 +1122,6 @@ func clusterUnmatchedFace(db *storage.DB, newFaceID int64, embedding []float32, 
 	_ = db.UpdateFacePerson(bestFace.ID, personID, bestSim)
 	_ = db.UpdateFacePerson(newFaceID, personID, 1.0)
 	slog.Info("auto-clustered faces into new person", "person_id", personID, "similarity", fmt.Sprintf("%.3f", bestSim), "camera", camera)
-}
-
-func averageEmbeddings(a, b []float32) []float32 {
-	if len(a) != len(b) {
-		return a
-	}
-	out := make([]float32, len(a))
-	var norm float64
-	for i := range out {
-		out[i] = (a[i] + b[i]) / 2
-		norm += float64(out[i]) * float64(out[i])
-	}
-	if norm > 1e-10 {
-		invNorm := float32(1.0 / math.Sqrt(norm))
-		for i := range out {
-			out[i] *= invNorm
-		}
-	}
-	return out
 }
 
 func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event camera.Event, threshold float64) []string {
