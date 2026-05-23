@@ -137,3 +137,58 @@ func TestRunEventLoopTracingRoot(t *testing.T) {
 		t.Errorf("vedetta.score = %v, want %v", got, want)
 	}
 }
+
+func TestRunEventLoopTracingEnd(t *testing.T) {
+	tracer, sr := newTestTracer()
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	sub := testSubsystems()
+	cfg := testConfig()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	runEventLoop(ctx, cfg, db, sub, nil, tracer)
+
+	ev := camera.Event{
+		ID:         "cam1-t7-456",
+		CameraName: "cam1",
+		Label:      "person",
+		Score:      0.8,
+		TrackID:    7,
+		Timestamp:  time.Now(),
+	}
+	sub.events <- ev
+
+	// Gate: only send EventEnd once the root span is recorded. The event-loop
+	// is a single goroutine processing one select case per iteration, so once
+	// the root span has ended, the active-map insert that follows it completes
+	// before the loop can process the EventEnd we send next. This avoids the
+	// race where a simultaneously-ready EventEnd is handled before the event is
+	// tracked.
+	waitForSpan(t, sr, "event")
+
+	sub.eventEnds <- camera.EventEnd{
+		EventID:    ev.ID,
+		CameraName: "cam1",
+		EndTime:    time.Now(),
+	}
+
+	waitForSpan(t, sr, "event.end")
+
+	spans := sr.Ended()
+	root := spanByName(spans, "event")
+	endSpan := spanByName(spans, "event.end")
+	if root == nil || endSpan == nil {
+		t.Fatalf("missing spans: event=%v event.end=%v", root != nil, endSpan != nil)
+	}
+	if endSpan.Parent().SpanID() != root.SpanContext().SpanID() {
+		t.Errorf("event.end parent = %v, want root %v", endSpan.Parent().SpanID(), root.SpanContext().SpanID())
+	}
+	if endSpan.SpanContext().TraceID() != root.SpanContext().TraceID() {
+		t.Errorf("event.end trace id != root trace id")
+	}
+}

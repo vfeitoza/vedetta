@@ -731,13 +731,20 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			ev.EndTime = endTime
 			duration := endTime.Sub(ev.Timestamp)
 
+			endCtx := trace.ContextWithSpanContext(ctx, ae.rootSpanCtx)
+			_, endSpan := tracer.Start(endCtx, "event.end")
+
 			if err := db.UpdateEventEndTime(ev.ID, endTime); err != nil {
+				endSpan.RecordError(err)
+				endSpan.SetStatus(codes.Error, "update end time")
 				slog.Error("failed to update event end time", "event", ev.ID, "error", err)
 			}
 
 			// Publish event end over MQTT
 			if mc := sub.mqttClient.Load(); mc != nil {
 				if err := mc.PublishEvent(ev, nil); err != nil {
+					endSpan.RecordError(err)
+					endSpan.SetStatus(codes.Error, "publish event end")
 					slog.Error("failed to publish event end", "event", ev.ID, "error", err)
 				}
 
@@ -750,6 +757,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
 				}
 			}
+			endSpan.End()
 
 			slog.Info("event ended",
 				"event", ev.ID,
