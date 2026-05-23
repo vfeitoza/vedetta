@@ -1,9 +1,12 @@
 package mqtt
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +16,19 @@ import (
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/netguard"
 )
+
+// guardedDialBroker is paho's connection opener. It dials the broker through
+// the netguard dialer, whose Control hook rejects link-local / metadata
+// addresses at connect time. Being a custom opener, it also avoids paho's
+// proxy.FromEnvironment wrapping so the guard always inspects the real broker
+// address rather than a SOCKS proxy socket.
+func guardedDialBroker(uri *url.URL, o pahomqtt.ClientOptions) (net.Conn, error) {
+	timeout := o.ConnectTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return netguard.Dialer(timeout).DialContext(context.Background(), "tcp", uri.Host)
+}
 
 // Publisher defines the interface for MQTT publishing operations.
 type Publisher interface {
@@ -47,10 +63,12 @@ func New(cfg config.MQTTConfig) (*Client, error) {
 		SetClientID("vedetta").
 		SetAutoReconnect(true).
 		SetWill(availabilityTopic, "offline", 1, true).
-		// Enforce the SSRF policy at connect time against the resolved broker
-		// address. The dial timeout matches paho's default so the connection
-		// behavior is otherwise unchanged.
-		SetDialer(netguard.Dialer(30 * time.Second))
+		// Open the broker connection ourselves so the SSRF policy is enforced
+		// at connect time against the resolved broker address. A custom opener
+		// also bypasses paho's proxy.FromEnvironment path, which would
+		// otherwise apply the guard only to the SOCKS proxy socket and leave
+		// the real broker target unchecked when ALL_PROXY is set.
+		SetCustomOpenConnectionFn(guardedDialBroker)
 
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
