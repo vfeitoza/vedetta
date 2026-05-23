@@ -404,6 +404,16 @@ func (d *DB) UpdateEventClipAvailability(eventID string, available bool) error {
 	return err
 }
 
+// UpdateEventMediaAvailability sets both media-availability flags in a single
+// row write. Used by reconciliation, which recomputes both at once.
+func (d *DB) UpdateEventMediaAvailability(eventID string, snapshotAvailable, clipAvailable bool) error {
+	_, err := d.db.Exec(
+		"UPDATE events SET snapshot_available = ?, clip_available = ? WHERE id = ?",
+		snapshotAvailable, clipAvailable, eventID,
+	)
+	return err
+}
+
 // EventFilters narrows event queries. Empty fields are ignored.
 type EventFilters struct {
 	Camera string
@@ -1183,16 +1193,45 @@ func (d *DB) DeleteEvent(id string) error {
 	return err
 }
 
-// EventsWithSnapshots returns all events that have a non-empty snapshot_path.
-func (d *DB) EventsWithSnapshots() ([]camera.Event, error) {
+// EventMediaRef is the minimal projection of an event needed to reconcile its
+// recorded media against the filesystem. It deliberately omits the heavy event
+// fields so reconciliation does not hydrate full event rows.
+type EventMediaRef struct {
+	ID                string
+	SnapshotPath      string
+	SnapshotAvailable bool
+	ClipPath          string
+	ClipAvailable     bool
+}
+
+// EventMediaRefs returns the media references for every event that has a
+// non-empty snapshot or clip path. Used by media-availability reconciliation.
+func (d *DB) EventMediaRefs() ([]EventMediaRef, error) {
 	rows, err := d.db.Query(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
-		FROM events WHERE (snapshot_path != '' AND snapshot_path IS NOT NULL) OR (clip_path != '' AND clip_path IS NOT NULL)`)
+		SELECT id, snapshot_path, snapshot_available, clip_path, clip_available
+		FROM events
+		WHERE (snapshot_path != '' AND snapshot_path IS NOT NULL)
+		   OR (clip_path != '' AND clip_path IS NOT NULL)`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	return scanEvents(rows)
+
+	var refs []EventMediaRef
+	for rows.Next() {
+		var (
+			ref      EventMediaRef
+			snapPath sql.NullString
+			clipPath sql.NullString
+		)
+		if err := rows.Scan(&ref.ID, &snapPath, &ref.SnapshotAvailable, &clipPath, &ref.ClipAvailable); err != nil {
+			return nil, err
+		}
+		ref.SnapshotPath = snapPath.String
+		ref.ClipPath = clipPath.String
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
 }
 
 func (d *DB) DeleteEventsOlderThan(cutoff time.Time) error {

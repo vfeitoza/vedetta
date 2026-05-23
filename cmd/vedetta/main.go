@@ -187,7 +187,7 @@ func main() {
 		wireNotifier(ctx, server, sub.notifier, cfg)
 
 		// Reconcile event media availability with the filesystem
-		go reconcileEventMediaAvailability(db)
+		go recording.ReconcileEventMediaAvailability(db)
 
 		runEventLoop(ctx, cfg, db, sub, server)
 		startOnvifSubscribers(ctx, cfg, server)
@@ -255,7 +255,7 @@ func main() {
 	}
 
 	// Reconcile event media availability with the filesystem without deleting metadata.
-	go reconcileEventMediaAvailability(db)
+	go recording.ReconcileEventMediaAvailability(db)
 
 	authChecker := auth.NewFromDB(cfg.Auth, cfg.API, db)
 	defer authChecker.Close()
@@ -1215,36 +1215,6 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 		}
 	}
 	return matched
-}
-
-func reconcileEventMediaAvailability(db *storage.DB) {
-	events, err := db.EventsWithSnapshots()
-	if err != nil {
-		slog.Error("failed to query events for media reconciliation", "error", err)
-		return
-	}
-
-	for _, ev := range events {
-		snapshotAvailable := ev.SnapshotPath != ""
-		if snapshotAvailable {
-			if _, err := os.Stat(ev.SnapshotPath); err != nil {
-				snapshotAvailable = false
-			}
-		}
-		if err := db.UpdateEventSnapshotAvailability(ev.ID, snapshotAvailable); err != nil {
-			slog.Error("failed to update snapshot availability", "id", ev.ID, "error", err)
-		}
-
-		clipAvailable := ev.ClipPath != ""
-		if clipAvailable {
-			if _, err := os.Stat(ev.ClipPath); err != nil {
-				clipAvailable = false
-			}
-		}
-		if err := db.UpdateEventClipAvailability(ev.ID, clipAvailable); err != nil {
-			slog.Error("failed to update clip availability", "id", ev.ID, "error", err)
-		}
-	}
 }
 
 func cooldownKey(event camera.Event) string {

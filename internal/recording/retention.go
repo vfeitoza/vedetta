@@ -331,33 +331,7 @@ func (r *Recorder) cleanMotionActivity(cutoff time.Time) {
 }
 
 func (r *Recorder) reconcileEventMediaAvailability() {
-	events, err := r.db.EventsWithSnapshots()
-	if err != nil {
-		slog.Error("failed to query events for media reconciliation", "error", err)
-		return
-	}
-
-	for _, ev := range events {
-		snapshotAvailable := ev.SnapshotPath != ""
-		if snapshotAvailable {
-			if _, err := os.Stat(ev.SnapshotPath); err != nil {
-				snapshotAvailable = false
-			}
-		}
-		if err := r.db.UpdateEventSnapshotAvailability(ev.ID, snapshotAvailable); err != nil {
-			slog.Error("failed to update snapshot availability", "id", ev.ID, "error", err)
-		}
-
-		clipAvailable := ev.ClipPath != ""
-		if clipAvailable {
-			if _, err := os.Stat(ev.ClipPath); err != nil {
-				clipAvailable = false
-			}
-		}
-		if err := r.db.UpdateEventClipAvailability(ev.ID, clipAvailable); err != nil {
-			slog.Error("failed to update clip availability", "id", ev.ID, "error", err)
-		}
-	}
+	ReconcileEventMediaAvailability(r.db)
 }
 
 // cleanEmptyDirs removes empty directories left after cleanup,
