@@ -25,6 +25,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.5.1](https://github.com/rvben/vedetta/compare/v0.5.0...v0.5.1) - 2026-05-23
+
+### Added
+
+- wire opt-in OpenTelemetry tracing into the server lifecycle ([a4a5b5f](https://github.com/rvben/vedetta/commit/a4a5b5f32b5697ddf935ad740ecb93d10c000f01))
+- **api**: otelhttp request spans gated behind tracing config ([c6cacf6](https://github.com/rvben/vedetta/commit/c6cacf65a679f62f5d010734ac6865090323f1eb))
+- **tracing**: provider init, no-op fallback, bounded shutdown ([8dea325](https://github.com/rvben/vedetta/commit/8dea325eec16c3c262d698d16bfa14665e84fdd3))
+- **tracing**: prefix-keyed ParentBased sampler ([72a0221](https://github.com/rvben/vedetta/commit/72a022195f99f673a3fdb6f3ab30e308ab3838f3))
+- **tracing**: OTLP endpoint/env resolution and transport selection ([9c2dbd7](https://github.com/rvben/vedetta/commit/9c2dbd7b3fbfb02d102b2916cab73c2133fe021d))
+- **config**: add tracing config block with defaults and validation ([24b5589](https://github.com/rvben/vedetta/commit/24b5589ec0892dc952d03ebccd1b2a67fedce888))
+
 ## [0.5.0](https://github.com/rvben/vedetta/compare/v0.4.4...v0.5.0) - 2026-05-23
 
 ### Added
