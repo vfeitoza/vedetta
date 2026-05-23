@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -430,6 +431,34 @@ func resolveWindow(req DeleteRequest) (from, to time.Time, err error) {
 	return fromDay.UTC(), toDay.AddDate(0, 0, 1).UTC(), nil
 }
 
+// clipRefClearer is the subset of *storage.DB used to drop database references
+// to clip and snapshot files once they are deleted from disk. *storage.DB
+// satisfies it.
+type clipRefClearer interface {
+	UpdateEventClipPath(eventID, clipPath string) error
+	UpdateEventClipAvailability(eventID string, available bool) error
+	UpdateEventSnapshotPath(eventID, snapshotPath string) error
+	UpdateEventSnapshotAvailability(eventID string, available bool) error
+}
+
+// clearClipRef removes the DB reference to a deleted clip file. It joins both
+// update errors so a failure leaves a clear trail instead of silently leaving
+// the row pointing at a file that no longer exists.
+func clearClipRef(db clipRefClearer, eventID string) error {
+	return errors.Join(
+		db.UpdateEventClipPath(eventID, ""),
+		db.UpdateEventClipAvailability(eventID, false),
+	)
+}
+
+// clearSnapshotRef removes the DB reference to a deleted snapshot file.
+func clearSnapshotRef(db clipRefClearer, eventID string) error {
+	return errors.Join(
+		db.UpdateEventSnapshotPath(eventID, ""),
+		db.UpdateEventSnapshotAvailability(eventID, false),
+	)
+}
+
 func (r *Recorder) removeSegmentFile(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -443,6 +472,7 @@ func (r *Recorder) deleteClipsScoped(req DeleteRequest, _ map[string]struct{}) (
 		return nil, err
 	}
 	res := &DeleteResult{Cameras: []string{req.Camera}}
+	var refErrs []error
 	for _, ev := range events {
 		clipBytes := statSize(ev.ClipPath)
 		snapBytes := statSize(ev.SnapshotPath)
@@ -459,20 +489,30 @@ func (r *Recorder) deleteClipsScoped(req DeleteRequest, _ map[string]struct{}) (
 		}
 		if ev.ClipPath != "" {
 			if err := os.Remove(ev.ClipPath); err == nil || errors.Is(err, os.ErrNotExist) {
-				_ = r.db.UpdateEventClipPath(ev.ID, "")
-				_ = r.db.UpdateEventClipAvailability(ev.ID, false)
+				if err := clearClipRef(r.db, ev.ID); err != nil {
+					refErrs = append(refErrs, fmt.Errorf("event %s clip ref: %w", ev.ID, err))
+				}
 				res.Clips++
 				res.Bytes += clipBytes
 			}
 		}
 		if ev.SnapshotPath != "" {
 			if err := os.Remove(ev.SnapshotPath); err == nil || errors.Is(err, os.ErrNotExist) {
-				_ = r.db.UpdateEventSnapshotPath(ev.ID, "")
-				_ = r.db.UpdateEventSnapshotAvailability(ev.ID, false)
+				if err := clearSnapshotRef(r.db, ev.ID); err != nil {
+					refErrs = append(refErrs, fmt.Errorf("event %s snapshot ref: %w", ev.ID, err))
+				}
 				res.Snapshots++
 				res.Bytes += snapBytes
 			}
 		}
+	}
+	if len(refErrs) > 0 {
+		// The files are gone but their DB rows still reference them: surface
+		// the inconsistency rather than reporting a clean success.
+		joined := errors.Join(refErrs...)
+		slog.Error("deleted media files but failed to clear DB references",
+			"camera", req.Camera, "error", joined)
+		return res, fmt.Errorf("clearing DB references for deleted media: %w", joined)
 	}
 	return res, nil
 }
