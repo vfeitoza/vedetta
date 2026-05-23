@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/rvben/vedetta/internal/storage"
 )
 
 // StartRetentionCleanup runs a background goroutine that periodically
@@ -93,15 +95,25 @@ func (r *Recorder) runUrgentCleanup(ctx context.Context) {
 func (r *Recorder) runCleanupLocked() {
 	slog.Debug("running retention cleanup")
 
-	eventCutoff := time.Now().Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
-	eventMetadataCutoff := time.Now().Add(-time.Duration(r.eventConfig.RetainDays) * 24 * time.Hour)
-	segmentCutoff := time.Now().Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
+	now := time.Now()
 
+	// A retain value of 0 (or negative) means "keep forever". Age-based cleanup
+	// runs only when its retain window is positive; otherwise computing
+	// now.Add(-0) == now would expire and delete every record.
 	r.cleanSegments()
-	r.cleanClips(eventCutoff)
-	r.cleanSnapshots(eventCutoff)
-	r.cleanEventMetadata(eventMetadataCutoff)
-	r.cleanMotionActivity(segmentCutoff)
+	if r.config.EventRetain > 0 {
+		eventCutoff := now.Add(-time.Duration(r.config.EventRetain) * 24 * time.Hour)
+		r.cleanClips(eventCutoff)
+		r.cleanSnapshots(eventCutoff)
+	}
+	if r.eventConfig.RetainDays > 0 {
+		eventMetadataCutoff := now.Add(-time.Duration(r.eventConfig.RetainDays) * 24 * time.Hour)
+		r.cleanEventMetadata(eventMetadataCutoff)
+	}
+	if r.config.RetainDays > 0 {
+		segmentCutoff := now.Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
+		r.cleanMotionActivity(segmentCutoff)
+	}
 	r.reconcileEventMediaAvailability()
 	r.enforceStorageCap()
 	r.cleanEmptyDirs()
@@ -168,19 +180,31 @@ func (r *Recorder) enforceStorageCap() {
 // would miss.
 func (r *Recorder) cleanSegments() {
 	now := time.Now()
+
+	// A global retain_days of 0 (or negative) means "keep forever": the
+	// global expiry query is skipped entirely. Explicit per-camera overrides
+	// (always > 0) still apply so a camera can opt into shorter retention even
+	// when the global default keeps everything.
+	globalEnabled := r.config.RetainDays > 0
 	globalCutoff := now.Add(-time.Duration(r.config.RetainDays) * 24 * time.Hour)
 
-	expired, err := r.db.GetSegmentsEndingBefore(globalCutoff)
-	if err != nil {
-		slog.Error("failed to query expired segments", "error", err)
-		return
+	var expired []storage.SegmentRecord
+	if globalEnabled {
+		var err error
+		expired, err = r.db.GetSegmentsEndingBefore(globalCutoff)
+		if err != nil {
+			slog.Error("failed to query expired segments", "error", err)
+			return
+		}
 	}
 
-	// For cameras with shorter-than-global retention, also pick up segments
-	// that are older than the per-camera cutoff but still inside the global window.
+	// Per-camera overrides: pick up segments older than the per-camera cutoff.
+	// When the global query is enabled, only cameras with shorter-than-global
+	// retention add new rows (longer overrides are filtered below). When the
+	// global query is disabled, every override drives its own deletions.
 	for cam, days := range r.cameraRetention {
 		camCutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
-		if !camCutoff.After(globalCutoff) {
+		if globalEnabled && !camCutoff.After(globalCutoff) {
 			continue // override is >= global; the global query already covered it
 		}
 		more, err := r.db.GetSegmentsEndingBeforeForCamera(cam, camCutoff)
