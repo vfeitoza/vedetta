@@ -569,9 +569,7 @@ type webrtcConsumer struct {
 }
 
 func (wc *webrtcConsumer) OnVideoRTP(pkt *rtp.Packet) {
-	wc.mu.RLock()
-	defer wc.mu.RUnlock()
-	for _, p := range wc.peers {
+	for _, p := range wc.snapshotPeers() {
 		if err := p.writeVideo(pkt); err != nil {
 			slog.Debug("failed to write video RTP to peer", "error", err)
 		}
@@ -579,13 +577,23 @@ func (wc *webrtcConsumer) OnVideoRTP(pkt *rtp.Packet) {
 }
 
 func (wc *webrtcConsumer) OnAudioRTP(pkt *rtp.Packet) {
-	wc.mu.RLock()
-	defer wc.mu.RUnlock()
-	for _, p := range wc.peers {
+	for _, p := range wc.snapshotPeers() {
 		if err := p.writeAudio(pkt); err != nil {
 			slog.Debug("failed to write audio RTP to peer", "error", err)
 		}
 	}
+}
+
+// snapshotPeers returns a copy of the current peer set. The per-packet writes
+// then run without holding wc.mu, so a slow or stuck peer write cannot block
+// addPeer/removePeer (a viewer joining or being reaped).
+func (wc *webrtcConsumer) snapshotPeers() []*peerState {
+	wc.mu.RLock()
+	defer wc.mu.RUnlock()
+	if len(wc.peers) == 0 {
+		return nil
+	}
+	return append([]*peerState(nil), wc.peers...)
 }
 
 func (wc *webrtcConsumer) OnDisconnect() {}

@@ -366,3 +366,51 @@ func TestWaitForVideoParams_BlocksUntilParamsArrive(t *testing.T) {
 		t.Error("WaitForVideoParams should return true once in-band SPS/PPS are sniffed")
 	}
 }
+
+// blockingConsumer stalls inside OnVideoRTP until release is closed, signalling
+// on entered when the dispatch reaches it.
+type blockingConsumer struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingConsumer) OnVideoRTP(*rtp.Packet) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+}
+func (b *blockingConsumer) OnAudioRTP(*rtp.Packet) {}
+func (b *blockingConsumer) OnDisconnect()          {}
+
+// fanOutVideo must not hold the source lock while dispatching to consumers. A
+// consumer that marshals an fMP4 segment or writes to a stuck WebRTC peer would
+// otherwise hold s.mu for the whole packet, blocking AddConsumer/RemoveConsumer
+// so a new viewer cannot attach and a finished one cannot detach.
+func TestFanOutVideo_SlowConsumerDoesNotBlockMembership(t *testing.T) {
+	s := NewSource("rtsp://test:554/stream")
+	bc := &blockingConsumer{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	s.AddConsumer(bc)
+
+	go s.fanOutVideo(&rtp.Packet{Payload: []byte{1, 2, 3}})
+	select {
+	case <-bc.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fan-out never reached the consumer")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.AddConsumer(&mockConsumer{})
+		close(done)
+	}()
+	select {
+	case <-done:
+		// AddConsumer completed while the consumer is still blocked: good.
+	case <-time.After(2 * time.Second):
+		close(bc.release)
+		t.Fatal("AddConsumer blocked while fanOutVideo held the source lock during a slow consumer")
+	}
+	close(bc.release)
+}

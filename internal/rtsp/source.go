@@ -334,14 +334,27 @@ func (s *Source) fanOutVideo(pkt *rtp.Packet) {
 	// only read it, so a single shared clone is safe.
 	pkt = pkt.Clone()
 	start := time.Now()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, c := range s.consumers {
+	// Snapshot the consumer set and dispatch without holding s.mu: a consumer
+	// that marshals a segment or writes to a stuck peer must not block
+	// AddConsumer/RemoveConsumer (a viewer attaching or detaching).
+	consumers := s.snapshotConsumers()
+	for _, c := range consumers {
 		c.OnVideoRTP(pkt)
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		slog.Warn("slow fanOutVideo", "url", SanitizeURL(s.url), "elapsed", elapsed, "consumers", len(s.consumers))
+		slog.Warn("slow fanOutVideo", "url", SanitizeURL(s.url), "elapsed", elapsed, "consumers", len(consumers))
 	}
+}
+
+// snapshotConsumers returns a copy of the current consumer set so the per-packet
+// fan-out can run without holding s.mu.
+func (s *Source) snapshotConsumers() []Consumer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.consumers) == 0 {
+		return nil
+	}
+	return append([]Consumer(nil), s.consumers...)
 }
 
 // maybeLearnParameterSets scans an inbound H.264 RTP payload for SPS (NAL 7)
@@ -407,12 +420,11 @@ func (s *Source) fanOutAudio(pkt *rtp.Packet) {
 	// gortsplib-owned packet must be cloned before hand-off.
 	pkt = pkt.Clone()
 	start := time.Now()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, c := range s.consumers {
+	consumers := s.snapshotConsumers()
+	for _, c := range consumers {
 		c.OnAudioRTP(pkt)
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		slog.Warn("slow fanOutAudio", "url", SanitizeURL(s.url), "elapsed", elapsed, "consumers", len(s.consumers))
+		slog.Warn("slow fanOutAudio", "url", SanitizeURL(s.url), "elapsed", elapsed, "consumers", len(consumers))
 	}
 }

@@ -1193,3 +1193,55 @@ func TestHandleOffer_ErrorPathCancelsStatsLogger(t *testing.T) {
 	}
 	t.Fatalf("stats logger goroutine leaked after HandleOffer error: %d still running", countStatsLoggerGoroutines())
 }
+
+// blockingWriter blocks inside WriteRTP until release is closed, signalling on
+// entered when the call begins. It lets a test hold one peer's video write
+// open while probing whether the consumer still serves addPeer/removePeer.
+type blockingWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingWriter) WriteRTP(*rtp.Packet) error {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return nil
+}
+
+// OnVideoRTP fans a packet out to every peer. A slow or stuck peer write must
+// not hold the consumer lock, or it would block addPeer/removePeer (new
+// viewers cannot connect and disconnected viewers cannot be reaped) for as
+// long as the write stalls. This asserts the broadcast snapshots the peer set
+// and writes outside the lock.
+func TestWebrtcConsumer_PeerWriteDoesNotBlockMembershipChanges(t *testing.T) {
+	bw := &blockingWriter{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	slow := &peerState{video: &trackState{track: bw}, keyframeSeen: true}
+	wc := &webrtcConsumer{peers: []*peerState{slow}}
+
+	// Single small NAL (type 1, no fragmentation) → exactly one peer write.
+	pkt := &rtp.Packet{Payload: []byte{0x01, 0xAA}}
+
+	go wc.OnVideoRTP(pkt)
+	select {
+	case <-bw.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer write never started")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wc.addPeer(&peerState{})
+		close(done)
+	}()
+	select {
+	case <-done:
+		// addPeer completed while the peer write is still blocked: good.
+	case <-time.After(2 * time.Second):
+		close(bw.release)
+		t.Fatal("addPeer blocked while OnVideoRTP held the lock during a slow peer write")
+	}
+	close(bw.release)
+}
