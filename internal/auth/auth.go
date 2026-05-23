@@ -891,10 +891,36 @@ func (p *Principal) Allows(method, path string) bool {
 		}
 		return p.HasAnyScope("tokens:write", "api:*", "*")
 	}
+	// Config-mutation endpoints require the explicit admin scope. api:write and
+	// api:* are deliberately insufficient so a general write token cannot
+	// rewrite server configuration, install codecs, or change the password.
+	if isAdminPath(method, path) {
+		return p.HasAnyScope("admin", "*")
+	}
 	if isSafeMethod(method) {
 		return p.HasAnyScope("api:read", "api:*", "*")
 	}
 	return p.HasAnyScope("api:write", "api:*", "*")
+}
+
+// isAdminPath reports whether method+path is a configuration-mutation endpoint
+// gated behind the admin scope. Only unsafe methods qualify; GETs on the same
+// paths remain ordinary reads.
+func isAdminPath(method, path string) bool {
+	if isSafeMethod(method) {
+		return false
+	}
+	switch {
+	case path == "/api/cameras/manage" || strings.HasPrefix(path, "/api/cameras/manage/"):
+		return true
+	case strings.HasPrefix(path, "/api/settings/") && method == http.MethodPut:
+		return true
+	case path == "/api/system/codecs/openh264/install":
+		return true
+	case path == "/api/auth/password":
+		return true
+	}
+	return false
 }
 
 func IsLoopback(addr string) bool {

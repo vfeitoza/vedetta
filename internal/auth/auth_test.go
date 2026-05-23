@@ -194,6 +194,77 @@ func TestTokenEndpointWriteRequiresTokenScope(t *testing.T) {
 	}
 }
 
+// Config-mutation endpoints require the explicit admin scope. A general
+// api:write (or api:*) token must not be able to rewrite server configuration,
+// install codecs, or change the password. Session/proxy principals and the *
+// super-scope keep full access.
+func TestAdminScopeRequiredForConfigMutation(t *testing.T) {
+	adminPaths := []struct {
+		method, path string
+	}{
+		{http.MethodPut, "/api/settings/mqtt"},
+		{http.MethodPut, "/api/settings/recording"},
+		{http.MethodPut, "/api/settings/detect"},
+		{http.MethodPost, "/api/cameras/manage"},
+		{http.MethodPut, "/api/cameras/manage/0"},
+		{http.MethodDelete, "/api/cameras/manage/0"},
+		{http.MethodPost, "/api/system/codecs/openh264/install"},
+		{http.MethodPost, "/api/auth/password"},
+	}
+
+	apiWrite := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"api:write"}}
+	apiStar := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"api:*"}}
+	adminTok := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"admin"}}
+	starTok := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"*"}}
+	session := &Principal{Username: "admin", Kind: AuthKindSession}
+	proxy := &Principal{Username: "admin", Kind: AuthKindProxy}
+
+	for _, ap := range adminPaths {
+		if apiWrite.Allows(ap.method, ap.path) {
+			t.Errorf("api:write must be denied on %s %s", ap.method, ap.path)
+		}
+		if apiStar.Allows(ap.method, ap.path) {
+			t.Errorf("api:* must be denied on %s %s", ap.method, ap.path)
+		}
+		if !adminTok.Allows(ap.method, ap.path) {
+			t.Errorf("admin scope must be allowed on %s %s", ap.method, ap.path)
+		}
+		if !starTok.Allows(ap.method, ap.path) {
+			t.Errorf("* scope must be allowed on %s %s", ap.method, ap.path)
+		}
+		if !session.Allows(ap.method, ap.path) {
+			t.Errorf("session must be allowed on %s %s", ap.method, ap.path)
+		}
+		if !proxy.Allows(ap.method, ap.path) {
+			t.Errorf("proxy must be allowed on %s %s", ap.method, ap.path)
+		}
+	}
+}
+
+// Admin gating is scoped to config mutations: it must not over-restrict normal
+// reads or non-config writes that api:write legitimately covers.
+func TestAdminScopeDoesNotOverRestrict(t *testing.T) {
+	apiWrite := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"api:write"}}
+	apiRead := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: []string{"api:read"}}
+
+	// GET on a settings path is a read, not a config mutation.
+	if !apiRead.Allows(http.MethodGet, "/api/settings/mqtt") {
+		t.Error("api:read must still read settings via GET")
+	}
+	// The test/probe helpers under settings/cameras are not mutations.
+	allowedWrites := [][2]string{
+		{http.MethodPost, "/api/settings/mqtt/test"},
+		{http.MethodPost, "/api/cameras/test-rtsp"},
+		{http.MethodPost, "/api/push/test"},
+		{http.MethodPost, "/api/updates/dismiss"},
+	}
+	for _, w := range allowedWrites {
+		if !apiWrite.Allows(w[0], w[1]) {
+			t.Errorf("api:write must still be allowed on %s %s", w[0], w[1])
+		}
+	}
+}
+
 func TestChecker_DBAuth(t *testing.T) {
 	dir := t.TempDir()
 	db, err := storage.New(filepath.Join(dir, "test.db"))

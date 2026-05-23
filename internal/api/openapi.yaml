@@ -2301,6 +2301,12 @@ components:
           type: string
         scopes:
           type: array
+          description: >-
+            Scope vocabulary: api:read (safe methods), api:write (mutations),
+            tokens:read / tokens:write (token management), admin (config-mutation
+            endpoints such as PUT /api/settings/*, /api/cameras/manage*, codec
+            install, and password change), and * (all). admin is required for
+            config mutation; api:write alone is not sufficient.
           items:
             type: string
 
