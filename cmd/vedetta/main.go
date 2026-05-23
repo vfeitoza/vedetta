@@ -37,6 +37,8 @@ import (
 	"github.com/rvben/vedetta/internal/tracing"
 	"github.com/rvben/vedetta/internal/update"
 	"github.com/rvben/vedetta/internal/watchdog"
+
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -197,7 +199,7 @@ func main() {
 		// Reconcile event media availability with the filesystem
 		go recording.ReconcileEventMediaAvailability(db)
 
-		runEventLoop(ctx, cfg, db, sub, server)
+		runEventLoop(ctx, cfg, db, sub, server, tp.Tracer())
 		startOnvifSubscribers(ctx, cfg, server)
 
 		// Transition the running server to full mode
@@ -307,7 +309,7 @@ func main() {
 	sub.notifier = setupNotifier(db, cfg)
 	wireNotifier(ctx, server, sub.notifier, cfg)
 
-	runEventLoop(ctx, cfg, db, sub, server)
+	runEventLoop(ctx, cfg, db, sub, server, tp.Tracer())
 	startOnvifSubscribers(ctx, cfg, server)
 
 	// Start RTSP re-publishing server if enabled
@@ -701,7 +703,7 @@ func closeSubsystems(sub *subsystems) {
 // runEventLoop starts the goroutine that manages event lifecycles, including
 // clip extraction scheduling, cooldowns, presence updates, MQTT publishing,
 // face recognition, and object re-identification.
-func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *subsystems, server *api.Server) {
+func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *subsystems, server *api.Server, tracer trace.Tracer) {
 	events := sub.events
 	eventEnds := sub.eventEnds
 	presenceEvents := sub.presenceEvents
@@ -710,9 +712,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 
 	go func() {
 		type activeEvent struct {
-			event      camera.Event
-			timer      *time.Timer
-			tempCancel context.CancelFunc // for non-continuous temporary recording
+			event       camera.Event
+			timer       *time.Timer
+			tempCancel  context.CancelFunc // for non-continuous temporary recording
+			rootSpanCtx trace.SpanContext  // event root span, for late event.end/clip.extract children
 		}
 		active := make(map[string]*activeEvent)         // eventID -> state
 		objectCounts := make(map[string]map[string]int) // camera -> label -> count
