@@ -14,7 +14,10 @@ import (
 
 // ExtractClip creates an event clip by copying relevant segments
 // and trimming to the event's pre/post capture window.
-func (r *Recorder) ExtractClip(_ context.Context, event camera.Event) (string, error) {
+func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	clipDir, err := safepath.Join(r.config.Path, event.CameraName, "clips", event.Timestamp.Format("2006-01-02"))
 	if err != nil {
 		return "", fmt.Errorf("resolve clip dir: %w", err)
@@ -61,6 +64,12 @@ func (r *Recorder) ExtractClip(_ context.Context, event camera.Event) (string, e
 		startOffset = 0
 	}
 	duration := to.Sub(from)
+
+	// Abort before the expensive trim/concat if shutdown began while we were
+	// resolving segments.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	if len(segments) == 1 {
 		if err := media.TrimMP4(segments[0].Path, clipPath, startOffset, duration); err != nil {

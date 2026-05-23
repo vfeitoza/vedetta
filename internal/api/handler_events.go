@@ -211,7 +211,7 @@ func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
 		return
 	}
-	if err := s.recorder.ReextractClip(*event); err != nil {
+	if err := s.recorder.ReextractClip(r.Context(), *event); err != nil {
 		s.serverError(w, r, err)
 		return
 	}

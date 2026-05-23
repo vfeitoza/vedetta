@@ -216,14 +216,14 @@ func (r *Recorder) StartContinuousRecording(ctx context.Context, stoppedCameras 
 // SaveClip extracts a clip around the event timestamp and persists its
 // path on the event row. Blocks on segmentOpMu so a concurrent manual
 // delete cannot run between ExtractClip and UpdateEventClipPath.
-func (r *Recorder) SaveClip(_ context.Context, event camera.Event) error {
+func (r *Recorder) SaveClip(ctx context.Context, event camera.Event) error {
 	r.segmentOpMu.Lock()
 	defer r.segmentOpMu.Unlock()
-	return r.saveClipLocked(event)
+	return r.saveClipLocked(ctx, event)
 }
 
-func (r *Recorder) saveClipLocked(event camera.Event) error {
-	clipPath, err := r.ExtractClip(context.Background(), event)
+func (r *Recorder) saveClipLocked(ctx context.Context, event camera.Event) error {
+	clipPath, err := r.ExtractClip(ctx, event)
 	if err != nil {
 		return fmt.Errorf("extract clip: %w", err)
 	}
@@ -600,7 +600,7 @@ func buildCameraRetention(cams []config.CameraConfig) map[string]int {
 // availability flag, then re-extracts. The entire sequence runs under
 // a single segmentOpMu acquisition so a concurrent manual delete pass
 // cannot observe a half-renamed state.
-func (r *Recorder) ReextractClip(event camera.Event) error {
+func (r *Recorder) ReextractClip(ctx context.Context, event camera.Event) error {
 	r.segmentOpMu.Lock()
 	defer r.segmentOpMu.Unlock()
 
@@ -612,5 +612,5 @@ func (r *Recorder) ReextractClip(event camera.Event) error {
 			return fmt.Errorf("clear clip availability: %w", err)
 		}
 	}
-	return r.saveClipLocked(event)
+	return r.saveClipLocked(ctx, event)
 }

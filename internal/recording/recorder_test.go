@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,45 @@ func TestSaveClip_WithSegment_SavesClipPath(t *testing.T) {
 	// Expected: trim error (not "no segments available")
 	if err.Error() == "extract clip: no segments available for camera \"cam1\"" {
 		t.Error("segments should have been found")
+	}
+}
+
+func TestSaveClip_CancelledContextAbortsBeforeExtraction(t *testing.T) {
+	rec, db := newTestRecorder(t)
+
+	segDir := filepath.Join(rec.config.Path, "cam1", "segments")
+	if err := os.MkdirAll(segDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dummyPath := filepath.Join(segDir, "2026-01-01_00-00-00.mp4")
+	if err := os.WriteFile(dummyPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	db.SaveSegment(storage.SegmentRecord{
+		Camera:    "cam1",
+		Path:      dummyPath,
+		StartTime: now.Add(-5 * time.Minute),
+		EndTime:   now,
+		SizeBytes: 4,
+	})
+
+	event := camera.Event{
+		ID:         "test-cancel",
+		CameraName: "cam1",
+		Label:      "person",
+		Timestamp:  now.Add(-1 * time.Minute),
+	}
+
+	// A segment exists, so without honoring ctx the call would proceed to the
+	// (failing) trim step. With an already-cancelled context it must abort up
+	// front and surface the cancellation rather than doing extraction work.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := rec.SaveClip(ctx, event)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SaveClip with cancelled ctx = %v, want context.Canceled", err)
 	}
 }
 
