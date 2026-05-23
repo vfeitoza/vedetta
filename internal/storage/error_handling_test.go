@@ -1,10 +1,71 @@
 package storage
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// TestSavePushSubscription_ConcurrentSameEndpoint reproduces the SELECT-then-
+// INSERT TOCTOU: several goroutines registering the same new endpoint at once
+// all read "no existing row" before any INSERT commits, so a loser's INSERT
+// hits the UNIQUE(endpoint) constraint and fails. The window is narrow, so each
+// round is repeated against a fresh endpoint to make the race near-certain to
+// surface before the fix; the atomic upsert lets every caller succeed, return
+// the same id, and leave exactly one row per endpoint.
+func TestSavePushSubscription_ConcurrentSameEndpoint(t *testing.T) {
+	db := newTestDB(t)
+
+	const (
+		rounds  = 80
+		workers = 32
+	)
+	for r := 0; r < rounds; r++ {
+		endpoint := fmt.Sprintf("https://push.example/shared-%d", r)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		ids := make([]int64, workers)
+		errs := make([]error, workers)
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				<-start // align goroutines on the check-then-insert window
+				ids[idx], errs[idx] = db.SavePushSubscription(PushSubscription{
+					Username: "alice",
+					Endpoint: endpoint,
+					P256dh:   "k",
+					Auth:     "a",
+				})
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d worker %d: SavePushSubscription returned %v (TOCTOU on UNIQUE endpoint?)", r, i, err)
+			}
+		}
+		// Every successful save must reference the single row's id.
+		first := ids[0]
+		for i, id := range ids {
+			if id != first {
+				t.Fatalf("round %d worker %d returned id %d, want shared id %d", r, i, id, first)
+			}
+		}
+	}
+
+	list, err := db.ListPushSubscriptionsByUser("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != rounds {
+		t.Fatalf("expected exactly %d subscription rows (one per endpoint), got %d", rounds, len(list))
+	}
+}
 
 // TestLatestObjectNameForZone_ReturnsError verifies the query no longer swallows
 // failures: a real query error must surface, while a clean "no matching event"

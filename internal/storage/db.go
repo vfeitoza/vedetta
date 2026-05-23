@@ -2078,35 +2078,32 @@ var (
 //   - owned by the same user: keys/user_agent are updated, last_seen bumped, same id returned.
 //   - owned by a different user: ErrSubscriptionOwnedByOther is returned.
 func (d *DB) SavePushSubscription(sub PushSubscription) (int64, error) {
-	var existingID int64
-	var existingUser string
-	err := d.db.QueryRow(`SELECT id, username FROM push_subscriptions WHERE endpoint = ?`, sub.Endpoint).
-		Scan(&existingID, &existingUser)
-	if err != nil && err != sql.ErrNoRows {
-		return 0, err
-	}
-	if err == nil {
-		if existingUser != sub.Username {
-			return 0, ErrSubscriptionOwnedByOther
-		}
-		_, uerr := d.db.Exec(`
-			UPDATE push_subscriptions
-			   SET p256dh = ?, auth = ?, user_agent = ?, last_seen = CURRENT_TIMESTAMP
-			 WHERE id = ?`,
-			sub.P256dh, sub.Auth, nullString(sub.UserAgent), existingID)
-		if uerr != nil {
-			return 0, uerr
-		}
-		return existingID, nil
-	}
-	res, err := d.db.Exec(`
+	// Single atomic upsert: a separate SELECT-then-INSERT lets two concurrent
+	// registrations of the same new endpoint both observe "no row" and then race
+	// on the UNIQUE(endpoint) constraint. ON CONFLICT applies the update only
+	// when the existing row belongs to the same user; a conflict owned by a
+	// different user filters the update out, so RETURNING yields no row, which we
+	// map to ErrSubscriptionOwnedByOther. The id is stable across updates, so
+	// every caller gets the same value.
+	var id int64
+	err := d.db.QueryRow(`
 		INSERT INTO push_subscriptions (username, endpoint, p256dh, auth, user_agent)
-		VALUES (?, ?, ?, ?, ?)`,
-		sub.Username, sub.Endpoint, sub.P256dh, sub.Auth, nullString(sub.UserAgent))
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(endpoint) DO UPDATE SET
+			p256dh = excluded.p256dh,
+			auth = excluded.auth,
+			user_agent = excluded.user_agent,
+			last_seen = CURRENT_TIMESTAMP
+		WHERE push_subscriptions.username = excluded.username
+		RETURNING id`,
+		sub.Username, sub.Endpoint, sub.P256dh, sub.Auth, nullString(sub.UserAgent)).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, ErrSubscriptionOwnedByOther
+	}
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return id, nil
 }
 
 // FindPushSubscriptionByEndpoint returns the subscription with the given endpoint, or nil if none.
