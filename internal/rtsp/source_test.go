@@ -12,11 +12,11 @@ import (
 
 // mockConsumer records calls to OnVideoRTP, OnAudioRTP, OnDisconnect.
 type mockConsumer struct {
-	mu            sync.Mutex
-	videoPkts     int
-	audioPkts     int
-	disconnects   int
-	lastVideoPkt  *rtp.Packet
+	mu           sync.Mutex
+	videoPkts    int
+	audioPkts    int
+	disconnects  int
+	lastVideoPkt *rtp.Packet
 }
 
 func (m *mockConsumer) OnVideoRTP(pkt *rtp.Packet) {
@@ -329,6 +329,27 @@ func TestWaitForVideoParams_TimesOut(t *testing.T) {
 	defer cancel()
 	if s.WaitForVideoParams(ctx) {
 		t.Error("WaitForVideoParams should return false when SPS never arrives")
+	}
+}
+
+func TestWaitForVideoParams_WakesPromptlyOnLearn(t *testing.T) {
+	s := NewSource("rtsp://test/stream")
+	start := time.Now()
+	go func() {
+		// Deliver the parameter sets early within a single 50ms poll interval.
+		// A busy-poll implementation only notices on its next tick (~50ms);
+		// a notified waiter wakes as soon as the sets are learned.
+		time.Sleep(5 * time.Millisecond)
+		s.maybeLearnParameterSets(&rtp.Packet{Payload: []byte{0x67, 0x64, 0x00, 0x29, 0xac}})
+		s.maybeLearnParameterSets(&rtp.Packet{Payload: []byte{0x68, 0xee, 0x3c, 0x80}})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !s.WaitForVideoParams(ctx) {
+		t.Fatal("WaitForVideoParams should return true once in-band SPS/PPS are sniffed")
+	}
+	if elapsed := time.Since(start); elapsed > 40*time.Millisecond {
+		t.Fatalf("WaitForVideoParams woke after %v; expected a prompt notification, not a 50ms poll tick", elapsed)
 	}
 }
 

@@ -25,11 +25,29 @@ type Source struct {
 	videoTrack *TrackInfo
 	audioTrack *TrackInfo
 	connected  bool
+
+	// paramsReady is closed once videoTrack holds a usable SPS+PPS pair, so
+	// WaitForVideoParams can block on a notification instead of polling.
+	paramsReady chan struct{}
 }
 
 // NewSource creates a new RTSP source for the given URL.
 func NewSource(url string) *Source {
-	return &Source{url: url}
+	return &Source{url: url, paramsReady: make(chan struct{})}
+}
+
+// signalParamsReadyLocked closes paramsReady the first time the video track has
+// a usable SPS+PPS pair. The caller must hold s.mu.
+func (s *Source) signalParamsReadyLocked() {
+	if s.videoTrack == nil || len(s.videoTrack.SPS) < 4 || len(s.videoTrack.PPS) == 0 {
+		return
+	}
+	select {
+	case <-s.paramsReady:
+		// already closed
+	default:
+		close(s.paramsReady)
+	}
 }
 
 // URL returns the RTSP URL of this source.
@@ -82,6 +100,7 @@ func (s *Source) SetVideoTrack(ti *TrackInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.videoTrack = ti
+	s.signalParamsReadyLocked()
 }
 
 // SetAudioTrack sets the audio track info (for testing).
@@ -110,18 +129,17 @@ func (s *Source) Connected() bool {
 // parameter sets are sniffed lets us advertise a profile that actually matches
 // what the camera is about to send.
 func (s *Source) WaitForVideoParams(ctx context.Context) bool {
-	for {
-		s.mu.RLock()
-		ready := s.videoTrack != nil && len(s.videoTrack.SPS) >= 4 && len(s.videoTrack.PPS) > 0
-		s.mu.RUnlock()
-		if ready {
-			return true
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(50 * time.Millisecond):
-		}
+	s.mu.RLock()
+	ready := s.videoTrack != nil && len(s.videoTrack.SPS) >= 4 && len(s.videoTrack.PPS) > 0
+	s.mu.RUnlock()
+	if ready {
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-s.paramsReady:
+		return true
 	}
 }
 
@@ -304,6 +322,7 @@ func (s *Source) extractTracks(desc *description.Session) {
 			}
 		}
 	}
+	s.signalParamsReadyLocked()
 }
 
 func (s *Source) fanOutVideo(pkt *rtp.Packet) {
@@ -380,6 +399,7 @@ func (s *Source) maybeLearnParameterSets(pkt *rtp.Packet) {
 	if pps != nil && len(s.videoTrack.PPS) == 0 {
 		s.videoTrack.PPS = pps
 	}
+	s.signalParamsReadyLocked()
 }
 
 func (s *Source) fanOutAudio(pkt *rtp.Packet) {
