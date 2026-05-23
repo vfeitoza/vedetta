@@ -891,6 +891,8 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 
 				if sub.objectEmbedder != nil && event.SnapshotImage != nil {
 					go func(ev camera.Event) {
+						_, reidSpan := tracer.Start(evCtx, "object.reid")
+						defer reidSpan.End()
 						matched := matchEventToKnownObjects(db, sub.objectEmbedder, ev, cfg.Detect.ObjectMatchThreshold)
 						if len(matched) > 0 {
 							if cam := sub.manager.GetCamera(ev.CameraName); cam != nil {
