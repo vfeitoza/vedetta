@@ -144,8 +144,9 @@ func TestUpdateMQTTSettings_PreservesPasswordWhenBlank(t *testing.T) {
 		Enabled: true, Host: "10.0.0.1", Port: 1883, Username: "u", Password: "stored-secret", Topic: "vedetta",
 	})
 
-	// UI saves with a blank password (it never received the stored one).
-	payload := `{"enabled":false,"host":"10.0.0.9","port":1883,"username":"u","password":"","topic":"vedetta"}`
+	// UI saves the SAME broker (host/port/username unchanged) with a blank
+	// password (it never received the stored one), editing only the topic.
+	payload := `{"enabled":false,"host":"10.0.0.1","port":1883,"username":"u","password":"","topic":"newtopic"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/mqtt", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -166,24 +167,71 @@ func TestUpdateMQTTSettings_PreservesPasswordWhenBlank(t *testing.T) {
 	}
 }
 
-// Both the save and the test paths treat a blank submitted secret as "keep
-// the stored one"; a non-blank value overrides it.
-func TestResolveWriteOnlySecret(t *testing.T) {
+// Changing the broker identity (host/port/username) with a blank password must
+// NOT carry the stored secret over to the new broker - that would leak the
+// password to a different, potentially attacker-controlled, host.
+func TestUpdateMQTTSettings_DropsPasswordWhenBrokerChanges(t *testing.T) {
+	srv, _ := newTestServer(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	initial := "auth:\n  users:\n    - username: admin\n      password_hash: \"$2a$10$7EqJtq98hPqEX7fNZaFWoOHi8V6I5WJFlQ7Y7S6d6n9zQ0jD4S3yu\"\napi:\n  host: 0.0.0.0\n  port: 5050\n  exposure: lan\n"
+	if err := os.WriteFile(cfgPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	srv.SetConfigPath(cfgPath)
+	srv.SetMQTTConfig(config.MQTTConfig{
+		Enabled: true, Host: "10.0.0.1", Port: 1883, Username: "u", Password: "stored-secret", Topic: "vedetta",
+	})
+
+	// Different host, blank password.
+	payload := `{"enabled":false,"host":"evil.example","port":1883,"username":"u","password":"","topic":"vedetta"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/mqtt", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.mqttConfig.Password != "" {
+		t.Fatalf("stored secret must not follow a broker change, got %q", srv.mqttConfig.Password)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("stored-secret")) {
+		t.Error("config file must not retain the old password after pointing at a new broker")
+	}
+}
+
+// The blank-password fallback must be scoped to the stored broker identity. A
+// non-blank password always wins. A blank password reuses the stored secret
+// ONLY when host, port, and username all match the stored config; otherwise it
+// stays blank, so the write-only secret can never be sent to a different
+// (potentially attacker-supplied) broker.
+func TestResolveBrokerSecret(t *testing.T) {
+	stored := config.MQTTConfig{Host: "10.0.0.1", Port: 1883, Username: "u", Password: "stored"}
 	tests := []struct {
 		name      string
+		host      string
+		port      int
+		user      string
 		submitted string
-		stored    string
 		want      string
 	}{
-		{"blank keeps stored", "", "stored", "stored"},
-		{"submitted overrides", "typed", "stored", "typed"},
-		{"blank with no stored stays blank", "", "", ""},
+		{"submitted overrides for same broker", "10.0.0.1", 1883, "u", "typed", "typed"},
+		{"submitted overrides for different broker", "evil.example", 1883, "u", "typed", "typed"},
+		{"blank reuses stored for same broker", "10.0.0.1", 1883, "u", "", "stored"},
+		{"blank drops secret when host differs", "evil.example", 1883, "u", "", ""},
+		{"blank drops secret when port differs", "10.0.0.1", 8883, "u", "", ""},
+		{"blank drops secret when username differs", "10.0.0.1", 1883, "other", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveWriteOnlySecret(tt.submitted, tt.stored); got != tt.want {
-				t.Fatalf("resolveWriteOnlySecret(%q, %q) = %q, want %q",
-					tt.submitted, tt.stored, got, tt.want)
+			if got := resolveBrokerSecret(tt.host, tt.port, tt.user, tt.submitted, stored); got != tt.want {
+				t.Fatalf("resolveBrokerSecret(%q,%d,%q,%q) = %q, want %q",
+					tt.host, tt.port, tt.user, tt.submitted, got, tt.want)
 			}
 		})
 	}

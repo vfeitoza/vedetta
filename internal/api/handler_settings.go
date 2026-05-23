@@ -10,14 +10,20 @@ import (
 	"github.com/rvben/vedetta/internal/mqtt"
 )
 
-// resolveWriteOnlySecret implements the write-only secret convention: a blank
-// submitted value means "keep the stored secret" (the UI never receives it), a
-// non-blank value overrides it.
-func resolveWriteOnlySecret(submitted, stored string) string {
-	if submitted == "" {
-		return stored
+// resolveBrokerSecret implements the write-only MQTT password convention. A
+// non-blank submitted password always wins. A blank password reuses the stored
+// secret ONLY when the submitted broker identity (host, port, username) matches
+// the stored config; pointing at any other broker yields a blank password, so
+// the hidden secret can never be sent to a different, potentially
+// attacker-supplied, host.
+func resolveBrokerSecret(reqHost string, reqPort int, reqUser, submitted string, stored config.MQTTConfig) string {
+	if submitted != "" {
+		return submitted
 	}
-	return submitted
+	if reqHost == stored.Host && reqPort == stored.Port && reqUser == stored.Username {
+		return stored.Password
+	}
+	return ""
 }
 
 func (s *Server) GetMQTTSettings(w http.ResponseWriter, _ *http.Request) {
@@ -68,7 +74,7 @@ func (s *Server) UpdateMQTTSettings(w http.ResponseWriter, r *http.Request) {
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: resolveWriteOnlySecret(req.Password, s.mqttConfig.Password),
+		Password: resolveBrokerSecret(req.Host, req.Port, req.Username, req.Password, s.mqttConfig),
 		Topic:    req.Topic,
 	}
 
@@ -120,7 +126,7 @@ func (s *Server) TestMQTTConnection(w http.ResponseWriter, r *http.Request) {
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: resolveWriteOnlySecret(req.Password, s.mqttConfig.Password),
+		Password: resolveBrokerSecret(req.Host, req.Port, req.Username, req.Password, s.mqttConfig),
 	}
 
 	client, err := mqtt.New(cfg)
