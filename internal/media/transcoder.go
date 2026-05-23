@@ -227,6 +227,115 @@ func verifyFMP4(path string) error {
 	return nil
 }
 
+// moofBlock is a deduplicated moof+mdat block location. indexFile emits one
+// fragment entry per traf, but multi-track moofs share a single mdat; a block
+// captures each unique moof+mdat pair so it is parsed exactly once.
+type moofBlock struct {
+	moofOffset int64
+	moofSize   int64
+	mdatOffset int64
+	mdatSize   int64
+}
+
+// identifyTracks finds the H264 video track and the (optional) audio track in
+// an fMP4 init segment. The first non-H264 track is treated as audio.
+func identifyTracks(srcInit fmp4.Init) (videoTrackID, audioTrackID int, h264Codec *codecs.H264, err error) {
+	for _, tr := range srcInit.Tracks {
+		if c, ok := tr.Codec.(*codecs.H264); ok {
+			videoTrackID = tr.ID
+			h264Codec = c
+		} else {
+			audioTrackID = tr.ID
+		}
+	}
+	if videoTrackID == 0 || h264Codec == nil {
+		return 0, 0, nil, fmt.Errorf("no H264 video track in source")
+	}
+	return videoTrackID, audioTrackID, h264Codec, nil
+}
+
+// collectMoofBlocks builds the deduplicated list of moof+mdat blocks from the
+// indexed fragments, skipping empty mdats and trafs that share an already-seen
+// moof offset.
+func collectMoofBlocks(frags []fragment) []moofBlock {
+	seen := make(map[int64]bool)
+	var blocks []moofBlock
+	for _, f := range frags {
+		if f.mdatSize == 0 || seen[f.moofOffset] {
+			continue
+		}
+		seen[f.moofOffset] = true
+		blocks = append(blocks, moofBlock{
+			moofOffset: f.moofOffset,
+			moofSize:   f.moofSize,
+			mdatOffset: f.mdatOffset,
+			mdatSize:   f.mdatSize,
+		})
+	}
+	return blocks
+}
+
+// computeVideoFPS derives the frame rate from the first video fragment's sample
+// duration so the encoder's rate control matches non-30fps sources. Implausible
+// or missing values fall back to 15fps.
+func computeVideoFPS(frags []fragment, videoTrackID int, videoTS uint32) float32 {
+	fps := float32(15)
+	for _, f := range frags {
+		if t := f.traf(uint32(videoTrackID)); t != nil && t.duration > 0 {
+			fps = float32(videoTS) / float32(t.duration)
+			break
+		}
+	}
+	if fps <= 0 || fps > 60 {
+		fps = 15
+	}
+	return fps
+}
+
+// extractIDRAccessUnit builds an Annex B access unit containing only the SPS,
+// PPS, and IDR NALs from annexB, each prefixed with a 4-byte start code.
+// P-frames and all other NAL types are discarded: the recompressed file stores
+// one keyframe per GOP, so decoding 30+ frames just to drop them is avoided.
+func extractIDRAccessUnit(annexB []byte) []byte {
+	startCode := []byte{0, 0, 0, 1}
+	var idrAU []byte
+	for _, nal := range splitAnnexB(annexB) {
+		if len(nal) == 0 {
+			continue
+		}
+		switch nal[0] & 0x1f {
+		case 7, 8, 5: // SPS, PPS, IDR
+			idrAU = append(idrAU, startCode...)
+			idrAU = append(idrAU, nal...)
+		}
+	}
+	return idrAU
+}
+
+// buildOutputInit assembles the output init segment: a video track carrying the
+// re-encoded SPS/PPS, followed by a verbatim copy of the source audio track
+// when one is present.
+func buildOutputInit(srcInit fmp4.Init, videoTrackID, audioTrackID int, videoTS uint32, outSPS, outPPS []byte) fmp4.Init {
+	outInit := fmp4.Init{
+		Tracks: []*fmp4.InitTrack{
+			{ID: videoTrackID, TimeScale: videoTS, Codec: &codecs.H264{SPS: outSPS, PPS: outPPS}},
+		},
+	}
+	if audioTrackID != 0 {
+		for _, tr := range srcInit.Tracks {
+			if tr.ID == audioTrackID {
+				outInit.Tracks = append(outInit.Tracks, &fmp4.InitTrack{
+					ID:        tr.ID,
+					TimeScale: tr.TimeScale,
+					Codec:     tr.Codec,
+				})
+				break
+			}
+		}
+	}
+	return outInit
+}
+
 // transcodeFile reads src fMP4, re-encodes video track at (outW, outH), copies audio verbatim, writes to dst.
 func transcodeFile(src, dst string, outW, outH int) error {
 	if !ensureOpenH264() {
@@ -245,18 +354,9 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		return fmt.Errorf("unmarshal init: %w", err)
 	}
 
-	var videoTrackID, audioTrackID int
-	var srcH264Codec *codecs.H264
-	for _, tr := range srcInit.Tracks {
-		if c, ok := tr.Codec.(*codecs.H264); ok {
-			videoTrackID = tr.ID
-			srcH264Codec = c
-		} else {
-			audioTrackID = tr.ID
-		}
-	}
-	if videoTrackID == 0 || srcH264Codec == nil {
-		return fmt.Errorf("no H264 video track in source")
+	videoTrackID, audioTrackID, srcH264Codec, err := identifyTracks(srcInit)
+	if err != nil {
+		return err
 	}
 
 	// Seek back to start and index moof+mdat locations
@@ -268,29 +368,7 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		return fmt.Errorf("index: %w", err)
 	}
 
-	// Build a deduplicated list of moof+mdat block locations. indexFile emits
-	// one fragment entry per traf but multi-track moofs share a single mdat.
-	// We collect unique moof offsets so each moof+mdat block is parsed once.
-	type moofBlock struct {
-		moofOffset int64
-		moofSize   int64
-		mdatOffset int64
-		mdatSize   int64
-	}
-	seen := make(map[int64]bool)
-	var blocks []moofBlock
-	for _, f := range indexedFrags {
-		if f.mdatSize == 0 || seen[f.moofOffset] {
-			continue
-		}
-		seen[f.moofOffset] = true
-		blocks = append(blocks, moofBlock{
-			moofOffset: f.moofOffset,
-			moofSize:   f.moofSize,
-			mdatOffset: f.mdatOffset,
-			mdatSize:   f.mdatSize,
-		})
-	}
+	blocks := collectMoofBlocks(indexedFrags)
 
 	// Create H264 decoder
 	dec := NewH264Decoder()
@@ -317,18 +395,7 @@ func transcodeFile(src, dst string, outW, outH int) error {
 	if videoTS == 0 {
 		videoTS = 90000
 	}
-	// Compute fps from the actual first video fragment's sample duration so that
-	// the encoder's rate-control is accurate for non-30fps sources (e.g. 25fps).
-	fps := float32(15)
-	for _, f := range indexedFrags {
-		if t := f.traf(uint32(videoTrackID)); t != nil && t.duration > 0 {
-			fps = float32(videoTS) / float32(t.duration)
-			break
-		}
-	}
-	if fps <= 0 || fps > 60 {
-		fps = 15
-	}
+	fps := computeVideoFPS(indexedFrags, videoTrackID, videoTS)
 
 	encParam := openh264.SEncParamBase{
 		IUsageType:     openh264.CAMERA_VIDEO_REAL_TIME,
@@ -456,23 +523,7 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		var newVideoSamples []*fmp4.Sample
 		pinner := &runtime.Pinner{}
 
-		// Build an access unit containing only SPS, PPS, and the IDR slice.
-		// P-frames are discarded — the recompressed file stores one keyframe
-		// per GOP. This keeps memory bounded and avoids decoding 30+ frames
-		// per GOP just to discard them.
-		startCode := []byte{0, 0, 0, 1}
-		var idrAU []byte
-		for _, nal := range splitAnnexB(annexB) {
-			if len(nal) == 0 {
-				continue
-			}
-			nalType := nal[0] & 0x1f
-			switch nalType {
-			case 7, 8, 5: // SPS, PPS, IDR
-				idrAU = append(idrAU, startCode...)
-				idrAU = append(idrAU, nal...)
-			}
-		}
+		idrAU := extractIDRAccessUnit(annexB)
 		if len(idrAU) == 0 {
 			continue
 		}
@@ -636,23 +687,7 @@ func transcodeFile(src, dst string, outW, outH int) error {
 		return fmt.Errorf("no frames encoded successfully")
 	}
 
-	outInit := fmp4.Init{
-		Tracks: []*fmp4.InitTrack{
-			{ID: videoTrackID, TimeScale: videoTS, Codec: &codecs.H264{SPS: outSPS, PPS: outPPS}},
-		},
-	}
-	if audioTrackID != 0 {
-		for _, tr := range srcInit.Tracks {
-			if tr.ID == audioTrackID {
-				outInit.Tracks = append(outInit.Tracks, &fmp4.InitTrack{
-					ID:        tr.ID,
-					TimeScale: tr.TimeScale,
-					Codec:     tr.Codec,
-				})
-				break
-			}
-		}
-	}
+	outInit := buildOutputInit(srcInit, videoTrackID, audioTrackID, videoTS, outSPS, outPPS)
 
 	if err := outInit.Marshal(out); err != nil {
 		return fmt.Errorf("write init: %w", err)
