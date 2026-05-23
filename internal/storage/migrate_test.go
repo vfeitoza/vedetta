@@ -238,6 +238,22 @@ func TestMigrate_V2CanonicalizesLegacyRFC3339(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// object_references.created_at and storage_audit.ts are both written via
+	// utc() (SaveObjectReference, InsertStorageAudit) - they do not rely on the
+	// CURRENT_TIMESTAMP default - and are ordered as text (ListObjectReferences
+	// ORDER BY created_at, StorageAudit ORDER BY ts DESC).
+	if _, err := db.Exec(
+		`INSERT INTO object_references (object_id, embedding, created_at) VALUES (?, ?, ?)`,
+		1, []byte("emb"), "2024-01-02T03:04:05Z",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO storage_audit (ts, actor, scope_json, bytes_freed, file_count) VALUES (?, ?, ?, ?, ?)`,
+		"2024-01-02T03:04:05Z", "admin", "{}", 0, 0,
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := migrate(db); err != nil {
 		t.Fatalf("v2 migrate: %v", err)
@@ -260,6 +276,8 @@ func TestMigrate_V2CanonicalizesLegacyRFC3339(t *testing.T) {
 		"SELECT CAST(timestamp AS TEXT) FROM object_sightings",
 		"SELECT CAST(expires_at AS TEXT) FROM auth_sessions",
 		"SELECT CAST(created_at AS TEXT) FROM api_tokens",
+		"SELECT CAST(created_at AS TEXT) FROM object_references",
+		"SELECT CAST(ts AS TEXT) FROM storage_audit",
 	} {
 		var raw string
 		if err := db.QueryRow(q).Scan(&raw); err != nil {

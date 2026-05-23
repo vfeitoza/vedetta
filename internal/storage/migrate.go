@@ -443,11 +443,14 @@ func needsNormalization(s string) bool {
 // ORDER BY). recanonicalizeTimestamps rewrites them into one uniform format so
 // bare (index-using) comparisons are correct.
 //
-// Columns defaulting to CURRENT_TIMESTAMP (e.g. people.created_at,
-// object_references.created_at) are deliberately excluded: SQLite writes those
-// as "2006-01-02 15:04:05" with no zone suffix, so recanonicalizing existing
-// rows to the " +0000 UTC" form would make them sort in a different
-// lexicographic group than every future CURRENT_TIMESTAMP insert.
+// Columns whose values come from SQLite's CURRENT_TIMESTAMP default rather than
+// utc() (e.g. people.created_at, auth_users.created_at, whose INSERTs omit the
+// column) are deliberately excluded: SQLite writes those as "2006-01-02
+// 15:04:05" with no zone suffix, so recanonicalizing existing rows to the
+// " +0000 UTC" form would make them sort in a different lexicographic group than
+// every future CURRENT_TIMESTAMP insert. A column that has a CURRENT_TIMESTAMP
+// default but is always overwritten by an explicit utc() value (e.g.
+// object_references.created_at) is included - its on-disk form is canonical.
 var timestampColumns = []struct {
 	table  string
 	column string
@@ -461,6 +464,8 @@ var timestampColumns = []struct {
 	{"object_sightings", "timestamp"},
 	{"auth_sessions", "expires_at"},
 	{"api_tokens", "created_at"},
+	{"object_references", "created_at"},
+	{"storage_audit", "ts"},
 }
 
 // storedTimeLayouts are the historical on-disk timestamp formats, tried in turn
