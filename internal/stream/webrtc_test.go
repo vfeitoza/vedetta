@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -1137,4 +1139,57 @@ func TestClampLevelIDC(t *testing.T) {
 			}
 		})
 	}
+}
+
+// countStatsLoggerGoroutines returns how many goroutines are currently running
+// the peer stats logger, identified by its function name in the stack dump.
+func countStatsLoggerGoroutines() int {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	// The active stack frame of a running stats logger is its closure; this
+	// appears exactly once per live goroutine (the "created by" line would
+	// double-count).
+	return strings.Count(string(buf[:n]), "startStatsLogger.func1(")
+}
+
+// TestHandleOffer_ErrorPathCancelsStatsLogger guards against leaking the
+// per-peer stats logger goroutine when HandleOffer fails after the logger has
+// been started (e.g. SetRemoteDescription rejects a malformed offer).
+func TestHandleOffer_ErrorPathCancelsStatsLogger(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := rtsp.NewHub(ctx)
+	defer hub.Close()
+
+	sm := NewStreamManager(hub, nil)
+	defer sm.Close()
+
+	// Pre-seed video params so HandleOffer does not block on WaitForVideoParams.
+	const rtspURL = "rtsp://invalid:554/stream"
+	src := hub.GetOrCreate(rtspURL)
+	src.SetVideoTrack(&rtsp.TrackInfo{
+		Codec:   "H264",
+		IsVideo: true,
+		SPS:     []byte{0x67, 0x64, 0x00, 0x29, 0xac, 0x2c, 0xa5, 0x01, 0x40},
+		PPS:     []byte{0x68, 0xee, 0x3c, 0x80},
+	})
+
+	// A malformed offer fails at SetRemoteDescription, which runs after the
+	// stats logger goroutine has already been started.
+	badOffer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "not-a-valid-sdp"}
+	if _, err := sm.HandleOffer("test-cam", rtspURL, badOffer); err == nil {
+		t.Fatal("expected HandleOffer to fail on a malformed offer")
+	}
+
+	// The error path must cancel the stats logger; allow it a brief moment to
+	// observe cancellation and return.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if countStatsLoggerGoroutines() == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("stats logger goroutine leaked after HandleOffer error: %d still running", countStatsLoggerGoroutines())
 }

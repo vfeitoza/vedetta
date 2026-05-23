@@ -881,6 +881,15 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		video:      &trackState{track: videoTrack},
 	}
 	peer.startStatsLogger(context.Background())
+	// The stats logger runs until ICE disconnect on the success path. If we
+	// abandon the peer on any error below, cancel it here so its goroutine does
+	// not leak.
+	handoffOK := false
+	defer func() {
+		if !handoffOK {
+			peer.statsCancel()
+		}
+	}()
 	if vt := source.VideoTrack(); vt != nil {
 		if len(vt.SPS) > 0 {
 			peer.sps = append([]byte(nil), vt.SPS...)
@@ -978,6 +987,9 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 			SDP:  rewriteAnswerProfileLevelID(finalAnswer.SDP, cameraPLI),
 		}
 	}
+	// The peer is fully wired up and handed to the consumer; the stats logger
+	// now lives until ICE disconnect.
+	handoffOK = true
 	return finalAnswer, nil
 }
 
