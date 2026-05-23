@@ -28,8 +28,9 @@ type SnapshotConsumer struct {
 	lastFrame *image.RGBA
 	lastTime  time.Time
 
-	decodeCh chan []byte
-	done     chan struct{}
+	decodeCh  chan []byte
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewSnapshotConsumer creates a consumer that caches the latest full-resolution
@@ -110,9 +111,11 @@ func (sc *SnapshotConsumer) LastFrame() *image.RGBA {
 	return sc.lastFrame
 }
 
-// Close releases decoder resources.
+// Close releases decoder resources. Safe to call more than once.
 func (sc *SnapshotConsumer) Close() {
-	close(sc.done)
+	sc.closeOnce.Do(func() {
+		close(sc.done)
+	})
 }
 
 // OnVideoRTP reassembles NAL units and queues IDR frames for async decode.
