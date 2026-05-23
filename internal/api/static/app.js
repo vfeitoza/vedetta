@@ -1175,9 +1175,21 @@ async function startWebRTC() {
   showStreamConnecting('WebRTC');
 
   try {
-    peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
+    // ICE configuration is per-peer and the browser is the offerer, so the
+    // server's answer cannot signal it. Fetch the operator-configured STUN/
+    // TURN list; the privacy-first default is empty (host candidates only, no
+    // IP leak to a third-party STUN). A fetch failure also degrades to [].
+    let iceServers = [];
+    try {
+      const iceResp = await fetch('/api/streaming/ice-servers');
+      if (iceResp.ok) {
+        iceServers = iceServersFromResponse(await iceResp.json());
+      }
+    } catch (e) {
+      iceServers = [];
+    }
+
+    peerConnection = new RTCPeerConnection({ iceServers });
 
     peerConnection.addTransceiver('video', { direction: 'recvonly' });
     peerConnection.addTransceiver('audio', { direction: 'recvonly' });

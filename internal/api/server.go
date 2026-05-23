@@ -67,6 +67,7 @@ type Server struct {
 	detector             *detect.Detector
 	recordingConfig      config.RecordingConfig
 	rtspServerConfig     config.RTSPServerConfig
+	webrtcConfig         config.WebRTCConfig
 	restartRequired      bool
 	hlsSegmentCache      sync.Map // map[string][]media.HLSSegmentRef — keyed by "camera:segID"
 	snapshotPath         string
@@ -248,6 +249,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/cameras/manage/{index}", s.RemoveCameraManage)
 	s.mux.HandleFunc("POST /api/cameras/test-rtsp", s.TestRTSPConnection)
 	s.mux.HandleFunc("GET /api/cameras/{name}/detections", s.StreamCameraDetections)
+
+	// Browser-facing WebRTC ICE servers (not in OpenAPI spec). The browser is
+	// the offerer; its ICE config is per-peer and not signaled by the answer.
+	s.mux.HandleFunc("GET /api/streaming/ice-servers", s.GetWebRTCICEServers)
 
 	// Camera discovery: reuse the setup-wizard handlers at runtime so the
 	// Add Camera flow can scan/probe. setupDone is nil here, which is safe:
@@ -441,6 +446,7 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 	s.cameras = cameras
 	s.recorder = recorder
 	s.hub = hub
+	s.webrtcConfig = webrtcCfg
 	s.streams = stream.NewStreamManager(hub, webrtcCfg.ICEServers)
 	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins, s.config.TrustedProxies)
 	s.hls = stream.NewHLSManager(hub)

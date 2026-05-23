@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
+	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/stream"
 
 	"github.com/pion/webrtc/v4"
@@ -62,6 +63,21 @@ func (s *Server) GetStreamingCapabilities(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetWebRTCICEServers returns the STUN/TURN servers a browser should configure
+// on its RTCPeerConnection. ICE configuration is per-peer and the browser is
+// the offerer, so the server's answer cannot signal these - the client fetches
+// them here. The list mirrors webrtc.ice_servers from config and is empty by
+// default (privacy-first: no viewer IP leaks to a third-party STUN operator).
+func (s *Server) GetWebRTCICEServers(w http.ResponseWriter, r *http.Request) {
+	servers := s.webrtcConfig.ICEServers
+	if servers == nil {
+		// Serialize as [] rather than null so the browser can spread it
+		// straight into RTCConfiguration.iceServers.
+		servers = []config.ICEServerConfig{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ice_servers": servers})
 }
 
 // pickWebRTCRTSPURL chooses which RTSP source vedetta will negotiate over
