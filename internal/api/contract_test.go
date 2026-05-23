@@ -224,7 +224,7 @@ func newTestServerWithAuth(t *testing.T) (*Server, http.Handler, *auth.Checker) 
 	}, config.EventConfig{RetainDays: 90}, nil, db, nil, "", "", nil)
 
 	srv := New(apiCfg, checker, db)
-	srv.SetSubsystems(nil, rec, nil, nil, nil, "", "", nil, nil)
+	srv.SetSubsystems(nil, rec, nil, nil, nil, "", "", nil, nil, config.WebRTCConfig{})
 
 	handler := authMiddleware(srv, srv.mux)
 	return srv, handler, checker

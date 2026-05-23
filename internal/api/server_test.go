@@ -36,7 +36,7 @@ func newTestServer(t *testing.T) (*Server, *storage.DB) {
 	apiCfg := config.APIConfig{Host: "127.0.0.1", Port: 0}
 	srv := New(apiCfg, nil, db)
 	srv.SetVersion("test")
-	srv.SetSubsystems(mgr, rec, nil, nil, nil, "", "", nil, nil)
+	srv.SetSubsystems(mgr, rec, nil, nil, nil, "", "", nil, nil, config.WebRTCConfig{})
 	return srv, db
 }
 
@@ -1493,7 +1493,7 @@ func newTestServerWithPTZ(t *testing.T) (*Server, *storage.DB) {
 
 	apiCfg := config.APIConfig{Host: "127.0.0.1", Port: 0}
 	srv := New(apiCfg, nil, db)
-	srv.SetSubsystems(mgr, rec, nil, nil, nil, "", "", nil, ptzClients)
+	srv.SetSubsystems(mgr, rec, nil, nil, nil, "", "", nil, ptzClients, config.WebRTCConfig{})
 	return srv, db
 }
 

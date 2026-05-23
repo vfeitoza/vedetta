@@ -437,11 +437,11 @@ func (s *Server) TransitionToFull(authChecker *auth.Checker) {
 	s.httpSrv.Handler = requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux))))
 }
 
-func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient) {
+func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient, webrtcCfg config.WebRTCConfig) {
 	s.cameras = cameras
 	s.recorder = recorder
 	s.hub = hub
-	s.streams = stream.NewStreamManager(hub)
+	s.streams = stream.NewStreamManager(hub, webrtcCfg.ICEServers)
 	s.mse = stream.NewMSEManager(hub, s.config.AllowedOrigins, s.config.TrustedProxies)
 	s.hls = stream.NewHLSManager(hub)
 	s.faceRecognizer = faceRecognizer

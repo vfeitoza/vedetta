@@ -143,3 +143,17 @@ notifications:
   # value is not well-formed. Unset = fallback to "admin@example.com"
   # with a startup warning; set a real contact for production.
   vapid_subscriber: admin@example.com
+
+# WebRTC ICE servers offered to live-view browsers. By default Vedetta offers
+# NONE: LAN viewers connect via local host candidates, and remote viewers fall
+# back to MSE/HLS over the TLS tunnel. This avoids leaking each viewer's IP to a
+# third-party STUN operator (e.g. Google). Only configure servers here if you
+# need UDP-forwarded remote WebRTC; supply your own STUN and/or TURN.
+# webrtc:
+#   ice_servers:
+#     - urls:
+#         - stun:stun.example.net:3478
+#     - urls:
+#         - turn:turn.example.net:3478
+#       username: turn-user
+#       credential: turn-secret

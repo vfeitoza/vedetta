@@ -26,6 +26,7 @@ type Config struct {
 	Updates       UpdateConfig        `yaml:"updates"`
 	Codecs        CodecsConfig        `yaml:"codecs"`
 	Notifications NotificationsConfig `yaml:"notifications"`
+	WebRTC        WebRTCConfig        `yaml:"webrtc"`
 }
 
 // NotificationsConfig controls web push notification delivery.
@@ -58,6 +59,25 @@ const DefaultVAPIDSubscriber = "admin@example.com"
 // CodecsConfig controls optional external codec behavior.
 type CodecsConfig struct {
 	OpenH264 OpenH264Config `yaml:"openh264"`
+}
+
+// WebRTCConfig controls the ICE servers offered to WebRTC viewers.
+type WebRTCConfig struct {
+	// ICEServers is the explicit list of STUN/TURN servers advertised to
+	// browsers during WebRTC negotiation. When empty (the default), Vedetta
+	// offers no external ICE servers: LAN viewers connect via host candidates
+	// and remote viewers use MSE/HLS over the TLS tunnel. This keeps every
+	// viewer's IP from leaking to a third-party STUN operator. Operators who
+	// need UDP-forwarded remote WebRTC opt in by listing their own servers.
+	ICEServers []ICEServerConfig `yaml:"ice_servers"`
+}
+
+// ICEServerConfig describes a single STUN or TURN server. Username and
+// Credential are only meaningful for TURN; STUN entries leave them empty.
+type ICEServerConfig struct {
+	URLs       []string `yaml:"urls" json:"urls"`
+	Username   string   `yaml:"username,omitempty" json:"username,omitempty"`
+	Credential string   `yaml:"credential,omitempty" json:"credential,omitempty"`
 }
 
 // OpenH264Config controls OpenH264 codec auto-install behavior.

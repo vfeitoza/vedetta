@@ -866,7 +866,7 @@ func TestSDPOfferAnswerExchange(t *testing.T) {
 	hub := rtsp.NewHub(ctx)
 	defer hub.Close()
 
-	sm := NewStreamManager(hub)
+	sm := NewStreamManager(hub, nil)
 	defer sm.Close()
 
 	// Create a client peer connection to generate an offer
@@ -951,7 +951,7 @@ func TestNewStreamManager(t *testing.T) {
 	hub := rtsp.NewHub(ctx)
 	defer hub.Close()
 
-	sm := NewStreamManager(hub)
+	sm := NewStreamManager(hub, nil)
 	if sm == nil {
 		t.Fatal("NewStreamManager returned nil")
 	}
@@ -1055,7 +1055,7 @@ func TestHandleOfferAudioMLineNotRejected(t *testing.T) {
 
 	hub := rtsp.NewHub(ctx)
 	defer hub.Close()
-	sm := NewStreamManager(hub)
+	sm := NewStreamManager(hub, nil)
 	defer sm.Close()
 
 	// Build a client offer that mirrors Chrome's: both audio and video

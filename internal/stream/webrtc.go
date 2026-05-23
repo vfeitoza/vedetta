@@ -15,6 +15,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
@@ -24,6 +25,9 @@ type StreamManager struct {
 	mu  sync.Mutex
 	// One webrtcConsumer per camera URL, shared across all peers watching that camera.
 	consumers map[string]*webrtcConsumer
+	// iceServers is the resolved set of STUN/TURN servers offered to peers.
+	// Empty by default (no external ICE), populated only from config.
+	iceServers []webrtc.ICEServer
 }
 
 // rtpWriter is the minimal interface needed to forward a packet onto a peer's
@@ -605,11 +609,40 @@ func (wc *webrtcConsumer) removePeer(peer *peerState) int {
 }
 
 // NewStreamManager creates a stream manager that uses an RTSP Hub for direct forwarding.
-func NewStreamManager(hub *rtsp.Hub) *StreamManager {
+// iceServers configures the STUN/TURN servers offered to WebRTC peers; pass nil to
+// offer none (the privacy-first default).
+func NewStreamManager(hub *rtsp.Hub, iceServers []config.ICEServerConfig) *StreamManager {
 	return &StreamManager{
-		hub:       hub,
-		consumers: make(map[string]*webrtcConsumer),
+		hub:        hub,
+		consumers:  make(map[string]*webrtcConsumer),
+		iceServers: iceServersFromConfig(iceServers),
 	}
+}
+
+// iceServersFromConfig converts the YAML ICE server config into pion's
+// representation. Entries without URLs are skipped (pion would reject them).
+// TURN credentials map to a password-type credential; STUN entries carry none.
+func iceServersFromConfig(cfg []config.ICEServerConfig) []webrtc.ICEServer {
+	if len(cfg) == 0 {
+		return nil
+	}
+	servers := make([]webrtc.ICEServer, 0, len(cfg))
+	for _, s := range cfg {
+		if len(s.URLs) == 0 {
+			continue
+		}
+		server := webrtc.ICEServer{URLs: s.URLs}
+		if s.Username != "" || s.Credential != "" {
+			server.Username = s.Username
+			server.Credential = s.Credential
+			server.CredentialType = webrtc.ICECredentialTypePassword
+		}
+		servers = append(servers, server)
+	}
+	if len(servers) == 0 {
+		return nil
+	}
+	return servers
 }
 
 // audioCodecForTrack returns the WebRTC codec parameters for a camera's audio track.
@@ -821,9 +854,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 		webrtc.WithInterceptorRegistry(ir),
 	)
 	pc, err := api.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
+		ICEServers: sm.iceServers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create peer connection: %w", err)

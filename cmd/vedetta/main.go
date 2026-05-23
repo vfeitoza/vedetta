@@ -194,7 +194,7 @@ func main() {
 
 		// Transition the running server to full mode
 		server.TransitionToFull(authChecker)
-		server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients)
+		server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients, cfg.WebRTC)
 		server.ObjectMatchThreshold = cfg.Detect.ObjectMatchThreshold
 		if cfg.MQTT.Enabled {
 			server.SetMQTTEnabled(true)
@@ -305,7 +305,7 @@ func main() {
 
 	// Wire subsystems into the API server now that everything is initialized
 	server.SetDetector(sub.detector)
-	server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients)
+	server.SetSubsystems(sub.manager, sub.recorder, sub.hub, sub.faceRecognizer, sub.objectEmbedder, cfg.Events.SnapshotPath, filepath.Join(cfg.Events.SnapshotPath, "faces"), cfg.Cameras, sub.ptzClients, cfg.WebRTC)
 	server.ObjectMatchThreshold = cfg.Detect.ObjectMatchThreshold
 	if cfg.MQTT.Enabled {
 		server.SetMQTTEnabled(true)
