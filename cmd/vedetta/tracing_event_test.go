@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -33,6 +34,17 @@ func spanByName(spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpa
 		}
 	}
 	return nil
+}
+
+// countEnded returns how many ended spans carry the given name.
+func countEnded(sr *tracetest.SpanRecorder, name string) int {
+	n := 0
+	for _, s := range sr.Ended() {
+		if s.Name() == name {
+			n++
+		}
+	}
+	return n
 }
 
 // waitForSpan polls the recorder until a span with the given name is ended or
@@ -276,6 +288,73 @@ func TestRunEventLoopSkipsEnqueueOnDBFailure(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if enq.count() != 0 {
 		t.Errorf("enqueuer received %d events on db failure, want 0", enq.count())
+	}
+}
+
+// TestRunEventLoopDoesNotBlockOnSlowEmit is the regression guard for the async
+// offload: the per-event snapshot/MQTT/push work must run on a detached goroutine
+// and never serialize the event loop. A slow enqueuer (emitDelay per event)
+// stands in for that work. Because the loop closes the root "event" span inline,
+// immediately after dispatching the emit goroutine, it must drain a burst of n
+// events almost instantly - well inside drainBudget, which is a small fraction of
+// n*emitDelay. Under the pre-offload inline model the loop would take ~n*emitDelay
+// to drain (the regression this guards), failing the budget assertion.
+func TestRunEventLoopDoesNotBlockOnSlowEmit(t *testing.T) {
+	const (
+		n           = 10
+		emitDelay   = 100 * time.Millisecond
+		drainBudget = 300 * time.Millisecond // serial path would need ~n*emitDelay = 1s
+	)
+	tracer, sr := newTestTracer()
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	sub := testSubsystems()
+	sub.events = make(chan camera.Event, n) // buffer the whole burst so sends don't throttle
+	enq := &slowEnqueuer{delay: emitDelay}
+	sub.notifier = enq
+	cfg := testConfig()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	runEventLoop(ctx, cfg, db, sub, nil, tracer)
+
+	// No snapshot image and nil MQTT client: each emit goroutine skips
+	// snapshot.save and mqtt.publish and goes straight to the slow Enqueue, so the
+	// only emit cost is the injected delay on the detached goroutine.
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		sub.events <- camera.Event{
+			ID:         fmt.Sprintf("cam1-burst-%d", i),
+			CameraName: "cam1",
+			Label:      "person",
+			Timestamp:  time.Now(),
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for countEnded(sr, "event") < n && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	drain := time.Since(start)
+	if got := countEnded(sr, "event"); got < n {
+		t.Fatalf("loop closed %d/%d root spans within deadline", got, n)
+	}
+	if drain >= drainBudget {
+		t.Fatalf("loop took %v to drain %d events (budget %v): emit work is blocking the loop", drain, n, drainBudget)
+	}
+
+	// The work is detached, not dropped: all n enqueues eventually complete. They
+	// run concurrently, so they finish in roughly one emitDelay rather than
+	// n*emitDelay - additional evidence the loop fanned them out in parallel.
+	for enq.completed() < n && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := enq.completed(); got != n {
+		t.Fatalf("enqueuer completed %d/%d events: detached emit work was dropped", got, n)
 	}
 }
 

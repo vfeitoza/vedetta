@@ -76,6 +76,31 @@ func (f *fakeEnqueuer) at(i int) camera.Event {
 	return f.enqueued[i]
 }
 
+// slowEnqueuer stands in for slow downstream emit work (snapshot save, MQTT
+// publish) running on the detached per-event goroutine: each Enqueue sleeps for
+// delay. A test uses it to prove the event loop does not serialize on that work.
+// Enqueue is the only emit step injectable at the loop level - the recorder and
+// MQTT client are concrete types - and it runs last in emitEventArtifacts, so a
+// slow Enqueue makes the whole detached goroutine slow, which is the point.
+type slowEnqueuer struct {
+	delay time.Duration
+	mu    sync.Mutex
+	done  int
+}
+
+func (s *slowEnqueuer) Enqueue(ev camera.Event) {
+	time.Sleep(s.delay)
+	s.mu.Lock()
+	s.done++
+	s.mu.Unlock()
+}
+
+func (s *slowEnqueuer) completed() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.done
+}
+
 func smallImage() *image.RGBA { return image.NewRGBA(image.Rect(0, 0, 2, 2)) }
 
 // --- tests ---
