@@ -26,6 +26,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.5.2](https://github.com/rvben/vedetta/compare/v0.5.1...v0.5.2) - 2026-05-24
+
+### Added
+
+- **tracing**: clip.extract span via testable extractClipSpan helper ([b2575aa](https://github.com/rvben/vedetta/commit/b2575aa110c29538cb2f05d98da0d386d14b7885))
+- **tracing**: event.end span parented to the stored event root ([316c94c](https://github.com/rvben/vedetta/commit/316c94ceb0e1d164cd88d5a5cebd2803880bb940))
+- **tracing**: object.reid child span on the detached re-ID goroutine ([a3d962b](https://github.com/rvben/vedetta/commit/a3d962b2af5d7d3b4d0cbb35a93d72d31f29aee9))
+- **tracing**: event root span with db/snapshot/mqtt children ([c2c9439](https://github.com/rvben/vedetta/commit/c2c94396e2b1678e1b7dfeefb7bd7ba79f7e3ff9))
+
 ## [0.5.1](https://github.com/rvben/vedetta/compare/v0.5.0...v0.5.1) - 2026-05-23
 
 ### Added
