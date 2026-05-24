@@ -711,6 +711,32 @@ type clipSaver interface {
 // Compile-time check that *recording.Recorder satisfies clipSaver.
 var _ clipSaver = (*recording.Recorder)(nil)
 
+// snapshotSaver is the subset of *recording.Recorder that emitEventArtifacts
+// needs, extracted so the snapshot.save span can be unit-tested with a stub.
+type snapshotSaver interface {
+	SaveEventSnapshot(event camera.Event, img *image.RGBA, primaryPath string) (string, error)
+}
+
+// eventPublisher is the subset of *mqtt.Client that emitEventArtifacts needs
+// for the create-event and snapshot publishes, extracted for unit testing.
+type eventPublisher interface {
+	PublishEvent(event camera.Event, matchedObjects []string) error
+	PublishSnapshot(cameraName, label string, jpegData []byte)
+}
+
+// eventEnqueuer is the subset of *notify.NotificationDispatcher used to enqueue
+// push notifications, extracted so the emit path can be tested with a fake.
+type eventEnqueuer interface {
+	Enqueue(ev camera.Event)
+}
+
+// Compile-time checks that the production types satisfy the seams.
+var (
+	_ snapshotSaver  = (*recording.Recorder)(nil)
+	_ eventPublisher = (*mqtt.Client)(nil)
+	_ eventEnqueuer  = (*notify.NotificationDispatcher)(nil)
+)
+
 // extractClipSpan runs one clip-extraction attempt inside a clip.extract span,
 // recording an error status when the attempt fails. The retry loop in the
 // event loop calls this per attempt.
