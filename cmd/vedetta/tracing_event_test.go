@@ -195,6 +195,90 @@ func TestRunEventLoopTracingEnd(t *testing.T) {
 	}
 }
 
+// pollEnqueued waits up to ~1s for the fake enqueuer to receive n events. The
+// emit work runs on a detached goroutine, so the assertion must poll.
+func pollEnqueued(t *testing.T, enq *fakeEnqueuer, n int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if enq.count() >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("enqueuer received %d events, want %d", enq.count(), n)
+}
+
+func TestRunEventLoopEnqueuesOnSuccess(t *testing.T) {
+	tracer, sr := newTestTracer()
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	sub := testSubsystems()
+	enq := &fakeEnqueuer{}
+	sub.notifier = enq
+	cfg := testConfig()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	runEventLoop(ctx, cfg, db, sub, nil, tracer)
+
+	// No snapshot image and nil MQTT client: the emit goroutine skips
+	// snapshot.save and mqtt.publish and proceeds straight to Enqueue.
+	sub.events <- camera.Event{
+		ID:         "cam1-t9-1",
+		CameraName: "cam1",
+		Label:      "person",
+		Timestamp:  time.Now(),
+	}
+
+	waitForSpan(t, sr, "event")
+	pollEnqueued(t, enq, 1)
+	if got := enq.at(0).ID; got != "cam1-t9-1" {
+		t.Errorf("enqueued event ID = %q, want cam1-t9-1", got)
+	}
+}
+
+func TestRunEventLoopSkipsEnqueueOnDBFailure(t *testing.T) {
+	tracer, sr := newTestTracer()
+	db, err := storage.New(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	// Close the DB so SaveEvent fails; the loop must not spawn the emit goroutine.
+	_ = db.Close()
+
+	sub := testSubsystems()
+	enq := &fakeEnqueuer{}
+	sub.notifier = enq
+	cfg := testConfig()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	runEventLoop(ctx, cfg, db, sub, nil, tracer)
+
+	sub.events <- camera.Event{
+		ID:         "cam1-t9-2",
+		CameraName: "cam1",
+		Label:      "person",
+		Timestamp:  time.Now(),
+	}
+
+	waitForSpan(t, sr, "event")
+	dbSpan := spanByName(sr.Ended(), "db.save_event")
+	if dbSpan == nil || dbSpan.Status().Code != codes.Error {
+		t.Fatalf("expected db.save_event with Error status on closed DB")
+	}
+	// Give any (erroneously spawned) goroutine a chance to run, then assert none.
+	time.Sleep(100 * time.Millisecond)
+	if enq.count() != 0 {
+		t.Errorf("enqueuer received %d events on db failure, want 0", enq.count())
+	}
+}
+
 type stubClipSaver struct{ err error }
 
 func (s stubClipSaver) SaveClip(ctx context.Context, ev camera.Event) error { return s.err }

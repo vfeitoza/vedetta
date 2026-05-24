@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,10 +51,30 @@ func (f *fakeEventPublisher) PublishSnapshot(cameraName, label string, jpegData 
 }
 
 type fakeEnqueuer struct {
+	mu       sync.Mutex
 	enqueued []camera.Event
 }
 
-func (f *fakeEnqueuer) Enqueue(ev camera.Event) { f.enqueued = append(f.enqueued, ev) }
+func (f *fakeEnqueuer) Enqueue(ev camera.Event) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueued = append(f.enqueued, ev)
+}
+
+// count returns the number of enqueued events under lock, safe to call while the
+// emit goroutine may still be appending.
+func (f *fakeEnqueuer) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.enqueued)
+}
+
+// at returns the i-th enqueued event under lock.
+func (f *fakeEnqueuer) at(i int) camera.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enqueued[i]
+}
 
 func smallImage() *image.RGBA { return image.NewRGBA(image.Rect(0, 0, 2, 2)) }
 
@@ -98,12 +119,13 @@ func TestEmitEventArtifacts_Success(t *testing.T) {
 	if pub.snapshots != 1 {
 		t.Errorf("PublishSnapshot called %d times, want 1", pub.snapshots)
 	}
-	if len(enq.enqueued) != 1 {
-		t.Fatalf("Enqueue called %d times, want 1", len(enq.enqueued))
+	if enq.count() != 1 {
+		t.Fatalf("Enqueue called %d times, want 1", enq.count())
 	}
-	if !enq.enqueued[0].SnapshotAvailable || enq.enqueued[0].SnapshotPath != "resolved/snap.jpg" {
+	got := enq.at(0)
+	if !got.SnapshotAvailable || got.SnapshotPath != "resolved/snap.jpg" {
 		t.Errorf("enqueued event lost resolved snapshot: avail=%v path=%q",
-			enq.enqueued[0].SnapshotAvailable, enq.enqueued[0].SnapshotPath)
+			got.SnapshotAvailable, got.SnapshotPath)
 	}
 }
 
@@ -135,10 +157,10 @@ func TestEmitEventArtifacts_SnapshotError(t *testing.T) {
 	if pub.events[0].ev.SnapshotAvailable {
 		t.Error("published SnapshotAvailable = true, want false after snapshot error")
 	}
-	if len(enq.enqueued) != 1 {
-		t.Fatalf("Enqueue called %d times, want 1", len(enq.enqueued))
+	if enq.count() != 1 {
+		t.Fatalf("Enqueue called %d times, want 1", enq.count())
 	}
-	if enq.enqueued[0].SnapshotAvailable {
+	if enq.at(0).SnapshotAvailable {
 		t.Error("enqueued SnapshotAvailable = true, want false after snapshot error")
 	}
 }
@@ -162,8 +184,8 @@ func TestEmitEventArtifacts_NoMQTTClient(t *testing.T) {
 	if !saver.called {
 		t.Error("saver not called")
 	}
-	if len(enq.enqueued) != 1 {
-		t.Errorf("Enqueue called %d times, want 1", len(enq.enqueued))
+	if enq.count() != 1 {
+		t.Errorf("Enqueue called %d times, want 1", enq.count())
 	}
 }
 
@@ -185,8 +207,8 @@ func TestEmitEventArtifacts_NilSnapshotImage(t *testing.T) {
 	if len(pub.events) != 1 {
 		t.Errorf("PublishEvent called %d times, want 1", len(pub.events))
 	}
-	if len(enq.enqueued) != 1 {
-		t.Errorf("Enqueue called %d times, want 1", len(enq.enqueued))
+	if enq.count() != 1 {
+		t.Errorf("Enqueue called %d times, want 1", enq.count())
 	}
 }
 

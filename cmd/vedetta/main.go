@@ -874,6 +874,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			timer       *time.Timer
 			tempCancel  context.CancelFunc // for non-continuous temporary recording
 			rootSpanCtx trace.SpanContext  // event root span, for late event.end/clip.extract children
+			emitDone    chan struct{}      // closed when the emit goroutine finishes; nil if none spawned
 		}
 		active := make(map[string]*activeEvent)         // eventID -> state
 		objectCounts := make(map[string]map[string]int) // camera -> label -> count
@@ -895,6 +896,11 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				endSpan.SetStatus(codes.Error, "update end time")
 				slog.Error("failed to update event end time", "event", ev.ID, "error", err)
 			}
+
+			// Order the event-end publish after the create publish, which runs
+			// in the emit goroutine. In practice emitDone is already closed by
+			// the time an event ends; the bounded wait only guards a wedged emit.
+			waitForEmit(ctx, ae.emitDone, emitWaitTimeout)
 
 			// Publish event end over MQTT
 			if mc := sub.mqttClient.Load(); mc != nil {
@@ -1008,53 +1014,42 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				if saveErr != nil {
 					dbSpan.RecordError(saveErr)
 					dbSpan.SetStatus(codes.Error, "save event")
-					dbSpan.End()
 					slog.Error("failed to save event", "error", saveErr)
-				} else {
-					dbSpan.End()
-					if event.SnapshotImage != nil && event.SnapshotPath != "" {
-						_, snapSpan := tracer.Start(evCtx, "snapshot.save")
-						resolved, err := sub.recorder.SaveEventSnapshot(event, event.SnapshotImage, event.SnapshotPath)
-						if err != nil {
-							snapSpan.RecordError(err)
-							snapSpan.SetStatus(codes.Error, "save snapshot")
-							slog.Error("failed to save event snapshot", "event", event.ID, "error", err)
-						} else {
-							// Update resolved path and availability so downstream
-							// consumers (MQTT, push) see the correct values.
-							event.SnapshotPath = resolved
-							event.SnapshotAvailable = true
-						}
-						snapSpan.End()
-					}
 				}
+				dbSpan.End()
 
-				if mc := sub.mqttClient.Load(); mc != nil {
-					_, mqttSpan := tracer.Start(evCtx, "mqtt.publish")
-					if err := mc.PublishEvent(event, nil); err != nil {
-						mqttSpan.RecordError(err)
-						mqttSpan.SetStatus(codes.Error, "publish event")
-						slog.Error("failed to publish event", "error", err)
-					}
-
-					// Track object count per camera per label
+				// Object-count gauge stays on the loop: the per-camera count map is
+				// not goroutine-safe, and finalizeEvent decrements and republishes on
+				// the same retained topic from the loop, so keeping the increment here
+				// keeps count ordering correct-by-construction. PublishObjectCount
+				// sends a small retained integer, so running it on the loop is cheap.
+				mc := sub.mqttClient.Load()
+				if mc != nil {
 					if objectCounts[event.CameraName] == nil {
 						objectCounts[event.CameraName] = make(map[string]int)
 					}
 					objectCounts[event.CameraName][event.Label]++
 					mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
+				}
 
-					// Use annotated image for MQTT (with bounding boxes for visual context)
-					mqttImg := event.AnnotatedImage
-					if mqttImg == nil {
-						mqttImg = event.SnapshotImage
+				// Offload snapshot save, MQTT create/snapshot publish, and push
+				// enqueue to a detached goroutine (one per event, like object.reid),
+				// but only when the event persisted: an event users cannot look up
+				// via the API must not be published to MQTT or pushed. emitDone is
+				// closed when the goroutine finishes so finalizeEvent can order the
+				// event-end publish after the create publish.
+				var emitDone chan struct{}
+				if saveErr == nil {
+					done := make(chan struct{})
+					emitDone = done
+					var pub eventPublisher
+					if mc != nil {
+						pub = mc
 					}
-					if mqttImg != nil {
-						if jpegData := encodeJPEG(mqttImg, cfg.Events.SnapshotQuality); jpegData != nil {
-							mc.PublishSnapshot(event.CameraName, event.Label, jpegData)
-						}
-					}
-					mqttSpan.End()
+					go func(ev camera.Event) {
+						defer close(done)
+						emitEventArtifacts(evCtx, tracer, sub.recorder, pub, sub.notifier, cfg.Events.SnapshotQuality, ev)
+					}(event)
 				}
 
 				if sub.objectEmbedder != nil && event.SnapshotImage != nil {
@@ -1102,14 +1097,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					timer:       timer,
 					tempCancel:  tempCancel,
 					rootSpanCtx: rootSpanCtx,
-				}
-
-				// Fan out to push notification subscribers. Enqueue is
-				// non-blocking and guarded by its own cooldown; we skip it
-				// only when the event failed to persist (saveErr != nil) so
-				// we never push an event users can't look up via the API.
-				if sub.notifier != nil && saveErr == nil {
-					sub.notifier.Enqueue(event)
+					emitDone:    emitDone,
 				}
 
 			case end := <-eventEnds:
