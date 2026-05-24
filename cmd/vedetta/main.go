@@ -48,6 +48,13 @@ import (
 // heartbeat before the watchdog terminates it for a supervisor restart.
 const livenessTimeout = 2 * time.Minute
 
+// emitWaitTimeout bounds how long finalizeEvent will wait for an event's emit
+// goroutine (create publish) to finish before publishing the event-end. In
+// practice the emit goroutine completes long before an event ends, so this only
+// guards against a wedged broker or disk; it keeps the event loop from blocking
+// indefinitely.
+const emitWaitTimeout = 5 * time.Second
+
 // Version is injected at build time via -ldflags="-X main.Version=<tag>".
 // Falls back to "dev" when building without ldflags (local development).
 var Version = "dev"
@@ -801,6 +808,22 @@ func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
 
 	if notifier != nil {
 		notifier.Enqueue(ev)
+	}
+}
+
+// waitForEmit blocks until an event's emit goroutine has finished (done is
+// closed), the timeout elapses, or ctx is cancelled. finalizeEvent calls this
+// before the event-end MQTT publish so the create publish (in the emit
+// goroutine) is ordered before the end publish on the same retained topic. A
+// nil done (no emit goroutine was spawned, e.g. db save failed) returns at once.
+func waitForEmit(ctx context.Context, done <-chan struct{}, timeout time.Duration) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	case <-ctx.Done():
 	}
 }
 

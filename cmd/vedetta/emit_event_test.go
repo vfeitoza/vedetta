@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/codes"
 
@@ -186,5 +187,43 @@ func TestEmitEventArtifacts_NilSnapshotImage(t *testing.T) {
 	}
 	if len(enq.enqueued) != 1 {
 		t.Errorf("Enqueue called %d times, want 1", len(enq.enqueued))
+	}
+}
+
+func TestWaitForEmit_NilReturnsImmediately(t *testing.T) {
+	start := time.Now()
+	waitForEmit(context.Background(), nil, time.Second)
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("nil channel waited %v, want immediate", elapsed)
+	}
+}
+
+func TestWaitForEmit_ClosedReturnsImmediately(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	start := time.Now()
+	waitForEmit(context.Background(), done, time.Second)
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("closed channel waited %v, want immediate", elapsed)
+	}
+}
+
+func TestWaitForEmit_TimesOut(t *testing.T) {
+	done := make(chan struct{}) // never closed
+	start := time.Now()
+	waitForEmit(context.Background(), done, 30*time.Millisecond)
+	if elapsed := time.Since(start); elapsed < 10*time.Millisecond {
+		t.Errorf("waited %v, want at least ~30ms timeout", elapsed)
+	}
+}
+
+func TestWaitForEmit_ContextCancel(t *testing.T) {
+	done := make(chan struct{}) // never closed
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	waitForEmit(ctx, done, time.Second)
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("cancelled ctx waited %v, want immediate", elapsed)
 	}
 }
