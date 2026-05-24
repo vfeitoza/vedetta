@@ -737,6 +737,73 @@ var (
 	_ eventEnqueuer  = (*notify.NotificationDispatcher)(nil)
 )
 
+// emitEventArtifacts performs the per-event work that does not need to block the
+// event loop: persisting the snapshot, publishing the create event and snapshot
+// to MQTT, and enqueuing the push notification. It is intended to be called in
+// a dedicated goroutine per event (like object.reid); it does not spawn one
+// itself. The event is passed by value, so it mutates only its own copy. Spans
+// are children of the passed ctx (the event root's evCtx) so the trace stays
+// connected even after the root span ends.
+//
+// Order matters: SaveEventSnapshot resolves SnapshotPath/SnapshotAvailable on
+// the local copy, then the create PublishEvent carries those resolved snapshot
+// fields, then Enqueue keeps the push thumbnail.
+//
+// Caller responsibilities:
+//   - Only invoke this after a successful db.SaveEvent. The push enqueue and
+//     MQTT publish happen unconditionally here, so an event that failed to
+//     persist (and is not retrievable via the API) must never reach this helper.
+//   - Object-count tracking (PublishObjectCount and the per-camera count map)
+//     stays on the event loop and is NOT performed here, because that map is
+//     not goroutine-safe and event-end decrements publish on the same retained
+//     topic from the loop.
+//
+// saver is required; pub and notifier may be nil (no MQTT client / no push
+// dispatcher), in which case the corresponding step is skipped.
+func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
+	saver snapshotSaver, pub eventPublisher, notifier eventEnqueuer,
+	snapshotQuality int, ev camera.Event) {
+
+	if ev.SnapshotImage != nil && ev.SnapshotPath != "" {
+		_, snapSpan := tracer.Start(ctx, "snapshot.save")
+		resolved, err := saver.SaveEventSnapshot(ev, ev.SnapshotImage, ev.SnapshotPath)
+		if err != nil {
+			snapSpan.RecordError(err)
+			snapSpan.SetStatus(codes.Error, "save snapshot")
+			slog.Error("failed to save event snapshot", "event", ev.ID, "error", err)
+		} else {
+			ev.SnapshotPath = resolved
+			ev.SnapshotAvailable = true
+		}
+		snapSpan.End()
+	}
+
+	if pub != nil {
+		_, mqttSpan := tracer.Start(ctx, "mqtt.publish")
+		if err := pub.PublishEvent(ev, nil); err != nil {
+			mqttSpan.RecordError(err)
+			mqttSpan.SetStatus(codes.Error, "publish event")
+			slog.Error("failed to publish event", "error", err)
+		}
+		// Use the annotated image (bounding boxes) for MQTT, falling back to the
+		// raw snapshot.
+		mqttImg := ev.AnnotatedImage
+		if mqttImg == nil {
+			mqttImg = ev.SnapshotImage
+		}
+		if mqttImg != nil {
+			if jpegData := encodeJPEG(mqttImg, snapshotQuality); jpegData != nil {
+				pub.PublishSnapshot(ev.CameraName, ev.Label, jpegData)
+			}
+		}
+		mqttSpan.End()
+	}
+
+	if notifier != nil {
+		notifier.Enqueue(ev)
+	}
+}
+
 // extractClipSpan runs one clip-extraction attempt inside a clip.extract span,
 // recording an error status when the attempt fails. The retry loop in the
 // event loop calls this per attempt.
