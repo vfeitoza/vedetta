@@ -72,7 +72,12 @@ type subsystems struct {
 	hub            *rtsp.Hub
 	recorder       *recording.Recorder
 	manager        *camera.Manager
-	notifier       *notify.NotificationDispatcher
+	// notifier is the eventEnqueuer seam so the event loop and emit path can be
+	// tested with a fake. The wiring in main assigns it only when the concrete
+	// dispatcher is non-nil, to avoid the typed-nil-in-interface trap: assigning a
+	// nil *NotificationDispatcher to an interface field yields a non-nil interface,
+	// which would break the `sub.notifier != nil` check when push is disabled.
+	notifier       eventEnqueuer
 	snapshotSaver  *snapshot.Saver
 	events         chan camera.Event
 	eventEnds      chan camera.EventEnd
@@ -202,8 +207,14 @@ func main() {
 		sub := initSubsystems(ctx, cancel, cfg, db)
 		defer closeSubsystems(sub)
 
-		sub.notifier = setupNotifier(db, cfg)
-		wireNotifier(ctx, server, sub.notifier, cfg)
+		dispatcher := setupNotifier(db, cfg)
+		wireNotifier(ctx, server, dispatcher, cfg)
+		// Avoid the typed-nil-in-interface trap: only store a non-nil dispatcher,
+		// so the emit path's `sub.notifier != nil` check is correct when push is
+		// disabled.
+		if dispatcher != nil {
+			sub.notifier = dispatcher
+		}
 
 		// Reconcile event media availability with the filesystem
 		go recording.ReconcileEventMediaAvailability(db)
@@ -315,8 +326,14 @@ func main() {
 	sub := initSubsystems(ctx, cancel, cfg, db)
 	defer closeSubsystems(sub)
 
-	sub.notifier = setupNotifier(db, cfg)
-	wireNotifier(ctx, server, sub.notifier, cfg)
+	dispatcher := setupNotifier(db, cfg)
+	wireNotifier(ctx, server, dispatcher, cfg)
+	// Avoid the typed-nil-in-interface trap: only store a non-nil dispatcher,
+	// so the emit path's `sub.notifier != nil` check is correct when push is
+	// disabled.
+	if dispatcher != nil {
+		sub.notifier = dispatcher
+	}
 
 	runEventLoop(ctx, cfg, db, sub, server, tp.Tracer())
 	startOnvifSubscribers(ctx, cfg, server)
