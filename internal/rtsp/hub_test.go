@@ -2,8 +2,120 @@ package rtsp
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 )
+
+// canceledHub returns a hub whose context is already done, so GetOrCreate's
+// per-source Connect goroutine exits immediately and never touches the reconnect
+// counters. Reconnects are driven explicitly via SimulateReconnectForTest.
+func canceledHub(t *testing.T) *Hub {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	hub := NewHub(ctx)
+	t.Cleanup(hub.Close)
+	return hub
+}
+
+// A reconnect sink registered before the source exists must be wired up when the
+// source is later created, so the per-camera counter starts accumulating from
+// the first drop regardless of which subsystem opens the stream.
+func TestHubRegisterReconnectSink_WiresSourceCreatedLater(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/cam"
+
+	var counter atomic.Int64
+	hub.RegisterReconnectSink(url, &counter)
+
+	src := hub.GetOrCreate(url)
+	src.SimulateReconnectForTest()
+
+	if got := counter.Load(); got != 1 {
+		t.Errorf("counter = %d, want 1 (sink registered before source creation)", got)
+	}
+}
+
+// Registering after the source already exists must wire the live source too.
+func TestHubRegisterReconnectSink_WiresExistingSource(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/cam"
+
+	src := hub.GetOrCreate(url)
+	var counter atomic.Int64
+	hub.RegisterReconnectSink(url, &counter)
+
+	src.SimulateReconnectForTest()
+	if got := counter.Load(); got != 1 {
+		t.Errorf("counter = %d, want 1 (sink registered after source creation)", got)
+	}
+}
+
+// Two cameras configured with the same RTSP URL share one Source. A reconnect on
+// that shared connection must increment both cameras' counters, not just the
+// last one registered.
+func TestHubRegisterReconnectSink_SharedURLFansOutToAllCameras(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/shared"
+
+	var camA, camB atomic.Int64
+	hub.RegisterReconnectSink(url, &camA)
+	hub.RegisterReconnectSink(url, &camB)
+
+	src := hub.GetOrCreate(url)
+	src.SimulateReconnectForTest()
+
+	if camA.Load() != 1 || camB.Load() != 1 {
+		t.Errorf("shared-source reconnect: camA=%d camB=%d, want 1 and 1", camA.Load(), camB.Load())
+	}
+}
+
+// The reconnect total must stay monotonic across a stop/start. Removing a source
+// discards it (and its own counter), but the registered sink is re-wired when a
+// fresh source is created, so the camera's cumulative count keeps climbing
+// without the camera having to re-register.
+func TestHubRegisterReconnectSink_SurvivesRemoveAndRecreate(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/cam"
+
+	var counter atomic.Int64
+	hub.RegisterReconnectSink(url, &counter)
+
+	src := hub.GetOrCreate(url)
+	src.SimulateReconnectForTest()
+	if got := counter.Load(); got != 1 {
+		t.Fatalf("counter = %d, want 1 before removal", got)
+	}
+
+	hub.Remove(url)
+	if got := counter.Load(); got != 1 {
+		t.Errorf("counter = %d, want 1 after removal (must not reset)", got)
+	}
+
+	src2 := hub.GetOrCreate(url)
+	src2.SimulateReconnectForTest()
+	if got := counter.Load(); got != 2 {
+		t.Errorf("counter = %d, want 2 after recreate + 1 drop (registry must re-wire)", got)
+	}
+}
+
+// Re-registering the same counter (e.g. a camera restart calling Start again)
+// must not double-count reconnects on a single shared source.
+func TestHubRegisterReconnectSink_IdempotentPerSink(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/cam"
+
+	var counter atomic.Int64
+	hub.RegisterReconnectSink(url, &counter)
+	hub.RegisterReconnectSink(url, &counter)
+
+	src := hub.GetOrCreate(url)
+	src.SimulateReconnectForTest()
+
+	if got := counter.Load(); got != 1 {
+		t.Errorf("counter = %d, want 1 (duplicate registration must not double-count)", got)
+	}
+}
 
 func TestSanitizeURL_RedactsCredentialsAndSecrets(t *testing.T) {
 	raw := "rtsp://user:pass@example.com/live?token=abc123&profile=main#frag"

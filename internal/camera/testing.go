@@ -79,5 +79,8 @@ func (m *Manager) RegisterForTest(cam *Camera) {
 	if m.cameras == nil {
 		m.cameras = map[string]*Camera{}
 	}
+	if _, exists := m.cameras[cam.config.Name]; !exists {
+		m.order = append(m.order, cam.config.Name)
+	}
 	m.cameras[cam.config.Name] = cam
 }

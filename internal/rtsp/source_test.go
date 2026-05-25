@@ -64,6 +64,35 @@ func TestSourceAddRemoveConsumer(t *testing.T) {
 	}
 }
 
+// A camera that keeps dropping its RTSP connection (a flapping or known-bad
+// stream) must surface as a rising reconnect count, so monitoring can tell a
+// flapping camera apart from one that is steadily offline.
+func TestSourceReconnectsCounter(t *testing.T) {
+	s := NewSource("rtsp://test:554/stream")
+
+	if got := s.Reconnects(); got != 0 {
+		t.Fatalf("expected 0 reconnects on a fresh source, got %d", got)
+	}
+
+	// A failed initial connection (never established) must not count: a
+	// steadily-offline camera should read 0, not look like it is flapping.
+	s.notifyDisconnect()
+	if got := s.Reconnects(); got != 0 {
+		t.Errorf("Reconnects() = %d, want 0 after a never-connected drop", got)
+	}
+
+	// Each loss of an *established* connection is a real reconnect.
+	for range 3 {
+		s.mu.Lock()
+		s.connected = true
+		s.mu.Unlock()
+		s.notifyDisconnect()
+	}
+	if got := s.Reconnects(); got != 3 {
+		t.Errorf("Reconnects() = %d, want 3", got)
+	}
+}
+
 func TestSourceRemoveNonexistent(t *testing.T) {
 	s := NewSource("rtsp://test:554/stream")
 	c1 := &mockConsumer{}

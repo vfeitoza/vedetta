@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // SanitizeURL removes credentials from an RTSP URL for safe logging.
@@ -45,6 +46,14 @@ type Hub struct {
 	sources map[string]*managedSource
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	// reconnectSinks maps an RTSP URL to the per-camera counters that want every
+	// reconnect on that URL. Registration is independent of source creation: a
+	// Source created later (by recording, snapshot, or detect, whichever opens
+	// the stream first) is wired up from this registry, and a Source recreated
+	// after Remove re-wires the same sinks, keeping the counters monotonic. One
+	// URL can map to several counters because multiple cameras may share it.
+	reconnectSinks map[string][]*atomic.Int64
 }
 
 type managedSource struct {
@@ -56,9 +65,10 @@ type managedSource struct {
 func NewHub(ctx context.Context) *Hub {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Hub{
-		sources: make(map[string]*managedSource),
-		ctx:     ctx,
-		cancel:  cancel,
+		sources:        make(map[string]*managedSource),
+		reconnectSinks: make(map[string][]*atomic.Int64),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -73,6 +83,9 @@ func (h *Hub) GetOrCreate(url string) *Source {
 
 	src := NewSource(url)
 	srcCtx, srcCancel := context.WithCancel(h.ctx)
+	for _, sink := range h.reconnectSinks[url] {
+		src.AddReconnectSink(sink)
+	}
 
 	h.sources[url] = &managedSource{
 		source: src,
@@ -83,6 +96,28 @@ func (h *Hub) GetOrCreate(url string) *Source {
 
 	slog.Info("RTSP hub created source", "url", SanitizeURL(url))
 	return src
+}
+
+// RegisterReconnectSink records that the given counter wants every reconnect on
+// url, and wires it onto the live Source if one already exists. The registration
+// outlives individual Sources, so a Source created or recreated later (after
+// Remove) picks the sink up automatically. Idempotent per (url, sink) so a
+// camera restart cannot double-register.
+func (h *Hub) RegisterReconnectSink(url string, sink *atomic.Int64) {
+	if url == "" || sink == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, existing := range h.reconnectSinks[url] {
+		if existing == sink {
+			return
+		}
+	}
+	h.reconnectSinks[url] = append(h.reconnectSinks[url], sink)
+	if ms, ok := h.sources[url]; ok {
+		ms.source.AddReconnectSink(sink)
+	}
 }
 
 // Get returns the Source for the given URL, or nil if it doesn't exist.

@@ -463,12 +463,6 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 		}
 	}
 
-	// Start continuous segment recording
-	sub.recorder.StartContinuousRecording(ctx, stoppedCameras)
-	sub.recorder.StartRetentionCleanup(ctx)
-	sub.recorder.StartStatsRefresh(ctx)
-	sub.recorder.StartRecompressionJob(ctx)
-
 	// Publish HA MQTT discovery for all enabled cameras
 	if mc := sub.mqttClient.Load(); mc != nil {
 		var cameraNames []string
@@ -497,6 +491,15 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	sub.detections = make(chan camera.DetectionFrame, 64)
 
 	sub.manager = camera.NewManager(cfg.Cameras, sub.detector, cfg.Detect.Motion, sub.events, sub.eventEnds, sub.presenceEvents, sub.hub, cfg.Events.SnapshotPath, cfg.Events.SnapshotQuality, cfg.Recording.Path, sub.faceRecognizer, sub.faceEvents, filepath.Join(cfg.Events.SnapshotPath, "faces"), sub.motionActivity, sub.detections)
+
+	// Start continuous segment recording after the manager is built: NewManager
+	// (via NewCamera) registers each camera's reconnect sink with the hub, and
+	// StartContinuousRecording is the first subsystem to open the record stream.
+	// Starting it before registration would lose any reconnect in the gap.
+	sub.recorder.StartContinuousRecording(ctx, stoppedCameras)
+	sub.recorder.StartRetentionCleanup(ctx)
+	sub.recorder.StartStatsRefresh(ctx)
+	sub.recorder.StartRecompressionJob(ctx)
 
 	// Sync zones from config to DB and load them into cameras
 	syncConfigZones(db, cfg.Cameras, sub.manager)

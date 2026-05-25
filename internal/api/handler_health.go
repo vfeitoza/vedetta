@@ -219,6 +219,13 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	for _, st := range cameraStatuses {
 		fmt.Fprintf(&b, "vedetta_camera_online{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Online))
 		fmt.Fprintf(&b, "vedetta_camera_degraded{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Degraded))
+		// A flapping camera (repeatedly dropping its RTSP connection) shows up
+		// as a rising reconnect rate here, distinct from a steadily-offline one.
+		if s.cameras != nil {
+			if cam := s.cameras.GetCamera(st.Name); cam != nil {
+				fmt.Fprintf(&b, "vedetta_camera_reconnects_total{camera=%q} %d\n", promLabel(st.Name), cam.Reconnects())
+			}
+		}
 	}
 
 	// Drop-on-full fan-out counters: the detection-overlay SSE hub and the MSE

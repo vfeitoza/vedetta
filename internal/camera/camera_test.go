@@ -191,6 +191,82 @@ func TestIsOnline_NoSource(t *testing.T) {
 	}
 }
 
+func TestCameraReconnects_AccumulatesFromSources(t *testing.T) {
+	// Cancel the context before creating sources so the hub's per-source
+	// connect goroutines exit immediately and never touch the counter.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	hub := rtsp.NewHub(ctx)
+	defer hub.Close()
+
+	cam := newTestCamera(config.CameraConfig{
+		Name:      "front",
+		URL:       "rtsp://localhost/detect",
+		RecordURL: "rtsp://localhost/record",
+	}, hub)
+
+	// newTestCamera -> NewCamera already registered both stream URLs' reconnect
+	// sinks with the hub. Create the sources directly here since the real ones
+	// need a live RTSP server; the hub wires the registered sinks on creation.
+	detectSrc := hub.GetOrCreate(cam.DetectURL())
+	recordSrc := hub.GetOrCreate(cam.RecordURL())
+
+	for range 2 {
+		detectSrc.SimulateReconnectForTest()
+	}
+	for range 3 {
+		recordSrc.SimulateReconnectForTest()
+	}
+
+	if got := cam.Reconnects(); got != 5 {
+		t.Errorf("Reconnects() = %d, want 5 (2 detect + 3 record)", got)
+	}
+}
+
+func TestCameraReconnects_Fresh(t *testing.T) {
+	cam := newTestCamera(config.CameraConfig{Name: "x", URL: "rtsp://localhost/x"}, nil)
+	if got := cam.Reconnects(); got != 0 {
+		t.Errorf("Reconnects() = %d, want 0 for a fresh camera", got)
+	}
+}
+
+// The reconnect count must stay monotonic across a stop/start: stopping a
+// camera removes its RTSP source from the hub (a fresh Source with a zero
+// counter is created on restart), so the cumulative total has to live on the
+// long-lived Camera, not the ephemeral Source.
+func TestCameraReconnects_SurvivesSourceRemoval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	hub := rtsp.NewHub(ctx)
+	defer hub.Close()
+
+	cam := newTestCamera(config.CameraConfig{Name: "front", URL: "rtsp://localhost/only"}, hub)
+
+	// newTestCamera -> NewCamera registered the sink once. The registry, not the
+	// ephemeral source, is what keeps the count monotonic across a stop/start.
+	src := hub.GetOrCreate(cam.RecordURL())
+	for range 4 {
+		src.SimulateReconnectForTest()
+	}
+	if got := cam.Reconnects(); got != 4 {
+		t.Fatalf("Reconnects() = %d, want 4 before removal", got)
+	}
+
+	// Stop: the source (and its own counter) is discarded.
+	hub.Remove(cam.RecordURL())
+	if got := cam.Reconnects(); got != 4 {
+		t.Errorf("Reconnects() = %d, want 4 after source removal (must not reset)", got)
+	}
+
+	// Restart: a fresh source picks up the registered sink automatically (no
+	// re-registration) and keeps accumulating.
+	src2 := hub.GetOrCreate(cam.RecordURL())
+	src2.SimulateReconnectForTest()
+	if got := cam.Reconnects(); got != 5 {
+		t.Errorf("Reconnects() = %d, want 5 after restart + 1 drop", got)
+	}
+}
+
 func TestStatus_NoHub(t *testing.T) {
 	cam := newTestCamera(config.CameraConfig{
 		Name: "test",

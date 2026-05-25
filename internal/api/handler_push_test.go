@@ -711,6 +711,25 @@ func TestGetMetrics_IncludesDetectionDropCounter(t *testing.T) {
 	}
 }
 
+// TestGetMetrics_IncludesCameraReconnectCounter verifies the /metrics endpoint
+// emits a per-camera reconnect counter so a flapping camera surfaces as a
+// rising rate, distinct from a steadily-offline one.
+func TestGetMetrics_IncludesCameraReconnectCounter(t *testing.T) {
+	srv, _ := newTestServerWithUser(t, "alice")
+	srv.cameras.RegisterForTest(camera.NewTestCamera("front_door"))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.GetMetrics(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: expected 200, got %d", rec.Code)
+	}
+	if want := `vedetta_camera_reconnects_total{camera="front_door"}`; !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("/metrics body missing %q\nbody:\n%s", want, rec.Body.String())
+	}
+}
+
 // TestGetMetrics_NoNotifier_NoCounters verifies the /metrics endpoint
 // does not crash or emit notify counters when no dispatcher is wired
 // (VAPID load failure or push disabled).

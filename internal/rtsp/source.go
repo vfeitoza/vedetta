@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
@@ -29,6 +30,54 @@ type Source struct {
 	// paramsReady is closed once videoTrack holds a usable SPS+PPS pair, so
 	// WaitForVideoParams can block on a notification instead of polling.
 	paramsReady chan struct{}
+
+	// reconnects counts how many times this source has lost an *established*
+	// connection and looped to reconnect. Failed initial attempts (offline
+	// camera, bad URL/credentials) are not counted, so a rising value
+	// distinguishes a flapping camera from one that is steadily offline.
+	reconnects atomic.Int64
+
+	// reconnectSinks receive every reconnect increment in addition to this
+	// source's own counter. A Source is destroyed when its camera stops
+	// (hub.Remove) and recreated on restart, so a per-Source counter resets on
+	// every stop/start; the sinks point at counters on the long-lived Camera(s),
+	// keeping the exported `_total` metric monotonic across that churn. A list
+	// (not a single pointer) because the Hub shares one Source across every
+	// camera configured with the same URL, and each must see the reconnect.
+	// Guarded by mu.
+	reconnectSinks []*atomic.Int64
+}
+
+// Reconnects returns the cumulative number of times this source has lost an
+// established RTSP connection. Failed initial connection attempts are excluded.
+func (s *Source) Reconnects() int64 { return s.reconnects.Load() }
+
+// AddReconnectSink registers an external counter that receives every reconnect
+// increment in addition to this source's own counter. Idempotent per pointer so
+// repeated wiring (e.g. a camera restart) cannot double-count. Used by the Hub
+// to keep cumulative per-camera totals that survive source removal.
+func (s *Source) AddReconnectSink(sink *atomic.Int64) {
+	if sink == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.reconnectSinks {
+		if existing == sink {
+			return
+		}
+	}
+	s.reconnectSinks = append(s.reconnectSinks, sink)
+}
+
+// SimulateReconnectForTest drives the real disconnect path as if an established
+// connection had dropped once, so the sinks are exercised too. Test-only seam
+// for reconnect-count aggregation without a live RTSP server.
+func (s *Source) SimulateReconnectForTest() {
+	s.mu.Lock()
+	s.connected = true
+	s.mu.Unlock()
+	s.notifyDisconnect()
 }
 
 // NewSource creates a new RTSP source for the given URL.
@@ -195,10 +244,27 @@ func (s *Source) Connect(ctx context.Context) {
 
 func (s *Source) notifyDisconnect() {
 	s.mu.Lock()
+	// Count only the loss of an established connection. A camera that never
+	// connects (bad URL, offline, rejected credentials) loops through
+	// notifyDisconnect on every failed attempt; counting those would make a
+	// steadily-offline camera indistinguishable from a flapping one.
+	wasConnected := s.connected
 	s.connected = false
 	consumers := make([]Consumer, len(s.consumers))
 	copy(consumers, s.consumers)
+	var sinks []*atomic.Int64
+	if wasConnected {
+		sinks = make([]*atomic.Int64, len(s.reconnectSinks))
+		copy(sinks, s.reconnectSinks)
+	}
 	s.mu.Unlock()
+
+	if wasConnected {
+		s.reconnects.Add(1)
+		for _, sink := range sinks {
+			sink.Add(1)
+		}
+	}
 
 	for _, c := range consumers {
 		c.OnDisconnect()

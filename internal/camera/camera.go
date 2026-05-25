@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rvben/vedetta/internal/config"
@@ -122,6 +123,12 @@ type Camera struct {
 	detections     chan<- DetectionFrame
 	degradedReason string
 
+	// reconnects is the cumulative RTSP reconnect count for this camera. The
+	// camera outlives its rtsp.Source objects (stop/start removes the source
+	// from the hub and creates a fresh one with a zeroed counter), so the
+	// monotonic total lives here. Each source feeds it via SetReconnectSink.
+	reconnects atomic.Int64
+
 	// testOnlineOverride forces IsOnline to return the given value regardless
 	// of hub state. Set via SetTestOnline in tests only; nil in production.
 	testOnlineOverride *bool
@@ -174,6 +181,17 @@ func NewCamera(cfg config.CameraConfig, detector *detect.Detector, motion config
 	}
 	if cam.detectEnabled && !detector.Available() {
 		cam.degradedReason = "object detector unavailable"
+	}
+	// Route reconnects on both streams into this camera's monotonic counter at
+	// construction, before any subsystem can open the streams. Continuous
+	// recording opens the record source during startup (ahead of the camera's
+	// own goroutines), so registering here rather than in Start ensures no
+	// early reconnect is missed. The Hub re-wires the sink onto sources created
+	// or recreated later, so this single registration covers the source's whole
+	// lifetime, including stop/start churn.
+	if hub != nil {
+		hub.RegisterReconnectSink(cam.DetectURL(), &cam.reconnects)
+		hub.RegisterReconnectSink(cam.RecordURL(), &cam.reconnects)
 	}
 	return cam
 }
@@ -258,6 +276,14 @@ func (c *Camera) RecordURL() string {
 		return c.config.RecordURL
 	}
 	return c.config.URL
+}
+
+// Reconnects returns the cumulative number of times this camera's RTSP
+// source(s) have lost an established connection. The count is monotonic across
+// camera stop/start: sources feed this counter via SetReconnectSink, so it
+// survives the source being removed from the hub and recreated.
+func (c *Camera) Reconnects() int64 {
+	return c.reconnects.Load()
 }
 
 // LastSnapshot converts the stored RGB24 frame to RGBA on demand.
