@@ -27,6 +27,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.5.3](https://github.com/rvben/vedetta/compare/v0.5.2...v0.5.3) - 2026-05-25
+
+### Added
+
+- **events**: add waitForEmit to order event-end after create publish ([efa68ac](https://github.com/rvben/vedetta/commit/efa68ac4e74d731bd1afd62ca35b2e41652b90a1))
+- **events**: add emitEventArtifacts for off-loop snapshot/MQTT/push ([002370e](https://github.com/rvben/vedetta/commit/002370e8c539f6e97e0d1edbae04fc3ed4de55c1))
+
+### Performance
+
+- **events**: offload snapshot/MQTT/push from the event loop ([8e55664](https://github.com/rvben/vedetta/commit/8e5566488fd21ce19216a517dafddfdac27f7234))
+
 ## [0.5.2](https://github.com/rvben/vedetta/compare/v0.5.1...v0.5.2) - 2026-05-24
 
 ### Added
