@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
@@ -96,13 +97,18 @@ type mseClient struct {
 	conn *websocket.Conn
 	ch   chan []byte
 	done chan struct{}
+
+	// dropped points at the owning MSEManager's drop counter so frames shed to
+	// a slow viewer are tallied for /metrics. nil-safe for hand-built clients.
+	dropped *atomic.Int64
 }
 
-func newMSEClient(conn *websocket.Conn) *mseClient {
+func newMSEClient(conn *websocket.Conn, dropped *atomic.Int64) *mseClient {
 	return &mseClient{
-		conn: conn,
-		ch:   make(chan []byte, mseClientChanSize),
-		done: make(chan struct{}),
+		conn:    conn,
+		ch:      make(chan []byte, mseClientChanSize),
+		done:    make(chan struct{}),
+		dropped: dropped,
 	}
 }
 
@@ -141,6 +147,9 @@ func (c *mseClient) send(data []byte) {
 	select {
 	case c.ch <- data:
 	default:
+		if c.dropped != nil {
+			c.dropped.Add(1)
+		}
 	}
 }
 
@@ -560,7 +569,16 @@ type MSEManager struct {
 	trustedProxies []netip.Prefix
 	mu             sync.Mutex
 	consumers      map[string]*mseConsumer
+
+	// dropped counts fMP4 frames shed across all viewers because a client's
+	// send buffer was full. A rising count means live MSE playback is
+	// silently degrading for slow clients.
+	dropped atomic.Int64
 }
+
+// DroppedFrames returns the cumulative count of MSE frames dropped to full
+// client buffers across all cameras.
+func (m *MSEManager) DroppedFrames() int64 { return m.dropped.Load() }
 
 // NewMSEManager creates an MSE manager.
 func NewMSEManager(hub *rtsp.Hub, allowedOrigins, trustedProxies []string) *MSEManager {
@@ -695,7 +713,7 @@ func (m *MSEManager) HandleWebSocket(w http.ResponseWriter, r *http.Request, cam
 	}
 
 	consumer := m.getOrCreateConsumer(cameraName, rtspURL)
-	client := newMSEClient(conn)
+	client := newMSEClient(conn, &m.dropped)
 
 	// addClient computes the codec string under the consumer lock,
 	// ensuring it's consistent with the current SPS/PPS and init segment.

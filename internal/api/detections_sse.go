@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
@@ -18,8 +19,9 @@ type detectionSubscriber struct {
 // detectionHub fans DetectionFrame values out to per-camera SSE subscribers.
 // Slow subscribers get their frames dropped rather than blocking publishers.
 type detectionHub struct {
-	mu   sync.RWMutex
-	subs map[string]map[*detectionSubscriber]struct{}
+	mu      sync.RWMutex
+	subs    map[string]map[*detectionSubscriber]struct{}
+	dropped atomic.Int64 // detection frames dropped to full subscriber buffers
 }
 
 func newDetectionHub() *detectionHub {
@@ -61,9 +63,15 @@ func (h *detectionHub) Publish(frame camera.DetectionFrame) {
 		select {
 		case sub.ch <- frame:
 		default:
+			h.dropped.Add(1)
 		}
 	}
 }
+
+// DroppedFrames returns the cumulative count of detection frames dropped
+// because a subscriber's buffer was full. A rising count means the live
+// overlay is silently degrading for slow clients.
+func (h *detectionHub) DroppedFrames() int64 { return h.dropped.Load() }
 
 // PublishDetection is called from the main event loop to push a frame onto
 // the hub for fan-out to subscribers.

@@ -221,6 +221,16 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(&b, "vedetta_camera_degraded{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Degraded))
 	}
 
+	// Drop-on-full fan-out counters: the detection-overlay SSE hub and the MSE
+	// pipeline shed frames to slow clients rather than blocking. A rising count
+	// means live overlay / playback is silently degrading for those viewers.
+	if s.detectionHub != nil {
+		fmt.Fprintf(&b, "vedetta_detection_frames_dropped_total %d\n", s.detectionHub.DroppedFrames())
+	}
+	if s.mse != nil {
+		fmt.Fprintf(&b, "vedetta_mse_frames_dropped_total %d\n", s.mse.DroppedFrames())
+	}
+
 	// Push notification counters — only emitted when a dispatcher is wired.
 	if s.notifier != nil {
 		s.notifier.Metrics().WriteProm(&b)

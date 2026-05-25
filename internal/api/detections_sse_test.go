@@ -64,6 +64,12 @@ func TestDetectionHub_SlowSubscriberDropsFrames(t *testing.T) {
 		t.Fatal("Publish appears to be blocking on a slow subscriber")
 	}
 
+	// Buffer holds at most 4 frames; the other 96 were dropped and must be
+	// counted so silent overlay degradation is visible on /metrics.
+	if got := hub.DroppedFrames(); got != 96 {
+		t.Errorf("DroppedFrames() = %d, want 96 (100 published, 4 buffered)", got)
+	}
+
 	// Buffer holds at most 4 dropped frames; drain what's there.
 	drained := 0
 	for {

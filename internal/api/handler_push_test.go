@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -681,6 +682,32 @@ func TestGetMetrics_IncludesNotifyCounters(t *testing.T) {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics body missing %q\nbody:\n%s", name, body)
 		}
+	}
+}
+
+// TestGetMetrics_IncludesDetectionDropCounter verifies the /metrics endpoint
+// surfaces the detection-overlay SSE drop counter, and that it reflects frames
+// shed to a slow subscriber. Without this, silent overlay degradation for slow
+// clients is invisible to monitoring.
+func TestGetMetrics_IncludesDetectionDropCounter(t *testing.T) {
+	srv, _ := newTestServerWithUser(t, "alice")
+
+	// Subscribe then overflow the 4-slot buffer so 6 of 10 frames drop.
+	sub := srv.detectionHub.Subscribe("cam1")
+	defer srv.detectionHub.Unsubscribe(sub)
+	for i := 0; i < 10; i++ {
+		srv.detectionHub.Publish(camera.DetectionFrame{Camera: "cam1"})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.GetMetrics(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: expected 200, got %d", rec.Code)
+	}
+	if want := "vedetta_detection_frames_dropped_total 6"; !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("/metrics body missing %q\nbody:\n%s", want, rec.Body.String())
 	}
 }
 
