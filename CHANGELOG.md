@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.5.4](https://github.com/rvben/vedetta/compare/v0.5.3...v0.5.4) - 2026-05-25
+
+### Added
+
+- **events**: break down mqtt.publish span into encode and broker sub-spans ([17fa8fd](https://github.com/rvben/vedetta/commit/17fa8fd61defda69c3e9d5aa4f1c23ea00048e34))
+
 ## [0.5.3](https://github.com/rvben/vedetta/compare/v0.5.2...v0.5.3) - 2026-05-25
 
 ### Added
