@@ -30,6 +30,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.6.1](https://github.com/rvben/vedetta/compare/v0.6.0...v0.6.1) - 2026-05-25
+
 ## [0.6.0](https://github.com/rvben/vedetta/compare/v0.5.4...v0.6.0) - 2026-05-25
 
 ### Added
