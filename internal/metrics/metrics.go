@@ -105,11 +105,17 @@ type Histogram struct {
 }
 
 type histSeries struct {
+	// mu guards all three fields together so a scrape always observes a
+	// consistent snapshot. Without it the bucket, sum, and count could be read
+	// mid-update, emitting a +Inf bucket greater than _count or a stale _sum -
+	// both Prometheus histogram-invariant violations. Contention is negligible:
+	// effectively one writer goroutine per camera per instrument.
+	mu sync.Mutex
 	// counts has len(bounds)+1 entries: one per bound plus a trailing +Inf
 	// overflow bucket. Stored non-cumulatively; WriteProm accumulates.
-	counts []atomic.Uint64
-	sumNs  atomic.Int64
-	count  atomic.Uint64
+	counts []uint64
+	sumNs  int64
+	count  uint64
 }
 
 // NewHistogram builds a standalone histogram. bounds must be ascending second
@@ -136,16 +142,18 @@ func (h *Histogram) Observe(camera string, d time.Duration) {
 			break
 		}
 	}
-	s.counts[idx].Add(1)
-	s.sumNs.Add(ns)
-	s.count.Add(1)
+	s.mu.Lock()
+	s.counts[idx]++
+	s.sumNs += ns
+	s.count++
+	s.mu.Unlock()
 }
 
 func (h *Histogram) seriesFor(camera string) *histSeries {
 	if v, ok := h.series.Load(camera); ok {
 		return v.(*histSeries)
 	}
-	s := &histSeries{counts: make([]atomic.Uint64, len(h.bounds)+1)}
+	s := &histSeries{counts: make([]uint64, len(h.bounds)+1)}
 	actual, _ := h.series.LoadOrStore(camera, s)
 	return actual.(*histSeries)
 }
@@ -160,19 +168,28 @@ func (h *Histogram) WriteProm(w io.Writer) {
 		s := v.(*histSeries)
 		label := escapeLabel(camera)
 
+		// Snapshot the series under its lock so the emitted buckets, sum, and
+		// count are mutually consistent even while frames are being observed.
+		s.mu.Lock()
+		counts := make([]uint64, len(s.counts))
+		copy(counts, s.counts)
+		sumNs := s.sumNs
+		total := s.count
+		s.mu.Unlock()
+
 		var cumulative uint64
 		for i, b := range h.bounds {
-			cumulative += s.counts[i].Load()
+			cumulative += counts[i]
 			fmt.Fprintf(w, "%s_bucket{camera=\"%s\",le=\"%s\"} %d\n",
 				h.name, label, formatBound(b), cumulative)
 		}
 		// +Inf overflow bucket equals the total count.
-		cumulative += s.counts[len(h.bounds)].Load()
+		cumulative += counts[len(h.bounds)]
 		fmt.Fprintf(w, "%s_bucket{camera=\"%s\",le=\"+Inf\"} %d\n", h.name, label, cumulative)
 
-		sum := float64(s.sumNs.Load()) / float64(time.Second)
+		sum := float64(sumNs) / float64(time.Second)
 		fmt.Fprintf(w, "%s_sum{camera=\"%s\"} %s\n", h.name, label, formatFloat(sum))
-		fmt.Fprintf(w, "%s_count{camera=\"%s\"} %d\n", h.name, label, s.count.Load())
+		fmt.Fprintf(w, "%s_count{camera=\"%s\"} %d\n", h.name, label, total)
 	}
 }
 

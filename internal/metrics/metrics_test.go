@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,63 @@ func TestPackageWritePromAndReset(t *testing.T) {
 	if strings.Contains(b.String(), `camera="cam"`) {
 		t.Errorf("ResetForTest did not clear series:\n%s", b.String())
 	}
+}
+
+// A scrape that races concurrent observations must always emit a mutually
+// consistent snapshot: the cumulative +Inf bucket equals _count. Independent
+// atomics would let a scrape land between the bucket and count updates and
+// violate that invariant.
+func TestHistogramSnapshotConsistentUnderConcurrency(t *testing.T) {
+	h := NewHistogram("vedetta_test_seconds", "h", []float64{0.001, 0.01, 0.1})
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 20000; i++ {
+			h.Observe("cam", time.Duration(i%300)*time.Microsecond)
+		}
+		close(done)
+	}()
+
+	check := func() {
+		var b strings.Builder
+		h.WriteProm(&b)
+		inf, count, ok := parseInfAndCount(b.String())
+		if ok && inf != count {
+			t.Fatalf("histogram invariant violated: +Inf bucket=%d, count=%d", inf, count)
+		}
+	}
+	for {
+		select {
+		case <-done:
+			check()
+			return
+		default:
+			check()
+		}
+	}
+}
+
+// parseInfAndCount extracts the +Inf cumulative bucket and the _count value
+// from a single-camera histogram rendering.
+func parseInfAndCount(out string) (inf, count uint64, ok bool) {
+	var haveInf, haveCount bool
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		val, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch {
+		case strings.Contains(fields[0], `le="+Inf"`):
+			inf, haveInf = val, true
+		case strings.HasPrefix(fields[0], "vedetta_test_seconds_count{"):
+			count, haveCount = val, true
+		}
+	}
+	return inf, count, haveInf && haveCount
 }
 
 func render(w interface{ WriteProm(io.Writer) }) string {
