@@ -12,18 +12,31 @@ import (
 	"github.com/rvben/vedetta/internal/safepath"
 )
 
+// ClipStats describes the work a clip extraction represented. It is reported
+// alongside the result (and the error, populated as far as extraction got) so
+// the clip.extract span can explain its latency: a many-segment concat or a
+// long window costs more than a single short trim.
+type ClipStats struct {
+	SegmentCount int           // segments stitched into the clip
+	ClipDuration time.Duration // pre+event+post window length
+	OutputBytes  int64         // size of the written clip; 0 unless extraction succeeded
+}
+
 // ExtractClip creates an event clip by copying relevant segments
-// and trimming to the event's pre/post capture window.
-func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string, error) {
+// and trimming to the event's pre/post capture window. The returned ClipStats
+// is populated up to the point extraction reached, so a partial failure (e.g. a
+// trim error) still reports the segment count and window that were resolved.
+func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string, ClipStats, error) {
+	var stats ClipStats
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", stats, err
 	}
 	clipDir, err := safepath.Join(r.config.Path, event.CameraName, "clips", event.Timestamp.Format("2006-01-02"))
 	if err != nil {
-		return "", fmt.Errorf("resolve clip dir: %w", err)
+		return "", stats, fmt.Errorf("resolve clip dir: %w", err)
 	}
 	if err := os.MkdirAll(clipDir, 0o755); err != nil {
-		return "", fmt.Errorf("create clip dir: %w", err)
+		return "", stats, fmt.Errorf("create clip dir: %w", err)
 	}
 
 	filename := fmt.Sprintf("%s_%s_%s.mp4",
@@ -39,11 +52,12 @@ func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string,
 		endTime = event.Timestamp
 	}
 	to := endTime.Add(r.config.PostCapture)
+	stats.ClipDuration = to.Sub(from)
 
 	segments := r.segments.FindSegments(event.CameraName, from, to)
 
 	if len(segments) == 0 {
-		return "", fmt.Errorf("no segments available for camera %q", event.CameraName)
+		return "", stats, fmt.Errorf("no segments available for camera %q", event.CameraName)
 	}
 
 	// Filter out segments whose files no longer exist
@@ -56,38 +70,41 @@ func (r *Recorder) ExtractClip(ctx context.Context, event camera.Event) (string,
 	segments = valid
 
 	if len(segments) == 0 {
-		return "", fmt.Errorf("segments deleted before clip extraction for camera %q", event.CameraName)
+		return "", stats, fmt.Errorf("segments deleted before clip extraction for camera %q", event.CameraName)
 	}
+	stats.SegmentCount = len(segments)
 
 	startOffset := from.Sub(segments[0].StartTime)
 	if startOffset < 0 {
 		startOffset = 0
 	}
-	duration := to.Sub(from)
+	duration := stats.ClipDuration
 
 	// Abort before the expensive trim/concat if shutdown began while we were
 	// resolving segments.
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", stats, err
 	}
 
 	if len(segments) == 1 {
 		if err := media.TrimMP4(segments[0].Path, clipPath, startOffset, duration); err != nil {
-			return "", fmt.Errorf("trim segment: %w", err)
+			return "", stats, fmt.Errorf("trim segment: %w", err)
 		}
-		return clipPath, nil
+	} else {
+		// Multiple segments — concat then trim
+		inputs := make([]string, len(segments))
+		for i, seg := range segments {
+			inputs[i] = seg.Path
+		}
+		if err := media.ConcatMP4(inputs, clipPath, startOffset, duration); err != nil {
+			return "", stats, fmt.Errorf("concat and trim: %w", err)
+		}
 	}
 
-	// Multiple segments — concat then trim
-	inputs := make([]string, len(segments))
-	for i, seg := range segments {
-		inputs[i] = seg.Path
+	if fi, err := os.Stat(clipPath); err == nil {
+		stats.OutputBytes = fi.Size()
 	}
-	if err := media.ConcatMP4(inputs, clipPath, startOffset, duration); err != nil {
-		return "", fmt.Errorf("concat and trim: %w", err)
-	}
-
-	return clipPath, nil
+	return clipPath, stats, nil
 }
 
 func formatDuration(d time.Duration) string {

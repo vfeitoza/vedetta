@@ -45,7 +45,7 @@ func TestSaveClip_NoSegments_ReturnsError(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := rec.SaveClip(context.Background(), event)
+	_, err := rec.SaveClip(context.Background(), event)
 	if err == nil {
 		t.Error("expected error when no segments available, got nil")
 	}
@@ -83,7 +83,7 @@ func TestSaveClip_WithSegment_SavesClipPath(t *testing.T) {
 
 	// SaveClip will fail during trim (dummy file isn't valid MP4),
 	// but should get past segment lookup
-	err := rec.SaveClip(context.Background(), event)
+	_, err := rec.SaveClip(context.Background(), event)
 	if err == nil {
 		// If it somehow succeeded, verify the clip path was saved
 		return
@@ -127,7 +127,7 @@ func TestSaveClip_CancelledContextAbortsBeforeExtraction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := rec.SaveClip(ctx, event)
+	_, err := rec.SaveClip(ctx, event)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("SaveClip with cancelled ctx = %v, want context.Canceled", err)
 	}
@@ -171,7 +171,7 @@ func TestSaveClip_DirCreationError_ReturnsError(t *testing.T) {
 		Timestamp:  now.Add(-1 * time.Minute),
 	}
 
-	err := rec.SaveClip(context.Background(), event)
+	_, err := rec.SaveClip(context.Background(), event)
 	if err == nil {
 		t.Error("expected error for clip dir creation failure, got nil")
 	}
@@ -209,7 +209,7 @@ func TestSaveClip_WithEndTime_UsesExtendedWindow(t *testing.T) {
 	}
 
 	// Will fail during trim (dummy file), but should find the segment
-	err := rec.SaveClip(context.Background(), event)
+	_, err := rec.SaveClip(context.Background(), event)
 	if err == nil {
 		return
 	}
@@ -249,7 +249,7 @@ func TestSaveClip_ZeroEndTime_FallsBackToTimestamp(t *testing.T) {
 		Timestamp:  now.Add(-1 * time.Minute),
 	}
 
-	err := rec.SaveClip(context.Background(), event)
+	_, err := rec.SaveClip(context.Background(), event)
 	if err == nil {
 		return
 	}

@@ -216,16 +216,16 @@ func (r *Recorder) StartContinuousRecording(ctx context.Context, stoppedCameras 
 // SaveClip extracts a clip around the event timestamp and persists its
 // path on the event row. Blocks on segmentOpMu so a concurrent manual
 // delete cannot run between ExtractClip and UpdateEventClipPath.
-func (r *Recorder) SaveClip(ctx context.Context, event camera.Event) error {
+func (r *Recorder) SaveClip(ctx context.Context, event camera.Event) (ClipStats, error) {
 	r.segmentOpMu.Lock()
 	defer r.segmentOpMu.Unlock()
 	return r.saveClipLocked(ctx, event)
 }
 
-func (r *Recorder) saveClipLocked(ctx context.Context, event camera.Event) error {
-	clipPath, err := r.ExtractClip(ctx, event)
+func (r *Recorder) saveClipLocked(ctx context.Context, event camera.Event) (ClipStats, error) {
+	clipPath, stats, err := r.ExtractClip(ctx, event)
 	if err != nil {
-		return fmt.Errorf("extract clip: %w", err)
+		return stats, fmt.Errorf("extract clip: %w", err)
 	}
 
 	if err := r.db.UpdateEventClipPath(event.ID, clipPath); err != nil {
@@ -238,7 +238,7 @@ func (r *Recorder) saveClipLocked(ctx context.Context, event camera.Event) error
 		"path", clipPath,
 	)
 
-	return nil
+	return stats, nil
 }
 
 // Close waits for all recording goroutines to finalize their segments,
@@ -612,5 +612,6 @@ func (r *Recorder) ReextractClip(ctx context.Context, event camera.Event) error 
 			return fmt.Errorf("clear clip availability: %w", err)
 		}
 	}
-	return r.saveClipLocked(ctx, event)
+	_, err := r.saveClipLocked(ctx, event)
+	return err
 }

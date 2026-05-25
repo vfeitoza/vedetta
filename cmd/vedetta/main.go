@@ -729,7 +729,7 @@ func closeSubsystems(sub *subsystems) {
 // clipSaver is the subset of *recording.Recorder that clip extraction needs,
 // extracted so the clip.extract span can be unit-tested with a stub.
 type clipSaver interface {
-	SaveClip(ctx context.Context, ev camera.Event) error
+	SaveClip(ctx context.Context, ev camera.Event) (recording.ClipStats, error)
 }
 
 // Compile-time check that *recording.Recorder satisfies clipSaver.
@@ -857,12 +857,27 @@ func waitForEmit(ctx context.Context, done <-chan struct{}, timeout time.Duratio
 }
 
 // extractClipSpan runs one clip-extraction attempt inside a clip.extract span,
-// recording an error status when the attempt fails. The retry loop in the
-// event loop calls this per attempt.
-func extractClipSpan(ctx context.Context, tracer trace.Tracer, saver clipSaver, ev camera.Event) error {
-	_, span := tracer.Start(ctx, "clip.extract")
+// recording an error status when the attempt fails. The retry loop in the event
+// loop calls this per attempt, passing the 1-based attempt number. The span
+// carries the attempt and the extraction stats (segment count, output size,
+// window duration) so a slow or failed extraction is diagnosable from the trace:
+// a many-segment concat or a long window explains latency, and the attempt
+// number tells a transient early failure from a permanent final-attempt loss.
+func extractClipSpan(ctx context.Context, tracer trace.Tracer, saver clipSaver, ev camera.Event, attempt int) error {
+	_, span := tracer.Start(ctx, "clip.extract", trace.WithAttributes(
+		attribute.Int("clip.attempt", attempt),
+		attribute.String("vedetta.camera", ev.CameraName),
+		attribute.String("vedetta.label", ev.Label),
+	))
 	defer span.End()
-	err := saver.SaveClip(ctx, ev)
+	stats, err := saver.SaveClip(ctx, ev)
+	// Stats are populated as far as extraction reached, so they are recorded on
+	// both the success and failure paths.
+	span.SetAttributes(
+		attribute.Int("clip.segment_count", stats.SegmentCount),
+		attribute.Int64("clip.output_bytes", stats.OutputBytes),
+		attribute.Int64("clip.duration_ms", stats.ClipDuration.Milliseconds()),
+	)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "save clip")
@@ -965,7 +980,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					return
 				}
 				for attempt := range 5 {
-					err := extractClipSpan(clipCtx, tracer, sub.recorder, ev)
+					err := extractClipSpan(clipCtx, tracer, sub.recorder, ev, attempt+1)
 					if err == nil {
 						return
 					}

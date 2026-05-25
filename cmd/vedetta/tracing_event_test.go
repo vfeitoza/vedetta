@@ -15,6 +15,7 @@ import (
 
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
+	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -358,13 +359,26 @@ func TestRunEventLoopDoesNotBlockOnSlowEmit(t *testing.T) {
 	}
 }
 
-type stubClipSaver struct{ err error }
+type stubClipSaver struct {
+	err   error
+	stats recording.ClipStats
+}
 
-func (s stubClipSaver) SaveClip(ctx context.Context, ev camera.Event) error { return s.err }
+func (s stubClipSaver) SaveClip(ctx context.Context, ev camera.Event) (recording.ClipStats, error) {
+	return s.stats, s.err
+}
+
+func spanAttrs(s sdktrace.ReadOnlySpan) map[attribute.Key]attribute.Value {
+	m := map[attribute.Key]attribute.Value{}
+	for _, kv := range s.Attributes() {
+		m[kv.Key] = kv.Value
+	}
+	return m
+}
 
 func TestExtractClipSpanSuccess(t *testing.T) {
 	tracer, sr := newTestTracer()
-	err := extractClipSpan(context.Background(), tracer, stubClipSaver{}, camera.Event{ID: "e1"})
+	err := extractClipSpan(context.Background(), tracer, stubClipSaver{}, camera.Event{ID: "e1"}, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,10 +391,52 @@ func TestExtractClipSpanSuccess(t *testing.T) {
 	}
 }
 
+// The clip.extract span carries the attempt number plus the extraction stats
+// (segment count, output size, window duration) and the camera/label, so a slow
+// or failed extraction can be diagnosed from the trace alone.
+func TestExtractClipSpanRecordsStats(t *testing.T) {
+	tracer, sr := newTestTracer()
+	saver := stubClipSaver{stats: recording.ClipStats{
+		SegmentCount: 3,
+		OutputBytes:  4096,
+		ClipDuration: 2 * time.Second,
+	}}
+	ev := camera.Event{ID: "e3", CameraName: "garage", Label: "person"}
+
+	if err := extractClipSpan(context.Background(), tracer, saver, ev, 2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	span := spanByName(sr.Ended(), "clip.extract")
+	if span == nil {
+		t.Fatal("clip.extract span not recorded")
+	}
+	attrs := spanAttrs(span)
+	if got := attrs["clip.attempt"].AsInt64(); got != 2 {
+		t.Errorf("clip.attempt = %d, want 2", got)
+	}
+	if got := attrs["clip.segment_count"].AsInt64(); got != 3 {
+		t.Errorf("clip.segment_count = %d, want 3", got)
+	}
+	if got := attrs["clip.output_bytes"].AsInt64(); got != 4096 {
+		t.Errorf("clip.output_bytes = %d, want 4096", got)
+	}
+	if got := attrs["clip.duration_ms"].AsInt64(); got != 2000 {
+		t.Errorf("clip.duration_ms = %d, want 2000", got)
+	}
+	if got := attrs["vedetta.camera"].AsString(); got != "garage" {
+		t.Errorf("vedetta.camera = %q, want garage", got)
+	}
+	if got := attrs["vedetta.label"].AsString(); got != "person" {
+		t.Errorf("vedetta.label = %q, want person", got)
+	}
+}
+
 func TestExtractClipSpanError(t *testing.T) {
 	tracer, sr := newTestTracer()
 	wantErr := errors.New("clip not ready")
-	err := extractClipSpan(context.Background(), tracer, stubClipSaver{err: wantErr}, camera.Event{ID: "e2"})
+	// Even on failure the attempt number is recorded so a transient early-attempt
+	// error reads differently from a permanent final-attempt loss.
+	err := extractClipSpan(context.Background(), tracer, stubClipSaver{err: wantErr}, camera.Event{ID: "e2"}, 5)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -393,6 +449,9 @@ func TestExtractClipSpanError(t *testing.T) {
 	}
 	if span.Status().Description != "save clip" {
 		t.Errorf("status description = %q, want %q", span.Status().Description, "save clip")
+	}
+	if got := spanAttrs(span)["clip.attempt"].AsInt64(); got != 5 {
+		t.Errorf("clip.attempt = %d, want 5 on the failing attempt", got)
 	}
 	events := span.Events()
 	if len(events) == 0 || events[0].Name != "exception" {
