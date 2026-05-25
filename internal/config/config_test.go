@@ -850,9 +850,6 @@ func TestTracingDefaults(t *testing.T) {
 	if !cfg.Tracing.Insecure {
 		t.Errorf("insecure should default true")
 	}
-	if cfg.Tracing.SampleRatio != 0.05 {
-		t.Errorf("sample_ratio default = %v, want 0.05", cfg.Tracing.SampleRatio)
-	}
 	if cfg.Tracing.ServiceName != "vedetta" {
 		t.Errorf("service_name default = %q, want \"vedetta\"", cfg.Tracing.ServiceName)
 	}

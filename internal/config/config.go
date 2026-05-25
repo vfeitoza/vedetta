@@ -87,12 +87,11 @@ type ICEServerConfig struct {
 // with Insecure) or a full URL; when empty the standard
 // OTEL_EXPORTER_OTLP_ENDPOINT environment variable is used.
 type TracingConfig struct {
-	Enabled     bool    `yaml:"enabled"`
-	Endpoint    string  `yaml:"endpoint"`
-	Protocol    string  `yaml:"protocol"`
-	Insecure    bool    `yaml:"insecure"`
-	SampleRatio float64 `yaml:"sample_ratio"`
-	ServiceName string  `yaml:"service_name"`
+	Enabled     bool   `yaml:"enabled"`
+	Endpoint    string `yaml:"endpoint"`
+	Protocol    string `yaml:"protocol"`
+	Insecure    bool   `yaml:"insecure"`
+	ServiceName string `yaml:"service_name"`
 }
 
 // OpenH264Config controls OpenH264 codec auto-install behavior.
@@ -418,7 +417,6 @@ func Defaults() *Config {
 		Tracing: TracingConfig{
 			Protocol:    "http",
 			Insecure:    true,
-			SampleRatio: 0.05,
 			ServiceName: "vedetta",
 		},
 	}
@@ -585,9 +583,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Tracing.ServiceName == "" {
 		cfg.Tracing.ServiceName = "vedetta"
-	}
-	if cfg.Tracing.SampleRatio < 0 || cfg.Tracing.SampleRatio > 1 {
-		return nil, fmt.Errorf("tracing.sample_ratio: must be between 0 and 1")
 	}
 
 	return cfg, nil

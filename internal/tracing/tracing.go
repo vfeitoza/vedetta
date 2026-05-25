@@ -28,7 +28,6 @@ type Config struct {
 	Endpoint    string
 	Protocol    string
 	Insecure    bool
-	SampleRatio float64
 	ServiceName string
 }
 
@@ -91,14 +90,14 @@ func Init(ctx context.Context, cfg Config, version string) (*Provider, error) {
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
-		sdktrace.WithSampler(newSampler(cfg.SampleRatio)),
+		sdktrace.WithSampler(newSampler()),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	otel.SetErrorHandler(newRateLimitedErrorHandler(30 * time.Second))
 
-	slog.Info("tracing enabled", "endpoint", cfg.Endpoint, "protocol", cfg.Protocol, "sample_ratio", cfg.SampleRatio)
+	slog.Info("tracing enabled", "endpoint", cfg.Endpoint, "protocol", cfg.Protocol)
 	return &Provider{
 		tracer:   tp.Tracer(instrumentationScope),
 		shutdown: []func(context.Context) error{tp.Shutdown},

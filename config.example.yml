@@ -175,7 +175,4 @@ tracing:
   # Send plaintext OTLP for scheme-less host:port endpoints on a trusted LAN.
   # Ignored for https:// URLs.
   insecure: true
-  # Head-sampling ratio for high-volume detection spans only. HTTP, event, and
-  # push spans are always sampled.
-  sample_ratio: 0.05
   service_name: vedetta
