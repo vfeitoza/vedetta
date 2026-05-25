@@ -7,16 +7,42 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+// safeBuffer is a mutex-guarded log sink. The WebSocket test logs from the
+// server handler goroutine while the client goroutine reads the buffer, so the
+// underlying bytes.Buffer must not be touched concurrently.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// snapshot returns a copy of the buffered bytes so callers can scan it without
+// racing the writer that still holds the underlying array.
+func (b *safeBuffer) snapshot() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf.Bytes()...)
+}
+
+func (b *safeBuffer) String() string { return string(b.snapshot()) }
+
 // captureLogs installs a JSON slog handler writing into buf as the default
 // logger for the duration of the test, restoring the original afterwards.
-func captureLogs(t *testing.T) *bytes.Buffer {
+func captureLogs(t *testing.T) *safeBuffer {
 	t.Helper()
-	buf := &bytes.Buffer{}
+	buf := &safeBuffer{}
 	orig := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	t.Cleanup(func() { slog.SetDefault(orig) })
@@ -24,23 +50,32 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 }
 
 // findRequestLog returns the first "http request" record decoded from the
-// captured JSON log lines, or fails the test if none is present.
-func findRequestLog(t *testing.T, buf *bytes.Buffer) map[string]any {
+// captured JSON log lines, or fails the test if none appears within the
+// timeout. Polling is necessary because requestLogMiddleware emits the access
+// line only after the handler returns, which can land after the client has
+// already observed the response (e.g. a WebSocket echo).
+func findRequestLog(t *testing.T, buf *safeBuffer) map[string]any {
 	t.Helper()
-	for _, line := range bytes.Split(buf.Bytes(), []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, line := range bytes.Split(buf.snapshot(), []byte("\n")) {
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
+			}
+			var rec map[string]any
+			if err := json.Unmarshal(line, &rec); err != nil {
+				continue
+			}
+			if rec["msg"] == "http request" {
+				return rec
+			}
 		}
-		var rec map[string]any
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
+		if time.Now().After(deadline) {
+			t.Fatalf("no \"http request\" log record found in:\n%s", buf.String())
+			return nil
 		}
-		if rec["msg"] == "http request" {
-			return rec
-		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("no \"http request\" log record found in:\n%s", buf.String())
-	return nil
 }
 
 // The instrumentation we need to settle the iPhone investigation: every
