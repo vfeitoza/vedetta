@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/recording"
 )
 
@@ -242,6 +243,10 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	if s.notifier != nil {
 		s.notifier.Metrics().WriteProm(&b)
 	}
+
+	// Detection-pipeline latency histograms and frame counters (motion-detect,
+	// YOLO inference, decode, frames processed/decoded/dropped).
+	metrics.WriteProm(&b)
 
 	_, _ = w.Write([]byte(b.String()))
 }

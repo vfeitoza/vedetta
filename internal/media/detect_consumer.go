@@ -10,6 +10,7 @@ import (
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
 	"github.com/pion/rtp"
 
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/rtsp"
 )
 
@@ -241,21 +242,32 @@ func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		nalStream = append(nalStream, nalu...)
 	}
 
+	decodeStart := time.Now()
 	ycbcr := dc.h264Dec.Decode(nalStream)
 	if ycbcr == nil {
 		return
 	}
-
 	rgb24 := ycbcrToRGB24Scaled(ycbcr, dc.width, dc.height)
+	metrics.FrameDecodeDuration.Observe(dc.camera, time.Since(decodeStart))
+	metrics.FramesDecoded.Inc(dc.camera)
 
 	dc.mu.Lock()
 	dc.lastFrame = time.Now()
 	dc.frameCount++
 	dc.mu.Unlock()
 
+	dc.dispatchFrame(RawFrame{Data: rgb24, Width: dc.width, Height: dc.height})
+}
+
+// dispatchFrame hands a decoded frame to the detection goroutine. It drops the
+// frame (and counts the drop) when the channel is full, so decoding never
+// blocks on a busy detector. A rising drop count is the detection-backpressure
+// signal.
+func (dc *DetectConsumer) dispatchFrame(frame RawFrame) {
 	select {
-	case dc.frameCh <- RawFrame{Data: rgb24, Width: dc.width, Height: dc.height}:
+	case dc.frameCh <- frame:
 	default:
+		metrics.DetectInputDropped.Inc(dc.camera)
 	}
 }
 

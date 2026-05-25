@@ -15,6 +15,7 @@ import (
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/media"
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/rtsp"
 	"github.com/rvben/vedetta/internal/safepath"
 	"github.com/rvben/vedetta/internal/snapshot"
@@ -566,9 +567,12 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 	if !c.detectEnabled {
 		return
 	}
+	metrics.FramesProcessed.Inc(c.config.Name)
 
 	// Contour-based motion detection
+	motionStart := time.Now()
 	motionRegions := c.motionDetector.Detect(buf, w, h)
+	metrics.MotionDetectDuration.Observe(c.config.Name, time.Since(motionStart))
 
 	if c.motionActivity != nil {
 		coverage := c.motionDetector.FrameCoverage()
@@ -602,7 +606,9 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 		c.mu.Lock()
 		c.lastMotion = time.Now()
 		c.mu.Unlock()
+		yoloStart := time.Now()
 		detections = c.detector.DetectRGB24(buf, w, h)
+		metrics.YOLOInferenceDuration.Observe(c.config.Name, time.Since(yoloStart))
 	}
 
 	// Run the tracking pipeline every frame (with detections=nil during quiet

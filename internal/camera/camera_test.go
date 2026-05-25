@@ -3,14 +3,50 @@ package camera
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/rtsp"
 )
+
+// processFrame must record a frames-processed count and a motion-detect latency
+// observation for every frame that reaches the detection pipeline, labelled by
+// camera. YOLO inference must only be timed when motion qualifies, so with no
+// qualified motion the inference histogram stays empty.
+func TestProcessFrameRecordsDetectionMetrics(t *testing.T) {
+	metrics.ResetForTest()
+	t.Cleanup(metrics.ResetForTest)
+
+	cam := newTestCamera(config.CameraConfig{
+		Name:   "frontdoor",
+		Detect: config.DetectStreamConfig{Width: 16, Height: 16, FPS: 5},
+	}, nil)
+	// Force no qualified motion so the (nil) object detector is never invoked;
+	// this isolates the motion-path recording points.
+	cam.motionMinRegionScore = 1e9
+
+	w, h := 16, 16
+	cam.processFrame(make([]byte, w*h*3), w, h)
+
+	var b strings.Builder
+	metrics.WriteProm(&b)
+	out := b.String()
+
+	if !strings.Contains(out, `vedetta_frames_processed_total{camera="frontdoor"} 1`) {
+		t.Errorf("frames_processed_total not recorded:\n%s", out)
+	}
+	if !strings.Contains(out, `vedetta_motion_detect_duration_seconds_count{camera="frontdoor"} 1`) {
+		t.Errorf("motion_detect_duration_seconds not recorded:\n%s", out)
+	}
+	if strings.Contains(out, `vedetta_yolo_inference_duration_seconds_count{camera="frontdoor"}`) {
+		t.Errorf("yolo inference recorded without qualified motion:\n%s", out)
+	}
+}
 
 func newTestCamera(cfg config.CameraConfig, hub *rtsp.Hub) *Camera {
 	return NewCamera(

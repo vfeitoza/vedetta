@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rvben/vedetta/internal/camera"
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/storage"
 )
 
@@ -746,5 +748,44 @@ func TestGetMetrics_NoNotifier_NoCounters(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "vedetta_notify_") {
 		t.Errorf("/metrics should not contain notify counters when dispatcher is nil:\n%s", rec.Body.String())
+	}
+}
+
+// TestGetMetrics_IncludesDetectionPipelineLatency verifies the /metrics
+// endpoint surfaces the detection-pipeline latency histograms and frame
+// counters recorded from the hot path. Without these, the NVR's per-frame
+// motion-detect, YOLO-inference, and decode latencies are invisible.
+func TestGetMetrics_IncludesDetectionPipelineLatency(t *testing.T) {
+	metrics.ResetForTest()
+	t.Cleanup(metrics.ResetForTest)
+
+	srv, _ := newTestServerWithUser(t, "alice")
+
+	metrics.MotionDetectDuration.Observe("cam1", time.Millisecond)
+	metrics.YOLOInferenceDuration.Observe("cam1", 30*time.Millisecond)
+	metrics.FrameDecodeDuration.Observe("cam1", 4*time.Millisecond)
+	metrics.FramesProcessed.Inc("cam1")
+	metrics.FramesDecoded.Inc("cam1")
+	metrics.DetectInputDropped.Inc("cam1")
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.GetMetrics(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`vedetta_motion_detect_duration_seconds_bucket{camera="cam1",le="+Inf"} 1`,
+		`vedetta_yolo_inference_duration_seconds_count{camera="cam1"} 1`,
+		`vedetta_frame_decode_duration_seconds_count{camera="cam1"} 1`,
+		`vedetta_frames_processed_total{camera="cam1"} 1`,
+		`vedetta_frames_decoded_total{camera="cam1"} 1`,
+		`vedetta_detect_input_dropped_total{camera="cam1"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics body missing %q\nbody:\n%s", want, body)
+		}
 	}
 }
