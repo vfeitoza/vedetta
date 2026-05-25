@@ -116,6 +116,38 @@ func TestServerShutdownWithoutStart(t *testing.T) {
 	}
 }
 
+// A Shutdown that wins the race against Start (arrives before Start binds its
+// listener) must still stop the server. Otherwise Start binds a listener that
+// nothing can ever close: Shutdown saw a nil httpSrv, returned, and the
+// listener serves forever. Start must observe the prior shutdown and return
+// http.ErrServerClosed without serving.
+func TestServerShutdownBeforeStartPreventsLeakedListener(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.config.Host = "127.0.0.1"
+	srv.config.Port = 0
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown() before Start should return nil, got %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
+
+	select {
+	case err := <-errCh:
+		if err != nil && strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("listener unavailable in this environment: %v", err)
+		}
+		if !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("Start() after Shutdown returned %v, want http.ErrServerClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Start() bound a listener and is serving despite a prior Shutdown: leaked listener")
+	}
+}
+
 // --- Helper function unit tests ---
 
 func TestFormatBytes(t *testing.T) {

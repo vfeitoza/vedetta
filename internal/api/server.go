@@ -74,7 +74,21 @@ type Server struct {
 	faceCropDir          string
 	ptzClients           map[string]*camera.PTZClient
 	cameraConfigs        []config.CameraConfig
-	httpSrv              *http.Server
+
+	// srvMu guards httpSrv and closed. Start writes httpSrv after binding;
+	// Shutdown reads it and sets closed. The flag closes a race where Shutdown
+	// arrives before Start has assigned httpSrv: without it, Shutdown sees nil
+	// and returns, then Start binds a listener that nothing can ever stop.
+	srvMu   sync.Mutex
+	httpSrv *http.Server
+	closed  bool
+
+	// activeHandler is the root handler installed on httpSrv. It delegates to
+	// an atomically-swappable inner handler so TransitionToFull can replace the
+	// setup-mode handler with the full handler without mutating the running
+	// http.Server, which the serve goroutine reads concurrently.
+	activeHandler swappableHandler
+
 	mux                  *http.ServeMux
 	funcMap              template.FuncMap
 	ready                atomic.Bool
@@ -334,19 +348,50 @@ func (s *Server) Start() error {
 	}
 	handler = requestLogMiddleware(handler)
 	handler = s.withTracing(handler)
+	s.activeHandler.set(handler)
 
-	s.httpSrv = s.buildHTTPServer(addr, handler)
-
-	if s.config.TLSCert != "" && s.config.TLSKey != "" {
-		s.httpSrv.TLSConfig = &tls.Config{
+	srv := s.buildHTTPServer(addr, &s.activeHandler)
+	useTLS := s.config.TLSCert != "" && s.config.TLSKey != ""
+	if useTLS {
+		srv.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
+	}
+
+	s.srvMu.Lock()
+	if s.closed {
+		// Shutdown already ran. Do not bind a listener: nothing would stop it.
+		s.srvMu.Unlock()
+		return http.ErrServerClosed
+	}
+	s.httpSrv = srv
+	s.srvMu.Unlock()
+
+	if useTLS {
 		slog.Info("API server listening (HTTPS)", "addr", addr)
-		return s.httpSrv.ListenAndServeTLS(s.config.TLSCert, s.config.TLSKey)
+		return srv.ListenAndServeTLS(s.config.TLSCert, s.config.TLSKey)
 	}
 
 	slog.Info("API server listening", "addr", addr)
-	return s.httpSrv.ListenAndServe()
+	return srv.ListenAndServe()
+}
+
+// swappableHandler is an http.Handler whose delegate can be replaced
+// atomically while the server is serving. It lets the setup-mode handler be
+// swapped for the full handler on TransitionToFull without a data race on the
+// running http.Server's Handler field.
+type swappableHandler struct {
+	h atomic.Pointer[http.Handler]
+}
+
+func (sh *swappableHandler) set(h http.Handler) { sh.h.Store(&h) }
+
+func (sh *swappableHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if hp := sh.h.Load(); hp != nil {
+		(*hp).ServeHTTP(w, r)
+		return
+	}
+	http.Error(w, "server not ready", http.StatusServiceUnavailable)
 }
 
 // buildHTTPServer constructs the *http.Server with the timeouts that bound how
@@ -431,10 +476,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.hls != nil {
 		s.hls.Close()
 	}
-	if s.httpSrv == nil {
+
+	s.srvMu.Lock()
+	s.closed = true
+	srv := s.httpSrv
+	s.srvMu.Unlock()
+
+	if srv == nil {
 		return nil
 	}
-	return s.httpSrv.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
 
 // SetupModeAPIConfig returns the API config for setup mode.
@@ -450,7 +501,7 @@ func (s *Server) TransitionToFull(authChecker *auth.Checker) {
 	s.mux = newMux
 	s.registerRoutes()
 
-	s.httpSrv.Handler = s.withTracing(requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux)))))
+	s.activeHandler.set(s.withTracing(requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux))))))
 }
 
 func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient, webrtcCfg config.WebRTCConfig) {
