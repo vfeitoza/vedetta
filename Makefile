@@ -1,4 +1,4 @@
-.PHONY: build build-capi build-deploy run test bench lint clean fmt check generate docker-build docker-push deploy release-patch release-minor release-major
+.PHONY: build build-capi build-deploy run test test-js test-race bench lint clean fmt check generate docker-build docker-push deploy release-patch release-minor release-major
 
 BINARY := vedetta
 BUILD_DIR := ./build
@@ -40,6 +40,13 @@ test: test-js
 test-js:
 	node --test internal/api/static/*.test.js
 
+# Race-enabled run of the full Go suite. The detector instruments every memory
+# access, so this catches concurrency bugs the plain run cannot - the server
+# lifecycle and fan-out paths are only exercised safely under -race. This is the
+# CI gate's test step; `make test` stays race-free for a fast local loop.
+test-race:
+	go test -race ./...
+
 bench:
 	go test ./internal/detect/ -bench=. -benchmem -count=1
 
@@ -56,7 +63,7 @@ fmt:
 generate:
 	cd internal/api && oapi-codegen --config oapi-codegen.yaml openapi.yaml
 
-check: lint test
+check: lint test-js test-race
 
 docker-build:
 	docker build -t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest .
