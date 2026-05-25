@@ -129,8 +129,19 @@ func TestEmitEventArtifacts_Success(t *testing.T) {
 	if spanByName(sr.Ended(), "snapshot.save") == nil {
 		t.Error("snapshot.save span not recorded")
 	}
-	if spanByName(sr.Ended(), "mqtt.publish") == nil {
-		t.Error("mqtt.publish span not recorded")
+	// mqtt.publish is a rollup with three children: the event publish, the JPEG
+	// encode, and the snapshot publish. With an image present and a publisher set,
+	// all four spans are recorded.
+	for _, name := range []string{"mqtt.publish", "mqtt.publish_event", "snapshot.encode", "mqtt.publish_snapshot"} {
+		if spanByName(sr.Ended(), name) == nil {
+			t.Errorf("%s span not recorded", name)
+		}
+	}
+	// The breakdown spans nest under the mqtt.publish rollup.
+	parent := spanByName(sr.Ended(), "mqtt.publish")
+	enc := spanByName(sr.Ended(), "snapshot.encode")
+	if parent != nil && enc != nil && enc.Parent().SpanID() != parent.SpanContext().SpanID() {
+		t.Errorf("snapshot.encode parent = %v, want mqtt.publish %v", enc.Parent().SpanID(), parent.SpanContext().SpanID())
 	}
 	if len(pub.events) != 1 {
 		t.Fatalf("PublishEvent called %d times, want 1", len(pub.events))
@@ -203,8 +214,10 @@ func TestEmitEventArtifacts_NoMQTTClient(t *testing.T) {
 
 	emitEventArtifacts(context.Background(), tracer, saver, nil, enq, 85, ev)
 
-	if spanByName(sr.Ended(), "mqtt.publish") != nil {
-		t.Error("mqtt.publish span recorded, want none with nil publisher")
+	for _, name := range []string{"mqtt.publish", "mqtt.publish_event", "snapshot.encode", "mqtt.publish_snapshot"} {
+		if spanByName(sr.Ended(), name) != nil {
+			t.Errorf("%s span recorded, want none with nil publisher", name)
+		}
 	}
 	if !saver.called {
 		t.Error("saver not called")
@@ -231,6 +244,17 @@ func TestEmitEventArtifacts_NilSnapshotImage(t *testing.T) {
 	}
 	if len(pub.events) != 1 {
 		t.Errorf("PublishEvent called %d times, want 1", len(pub.events))
+	}
+	// The event publish still runs and is traced, but with no image there is
+	// nothing to encode or publish as a snapshot.
+	if spanByName(sr.Ended(), "mqtt.publish_event") == nil {
+		t.Error("mqtt.publish_event span not recorded")
+	}
+	if spanByName(sr.Ended(), "snapshot.encode") != nil {
+		t.Error("snapshot.encode span recorded, want none without an image")
+	}
+	if spanByName(sr.Ended(), "mqtt.publish_snapshot") != nil {
+		t.Error("mqtt.publish_snapshot span recorded, want none without an image")
 	}
 	if enq.count() != 1 {
 		t.Errorf("Enqueue called %d times, want 1", enq.count())

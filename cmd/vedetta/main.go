@@ -803,12 +803,19 @@ func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
 	}
 
 	if pub != nil {
-		_, mqttSpan := tracer.Start(ctx, "mqtt.publish")
+		// mqtt.publish is a rollup; its children separate the broker round-trips
+		// from the CPU-bound JPEG encode so the breakdown is visible in traces.
+		mqttCtx, mqttSpan := tracer.Start(ctx, "mqtt.publish")
+
+		_, evtSpan := tracer.Start(mqttCtx, "mqtt.publish_event")
 		if err := pub.PublishEvent(ev, nil); err != nil {
-			mqttSpan.RecordError(err)
+			evtSpan.RecordError(err)
+			evtSpan.SetStatus(codes.Error, "publish event")
 			mqttSpan.SetStatus(codes.Error, "publish event")
 			slog.Error("failed to publish event", "error", err)
 		}
+		evtSpan.End()
+
 		// Use the annotated image (bounding boxes) for MQTT, falling back to the
 		// raw snapshot.
 		mqttImg := ev.AnnotatedImage
@@ -816,8 +823,13 @@ func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
 			mqttImg = ev.SnapshotImage
 		}
 		if mqttImg != nil {
-			if jpegData := encodeJPEG(mqttImg, snapshotQuality); jpegData != nil {
+			_, encSpan := tracer.Start(mqttCtx, "snapshot.encode")
+			jpegData := encodeJPEG(mqttImg, snapshotQuality)
+			encSpan.End()
+			if jpegData != nil {
+				_, snapSpan := tracer.Start(mqttCtx, "mqtt.publish_snapshot")
 				pub.PublishSnapshot(ev.CameraName, ev.Label, jpegData)
+				snapSpan.End()
 			}
 		}
 		mqttSpan.End()
