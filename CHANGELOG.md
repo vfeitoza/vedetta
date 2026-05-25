@@ -29,6 +29,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.6.0](https://github.com/rvben/vedetta/compare/v0.5.4...v0.6.0) - 2026-05-25
+
+### Added
+
+- **metrics**: add detection-pipeline latency histograms and frame counters ([3cf3000](https://github.com/rvben/vedetta/commit/3cf30005808e0cfc08598710ed94e8f6b6657020))
+- **metrics**: add per-camera RTSP reconnect counter ([45b79de](https://github.com/rvben/vedetta/commit/45b79deab32a71b91f8787b3f182c16009ed2dbd))
+- **metrics**: count frames dropped to slow detection-SSE and MSE clients ([24c7d18](https://github.com/rvben/vedetta/commit/24c7d1858adb4aa9449a836260ac8fe780cf9961))
+- **recording**: instrument clip.extract with attempt and stats ([41affd4](https://github.com/rvben/vedetta/commit/41affd41c485d14701220454fa8419c5bcc61622))
+
+### Fixed
+
+- **api**: guard server lifecycle against Start/Shutdown race ([e229305](https://github.com/rvben/vedetta/commit/e229305dd84673e3940549042928159db9888872))
+- **metrics**: snapshot histogram series under a lock for scrape consistency ([f0c826a](https://github.com/rvben/vedetta/commit/f0c826ac7c2251b6399f3260faf2629b27955c02))
+
 ## [0.5.4](https://github.com/rvben/vedetta/compare/v0.5.3...v0.5.4) - 2026-05-25
 
 ### Added
