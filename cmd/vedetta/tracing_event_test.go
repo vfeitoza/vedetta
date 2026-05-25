@@ -458,3 +458,37 @@ func TestExtractClipSpanError(t *testing.T) {
 		t.Errorf("expected exception event from RecordError, got %v", events)
 	}
 }
+
+// clip.extract runs ~25s after event.end as a detached follow-on. Parenting it
+// into the event trace inflated that trace's wall-clock duration to tens of
+// seconds even though the event itself takes milliseconds. It must instead be
+// its own root trace, linked back to the originating event so the causal
+// relationship stays navigable without distorting event timing.
+func TestExtractClipSpanIsLinkedRootNotEventChild(t *testing.T) {
+	tracer, sr := newTestTracer()
+
+	// Mirror finalizeEvent: clip extraction is scheduled with a context carrying
+	// the event root span context.
+	eventCtx, eventSpan := tracer.Start(context.Background(), "event")
+	eventSC := eventSpan.SpanContext()
+	eventSpan.End()
+
+	if err := extractClipSpan(eventCtx, tracer, stubClipSaver{}, camera.Event{ID: "e1"}, 1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	clip := spanByName(sr.Ended(), "clip.extract")
+	if clip == nil {
+		t.Fatal("clip.extract span not recorded")
+	}
+	if clip.SpanContext().TraceID() == eventSC.TraceID() {
+		t.Errorf("clip.extract shares the event trace ID %s; want a separate root trace", eventSC.TraceID())
+	}
+	links := clip.Links()
+	if len(links) != 1 {
+		t.Fatalf("clip.extract links = %d, want exactly 1 link to the event", len(links))
+	}
+	if links[0].SpanContext.TraceID() != eventSC.TraceID() || links[0].SpanContext.SpanID() != eventSC.SpanID() {
+		t.Errorf("clip.extract link = trace %s span %s, want event trace %s span %s",
+			links[0].SpanContext.TraceID(), links[0].SpanContext.SpanID(), eventSC.TraceID(), eventSC.SpanID())
+	}
+}

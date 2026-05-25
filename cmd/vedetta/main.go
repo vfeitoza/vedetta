@@ -866,12 +866,23 @@ func waitForEmit(ctx context.Context, done <-chan struct{}, timeout time.Duratio
 // window duration) so a slow or failed extraction is diagnosable from the trace:
 // a many-segment concat or a long window explains latency, and the attempt
 // number tells a transient early failure from a permanent final-attempt loss.
+//
+// Clip extraction fires ~25s after the event ends, so it is started as its own
+// root trace (WithNewRoot) rather than a child of the event: parenting it into
+// the event trace stretched that trace's wall-clock to tens of seconds even
+// though the event itself takes milliseconds. The originating event span
+// context (carried in ctx) is attached as a span Link so the causal
+// relationship stays navigable. A disabled/no-op tracer yields an invalid event
+// span context, which the SDK drops, so the link is simply absent.
 func extractClipSpan(ctx context.Context, tracer trace.Tracer, saver clipSaver, ev camera.Event, attempt int) error {
-	_, span := tracer.Start(ctx, "clip.extract", trace.WithAttributes(
-		attribute.Int("clip.attempt", attempt),
-		attribute.String("vedetta.camera", ev.CameraName),
-		attribute.String("vedetta.label", ev.Label),
-	))
+	_, span := tracer.Start(ctx, "clip.extract",
+		trace.WithNewRoot(),
+		trace.WithLinks(trace.Link{SpanContext: trace.SpanContextFromContext(ctx)}),
+		trace.WithAttributes(
+			attribute.Int("clip.attempt", attempt),
+			attribute.String("vedetta.camera", ev.CameraName),
+			attribute.String("vedetta.label", ev.Label),
+		))
 	defer span.End()
 	stats, err := saver.SaveClip(ctx, ev)
 	// Stats are populated as far as extraction reached, so they are recorded on
@@ -970,8 +981,9 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				}()
 			}
 
-			// Capture the parented context before launching the goroutine so the
-			// clip.extract spans share the same trace as the originating event.
+			// Carry the event root span context into the goroutine so each
+			// clip.extract span (a new root trace) can link back to the
+			// originating event.
 			clipCtx := trace.ContextWithSpanContext(ctx, ae.rootSpanCtx)
 
 			// Schedule clip extraction after post-capture + segment finalization buffer
