@@ -23,6 +23,9 @@ func (g *levelGate) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 func (g *levelGate) Handle(ctx context.Context, r slog.Record) error {
+	if !g.Enabled(ctx, r.Level) {
+		return nil
+	}
 	return g.inner.Handle(ctx, r)
 }
 
