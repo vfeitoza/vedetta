@@ -434,7 +434,6 @@ func Defaults() *Config {
 			ServiceName: "vedetta",
 		},
 		Logging: LoggingConfig{
-			Protocol:    "http",
 			Insecure:    true,
 			ServiceName: "vedetta",
 		},
@@ -608,12 +607,14 @@ func Load(path string) (*Config, error) {
 		cfg.Tracing.ServiceName = "vedetta"
 	}
 
+	// Unlike tracing, logging.protocol is left empty when unset. The logging
+	// package's transport fallback reuses tracing's protocol only while
+	// logging.protocol is empty, so filling a default here would pin logs to that
+	// default and defeat the fallback. Still normalize and validate any value the
+	// user did set.
 	cfg.Logging.Protocol = strings.ToLower(strings.TrimSpace(cfg.Logging.Protocol))
-	if cfg.Logging.Protocol == "" {
-		cfg.Logging.Protocol = "http"
-	}
 	switch cfg.Logging.Protocol {
-	case "http", "http/protobuf", "grpc":
+	case "", "http", "http/protobuf", "grpc":
 	default:
 		return nil, fmt.Errorf("logging.protocol: must be \"http\", \"http/protobuf\", or \"grpc\"")
 	}

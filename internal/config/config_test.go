@@ -919,6 +919,30 @@ func TestLoggingProtocolNormalized(t *testing.T) {
 	}
 }
 
+func TestLoggingProtocolUnsetSurvivesForFallback(t *testing.T) {
+	// When logging is enabled without its own protocol, Load must leave
+	// Logging.Protocol empty. The logging package's transport fallback keys off
+	// an empty protocol to reuse tracing's protocol atomically; eagerly filling a
+	// default here would defeat that and send logs over the wrong wire when a
+	// gRPC tracing endpoint is reused.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"tracing:\n  enabled: true\n  endpoint: otel:4317\n  protocol: grpc\n" +
+		"logging:\n  enabled: true\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Logging.Protocol != "" {
+		t.Errorf("logging.protocol = %q, want \"\" (unset) so transport fallback can reuse tracing", cfg.Logging.Protocol)
+	}
+}
+
 func TestLoggingDisabledByDefault(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Logging.Enabled {
