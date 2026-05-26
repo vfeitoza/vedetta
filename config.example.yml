@@ -187,9 +187,10 @@ logging:
   # URL. Empty reuses the tracing endpoint above; if that is also empty the
   # exporter reads OTEL_EXPORTER_OTLP_LOGS_ENDPOINT then OTEL_EXPORTER_OTLP_ENDPOINT.
   endpoint: ""
-  # "http" (default) or "grpc". Leave empty to reuse the tracing protocol when
-  # reusing the tracing endpoint; otherwise it reads OTEL_EXPORTER_OTLP_LOGS_PROTOCOL
-  # then OTEL_EXPORTER_OTLP_PROTOCOL, defaulting to http.
+  # "http" or "http/protobuf" (both use OTLP/HTTP) or "grpc". Leave empty to reuse
+  # the tracing protocol when reusing the tracing endpoint; otherwise it reads
+  # OTEL_EXPORTER_OTLP_LOGS_PROTOCOL then OTEL_EXPORTER_OTLP_PROTOCOL, defaulting
+  # to OTLP/HTTP.
   protocol: ""
   # Send plaintext OTLP for scheme-less host:port endpoints on a trusted LAN.
   # Ignored for https:// URLs. Only applies to a logging endpoint of its own; a

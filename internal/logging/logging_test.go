@@ -203,3 +203,25 @@ func assertHasLog(t *testing.T, req *collogspb.ExportLogsServiceRequest, body, s
 		t.Error("exported logs missing the correlated span_id")
 	}
 }
+
+func TestEnsureLogsPath(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no path gets /v1/logs", "http://host:4318", "http://host:4318/v1/logs"},
+		{"root path gets /v1/logs", "http://host:4318/", "http://host:4318/v1/logs"},
+		{"correct path preserved", "http://host:4318/v1/logs", "http://host:4318/v1/logs"},
+		{"custom path preserved", "http://host:4318/custom/path", "http://host:4318/custom/path"},
+		{"https no path gets /v1/logs", "https://otel.example.com", "https://otel.example.com/v1/logs"},
+		{"unparseable returned unchanged", "://not a url", "://not a url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ensureLogsPath(tc.in); got != tc.want {
+				t.Errorf("ensureLogsPath(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

@@ -3,7 +3,6 @@ package otelexport
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -47,20 +46,17 @@ func TestRateLimitedErrorHandlerCoalesces(t *testing.T) {
 	}
 }
 
-// TestInstallRateLimitedErrorHandlerReplacesDefault verifies that calling
-// InstallRateLimitedErrorHandler installs a non-default OTel error handler.
+// TestInstallRateLimitedErrorHandlerReplacesDefault verifies that after
+// InstallRateLimitedErrorHandler runs, the global OTel error handler is our
+// rate-limited handler rather than the SDK default delegator. errorHandlerOnce
+// is package-global, so the handler may already be installed by another test;
+// either way the post-condition is that the global handler is our type, and the
+// assertion fails for any other type (including the default ErrDelegator).
 func TestInstallRateLimitedErrorHandlerReplacesDefault(t *testing.T) {
-	// Reset the once so this test is not order-dependent. Because errorHandlerOnce
-	// is a package-level sync.Once we cannot reset it from outside, but the test
-	// is in-package so we can call the install unconditionally via a fresh once.
-	// We verify the type directly since we are in-package.
 	InstallRateLimitedErrorHandler(time.Second)
 
 	got := otel.GetErrorHandler()
 	if _, ok := got.(*rateLimitedErrorHandler); !ok {
-		// Also accept it being wrapped: fall back to type-string check.
-		if strings.Contains(fmt.Sprintf("%T", got), "ErrDelegator") {
-			t.Fatalf("InstallRateLimitedErrorHandler must replace the default ErrDelegator, got %T", got)
-		}
+		t.Fatalf("global OTel error handler = %T, want *rateLimitedErrorHandler", got)
 	}
 }
