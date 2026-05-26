@@ -25,6 +25,7 @@ import (
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/logging"
 	"github.com/rvben/vedetta/internal/media"
 	"github.com/rvben/vedetta/internal/mqtt"
 	"github.com/rvben/vedetta/internal/notify"
@@ -108,10 +109,10 @@ func main() {
 	configPath := flag.String("config", "config.yml", "path to configuration file")
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	baseHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	})
+	slog.SetDefault(slog.New(baseHandler))
 
 	// Bound the fatal-crash dump. The default ("all") makes the runtime walk
 	// every goroutine's stack on a fatal error; when a crash is caused by
@@ -129,6 +130,13 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	logProvider := wireLogging(ctx, cfg, baseHandler)
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = logProvider.Shutdown(sctx)
+	}()
 
 	db, err := storage.New(cfg.Storage.DBPath)
 	if err != nil {
@@ -186,6 +194,11 @@ func main() {
 			slog.Warn("config not found after setup, using defaults", "error", err)
 			cfg = config.Defaults()
 		}
+
+		// Re-wire logging with the reloaded config. The earlier base-only
+		// provider holds no exporter, so it needs no separate shutdown; the
+		// deferred closure reads logProvider at exit and flushes this one.
+		logProvider = wireLogging(ctx, cfg, baseHandler)
 
 		tp, _ := tracing.Init(ctx, tracing.Config(cfg.Tracing), Version)
 		defer func() {
@@ -379,6 +392,28 @@ func main() {
 
 	// Wait for recording goroutines to finalize segments before closing DB
 	sub.recorder.Close()
+}
+
+// wireLogging installs OTLP log export (when enabled) by wrapping the base
+// handler in a fan-out and setting it as the slog default, then returns the
+// provider so the caller can defer Shutdown. When logging is disabled it returns
+// a base-only provider whose Shutdown is a no-op. The Fallback* fields hand the
+// tracing transport (endpoint, protocol, insecure) to logging as one unit, so
+// that when logging configures no endpoint of its own it reuses tracing's whole
+// transport atomically rather than a mismatched mix.
+func wireLogging(ctx context.Context, cfg *config.Config, base slog.Handler) *logging.Provider {
+	lp, _ := logging.Init(ctx, logging.Config{
+		Enabled:          cfg.Logging.Enabled,
+		Endpoint:         cfg.Logging.Endpoint,
+		Protocol:         cfg.Logging.Protocol,
+		Insecure:         cfg.Logging.Insecure,
+		ServiceName:      cfg.Logging.ServiceName,
+		FallbackEndpoint: cfg.Tracing.Endpoint,
+		FallbackProtocol: cfg.Tracing.Protocol,
+		FallbackInsecure: cfg.Tracing.Insecure,
+	}, Version, base)
+	slog.SetDefault(slog.New(lp.Handler()))
+	return lp
 }
 
 // initSubsystems creates and starts all runtime components: MQTT, detector,
