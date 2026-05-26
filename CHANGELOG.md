@@ -31,6 +31,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.6.2](https://github.com/rvben/vedetta/compare/v0.6.1...v0.6.2) - 2026-05-26
+
+### Added
+
+- **metrics**: add HTTP RED metrics (request count + latency by status class) ([e63deb5](https://github.com/rvben/vedetta/commit/e63deb5d666ac41afe3cf66110952120ad3caf6f))
+
+### Fixed
+
+- **mqtt**: propagate object-count and presence publish errors ([588927b](https://github.com/rvben/vedetta/commit/588927bc7ef9d6d48bc50b9e592b9b1f1693a5a7))
+- **mqtt**: bound publish waits and span event-loop publishes ([46ed0cf](https://github.com/rvben/vedetta/commit/46ed0cf112820ab0436a34826296c2c9c1e35895))
+
 ## [0.6.1](https://github.com/rvben/vedetta/compare/v0.6.0...v0.6.1) - 2026-05-25
 
 ## [0.6.0](https://github.com/rvben/vedetta/compare/v0.5.4...v0.6.0) - 2026-05-25
