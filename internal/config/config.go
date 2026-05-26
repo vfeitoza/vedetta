@@ -28,6 +28,7 @@ type Config struct {
 	Notifications NotificationsConfig `yaml:"notifications"`
 	WebRTC        WebRTCConfig        `yaml:"webrtc"`
 	Tracing       TracingConfig       `yaml:"tracing"`
+	Logging       LoggingConfig       `yaml:"logging"`
 }
 
 // NotificationsConfig controls web push notification delivery.
@@ -87,6 +88,19 @@ type ICEServerConfig struct {
 // with Insecure) or a full URL; when empty the standard
 // OTEL_EXPORTER_OTLP_ENDPOINT environment variable is used.
 type TracingConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	Endpoint    string `yaml:"endpoint"`
+	Protocol    string `yaml:"protocol"`
+	Insecure    bool   `yaml:"insecure"`
+	ServiceName string `yaml:"service_name"`
+}
+
+// LoggingConfig controls opt-in OTLP log export to a collector (e.g. for Loki).
+// Disabled by default: when Enabled is false, vedetta logs only to stdout as
+// before. When Endpoint is empty it reuses the tracing endpoint; if that is
+// also empty the OTLP exporter resolves the endpoint from the standard
+// OTEL_EXPORTER_OTLP_LOGS_ENDPOINT / OTEL_EXPORTER_OTLP_ENDPOINT env vars.
+type LoggingConfig struct {
 	Enabled     bool   `yaml:"enabled"`
 	Endpoint    string `yaml:"endpoint"`
 	Protocol    string `yaml:"protocol"`
@@ -204,9 +218,9 @@ type TieredStorageConfig struct {
 	AfterDays    int           `yaml:"after_days"`
 	TargetWidth  int           `yaml:"target_width"`
 	TargetHeight int           `yaml:"target_height"`
-	Schedule     string        `yaml:"schedule"`  // "HH:MM-HH:MM", local time, may span midnight
-	Interval     time.Duration `yaml:"interval"`  // How often the recompress worker ticks inside the schedule window
-	Priority     string        `yaml:"priority"`  // "largest" | "oldest" — which eligible segment to recompress first
+	Schedule     string        `yaml:"schedule"` // "HH:MM-HH:MM", local time, may span midnight
+	Interval     time.Duration `yaml:"interval"` // How often the recompress worker ticks inside the schedule window
+	Priority     string        `yaml:"priority"` // "largest" | "oldest" — which eligible segment to recompress first
 }
 
 // CameraTieredStorageConfig holds per-camera overrides for tiered storage.
@@ -415,6 +429,11 @@ func Defaults() *Config {
 			CheckInterval: 24 * time.Hour,
 		},
 		Tracing: TracingConfig{
+			Protocol:    "http",
+			Insecure:    true,
+			ServiceName: "vedetta",
+		},
+		Logging: LoggingConfig{
 			Protocol:    "http",
 			Insecure:    true,
 			ServiceName: "vedetta",

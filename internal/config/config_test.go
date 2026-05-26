@@ -869,6 +869,16 @@ func TestTracingValidationRejectsBadProtocol(t *testing.T) {
 	}
 }
 
+func TestLoggingDisabledByDefault(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Logging.Enabled {
+		t.Error("logging must be disabled by default")
+	}
+	if cfg.Logging.ServiceName != "vedetta" {
+		t.Errorf("default logging service_name = %q, want vedetta", cfg.Logging.ServiceName)
+	}
+}
+
 func TestOpenH264ConfigYAMLParsing(t *testing.T) {
 	tests := []struct {
 		name    string
