@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"time"
 
+	"github.com/rvben/vedetta/internal/otelexport"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	otlploggrpc "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	otlploghttp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -73,6 +75,8 @@ func Init(ctx context.Context, cfg Config, version string, base slog.Handler) (*
 		semconv.ServiceName(name),
 		semconv.ServiceVersion(version),
 	)
+
+	otelexport.InstallRateLimitedErrorHandler(30 * time.Second)
 
 	lp := log.NewLoggerProvider(
 		log.WithProcessor(log.NewBatchProcessor(exp)),

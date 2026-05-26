@@ -1,7 +1,7 @@
-// Package otelexport holds the OTLP endpoint classification shared by the
-// tracing and logging subsystems. It is intentionally pure: it reads no
-// environment and encodes no config-vs-env precedence. Each signal layers its
-// own resolution policy on top.
+// Package otelexport holds OTLP export helpers shared by the tracing and
+// logging subsystems: endpoint classification (pure - reads no environment,
+// encodes no config-vs-env precedence) and a shared rate-limited error handler.
+// Each signal layers its own resolution policy on top of the endpoint helpers.
 package otelexport
 
 import "strings"

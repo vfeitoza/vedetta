@@ -9,9 +9,9 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
+	"github.com/rvben/vedetta/internal/otelexport"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -95,34 +95,11 @@ func Init(ctx context.Context, cfg Config, version string) (*Provider, error) {
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
-	otel.SetErrorHandler(newRateLimitedErrorHandler(30 * time.Second))
+	otelexport.InstallRateLimitedErrorHandler(30 * time.Second)
 
 	slog.Info("tracing enabled", "endpoint", cfg.Endpoint, "protocol", cfg.Protocol)
 	return &Provider{
 		tracer:   tp.Tracer(instrumentationScope),
 		shutdown: []func(context.Context) error{tp.Shutdown},
 	}, nil
-}
-
-// rateLimitedErrorHandler logs OTel export errors at most once per interval so
-// a down backend cannot spam the log with one line per dropped span.
-type rateLimitedErrorHandler struct {
-	mu       sync.Mutex
-	interval time.Duration
-	last     time.Time
-}
-
-func newRateLimitedErrorHandler(interval time.Duration) *rateLimitedErrorHandler {
-	return &rateLimitedErrorHandler{interval: interval}
-}
-
-func (h *rateLimitedErrorHandler) Handle(err error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	now := time.Now()
-	if now.Sub(h.last) < h.interval {
-		return
-	}
-	h.last = now
-	slog.Warn("tracing export error (rate-limited)", "err", err)
 }

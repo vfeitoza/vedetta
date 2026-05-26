@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/trace"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -122,6 +124,40 @@ func TestInitExportsToOTLPReceiverWithResourceAndCorrelation(t *testing.T) {
 		assertHasLog(t, c.req, "hello-loki", "vedetta-test", "v9.9.9", tid[:], sid[:])
 	case <-time.After(5 * time.Second):
 		t.Fatal("no OTLP export received")
+	}
+}
+
+// noopExporter is a log.Exporter that discards all records and succeeds on all
+// lifecycle calls. It is used in tests that need Init to reach the
+// provider-creation path without a real OTLP collector.
+type noopExporter struct{}
+
+func (noopExporter) Export(context.Context, []log.Record) error { return nil }
+func (noopExporter) ForceFlush(context.Context) error           { return nil }
+func (noopExporter) Shutdown(context.Context) error             { return nil }
+
+// TestInitEnabledInstallsRateLimitedErrorHandler proves that a successful Init
+// (with OTLP enabled) replaces the default OTel error handler with the
+// rate-limited one from otelexport. Without the InstallRateLimitedErrorHandler
+// call in Init, a down collector would spam stderr via the default handler.
+func TestInitEnabledInstallsRateLimitedErrorHandler(t *testing.T) {
+	orig := exporterFactory
+	t.Cleanup(func() { exporterFactory = orig })
+	exporterFactory = func(_ context.Context, _ Config, _ func(string) string) (log.Exporter, error) {
+		return noopExporter{}, nil
+	}
+
+	var buf bytes.Buffer
+	base := baseHandler(&buf)
+	p, err := Init(context.Background(), Config{Enabled: true, ServiceName: "test"}, "v0.0.0", base)
+	if err != nil {
+		t.Fatalf("Init returned %v", err)
+	}
+	defer p.Shutdown(context.Background()) //nolint:errcheck
+
+	got := otel.GetErrorHandler()
+	if strings.Contains(fmt.Sprintf("%T", got), "ErrDelegator") {
+		t.Fatalf("Init must install a rate-limited error handler, got default %T", got)
 	}
 }
 
