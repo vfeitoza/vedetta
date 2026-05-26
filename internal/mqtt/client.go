@@ -33,11 +33,11 @@ func guardedDialBroker(uri *url.URL, o pahomqtt.ClientOptions) (net.Conn, error)
 // Publisher defines the interface for MQTT publishing operations.
 type Publisher interface {
 	PublishEvent(event camera.Event, matchedObjects []string) error
-	PublishPresence(pe camera.PresenceEvent, objectName string)
+	PublishPresence(pe camera.PresenceEvent, objectName string) error
 	PublishCameraStatus(cameraName string, online bool, stopped bool)
 	PublishDiscovery(cameraNames []string)
 	PublishPresenceDiscovery(zones []ZoneInfo)
-	PublishObjectCount(cameraName, label string, count int)
+	PublishObjectCount(cameraName, label string, count int) error
 	PublishDiskStatus(freeBytes, totalBytes uint64, recordingPaused bool)
 	PublishDiskDiscovery()
 	Close()
@@ -138,13 +138,15 @@ func (c *Client) PublishEvent(event camera.Event, matchedObjects []string) error
 	return c.waitPublish(token)
 }
 
-func (c *Client) PublishObjectCount(cameraName, label string, count int) {
+func (c *Client) PublishObjectCount(cameraName, label string, count int) error {
 	topic := fmt.Sprintf("%s/%s/%s", c.topic, cameraName, label)
 	payload := strconv.Itoa(count)
 	token := c.client.Publish(topic, 1, true, payload)
 	if err := c.waitPublish(token); err != nil {
 		slog.Error("failed to publish object count", "camera", cameraName, "label", label, "error", err)
+		return err
 	}
+	return nil
 }
 
 func (c *Client) PublishSnapshot(cameraName, label string, jpegData []byte) {
@@ -185,7 +187,7 @@ func (c *Client) PublishDoorbell(cameraName, person string, jpegData []byte) {
 	}
 }
 
-func (c *Client) PublishPresence(pe camera.PresenceEvent, objectName string) {
+func (c *Client) PublishPresence(pe camera.PresenceEvent, objectName string) error {
 	state := "entered"
 	if pe.Type == "zone_leave" {
 		state = "left"
@@ -200,14 +202,16 @@ func (c *Client) PublishPresence(pe camera.PresenceEvent, objectName string) {
 	}
 	payload, err := json.Marshal(m)
 	if err != nil {
-		return
+		return err
 	}
 
 	topic := fmt.Sprintf("%s/presence/%s/%s", c.topic, sanitizeName(pe.ZoneName), pe.Label)
 	token := c.client.Publish(topic, 1, true, payload)
 	if err := c.waitPublish(token); err != nil {
 		slog.Error("failed to publish presence", "zone", pe.ZoneName, "error", err)
+		return err
 	}
+	return nil
 }
 
 func (c *Client) PublishObjectSighting(objectName string, event camera.Event) {

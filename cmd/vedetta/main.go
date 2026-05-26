@@ -976,8 +976,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 						counts[ev.Label] = 0
 					}
 					spanPublish(endCtx, tracer, "mqtt.publish_object_count", func() error {
-						mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
-						return nil
+						return mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
 					})
 				}
 			}
@@ -1093,8 +1092,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					}
 					objectCounts[event.CameraName][event.Label]++
 					spanPublish(evCtx, tracer, "mqtt.publish_object_count", func() error {
-						mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
-						return nil
+						return mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
 					})
 				}
 
@@ -1196,8 +1194,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					// the event loop, so span it (its own root trace) to surface the
 					// broker round-trip the loop blocks on.
 					spanPublish(ctx, tracer, "mqtt.publish_presence", func() error {
-						mc.PublishPresence(pe, objectName)
-						return nil
+						return mc.PublishPresence(pe, objectName)
 					})
 				}
 

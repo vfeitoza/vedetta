@@ -172,6 +172,26 @@ func TestClientPublishObjectCount_RetainedCount(t *testing.T) {
 	}
 }
 
+// PublishObjectCount and PublishPresence run on the event loop wrapped in a
+// publish span; they must return the publish error (in addition to logging it)
+// so a wedged-broker timeout is recorded on the span rather than swallowed.
+func TestClientPublishObjectCount_PropagatesError(t *testing.T) {
+	c, f := newTestClient()
+	f.publishErr = errors.New("broker down")
+	if err := c.PublishObjectCount("front", "person", 1); !errors.Is(err, f.publishErr) {
+		t.Fatalf("PublishObjectCount error = %v, want broker down", err)
+	}
+}
+
+func TestClientPublishPresence_PropagatesError(t *testing.T) {
+	c, f := newTestClient()
+	f.publishErr = errors.New("broker down")
+	err := c.PublishPresence(camera.PresenceEvent{Type: "zone_enter", ZoneName: "z", Label: "person"}, "")
+	if !errors.Is(err, f.publishErr) {
+		t.Fatalf("PublishPresence error = %v, want broker down", err)
+	}
+}
+
 func TestClientPublishCameraStatus_States(t *testing.T) {
 	cases := []struct {
 		online, stopped bool
