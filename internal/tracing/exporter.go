@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/rvben/vedetta/internal/otelexport"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -12,18 +13,13 @@ import (
 
 var errNoEndpoint = errors.New("tracing: no OTLP endpoint configured")
 
-// resolvedEndpoint describes how the OTLP exporter is addressed, independent of
-// transport. When AsURL is true, Value is a full URL passed to WithEndpointURL
-// (its scheme decides plaintext vs TLS). Otherwise Value is a scheme-less
-// host:port passed to WithEndpoint, and Insecure selects plaintext.
-type resolvedEndpoint struct {
-	Value    string
-	AsURL    bool
-	Insecure bool
-}
+// resolvedEndpoint is the shared classification of an OTLP endpoint.
+type resolvedEndpoint = otelexport.Endpoint
 
 // resolveEndpoint applies config-then-env precedence and classifies the
-// endpoint form. getenv is injected for testability.
+// endpoint form. getenv is injected for testability. The config/env values are
+// trimmed here (the shared classifier is pure and does not trim) to preserve the
+// existing behavior the regression tests rely on.
 func resolveEndpoint(cfg Config, getenv func(string) string) (resolvedEndpoint, error) {
 	ep := strings.TrimSpace(cfg.Endpoint)
 	if ep == "" {
@@ -32,17 +28,14 @@ func resolveEndpoint(cfg Config, getenv func(string) string) (resolvedEndpoint, 
 	if ep == "" {
 		return resolvedEndpoint{}, errNoEndpoint
 	}
-	if strings.Contains(ep, "://") {
-		return resolvedEndpoint{Value: ep, AsURL: true}, nil
-	}
-	return resolvedEndpoint{Value: ep, AsURL: false, Insecure: cfg.Insecure}, nil
+	return otelexport.Classify(ep, cfg.Insecure), nil
 }
 
 // resolveProtocol applies config-then-env precedence for the OTLP transport.
 func resolveProtocol(cfg Config, getenv func(string) string) string {
-	p := strings.ToLower(strings.TrimSpace(cfg.Protocol))
+	p := otelexport.ParseProtocol(cfg.Protocol)
 	if p == "" {
-		p = strings.ToLower(strings.TrimSpace(getenv("OTEL_EXPORTER_OTLP_PROTOCOL")))
+		p = otelexport.ParseProtocol(getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
 	}
 	return p
 }
