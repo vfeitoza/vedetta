@@ -899,6 +899,20 @@ func extractClipSpan(ctx context.Context, tracer trace.Tracer, saver clipSaver, 
 	return err
 }
 
+// spanPublish runs a synchronous MQTT publish inside a child span so the time
+// the event loop spends blocked on the broker is attributable in traces.
+// Several publishes run on the single event-loop goroutine; the client's
+// bounded wait caps the worst case and this span surfaces it. A publish error
+// is recorded on the span; the caller still logs it inside publish.
+func spanPublish(ctx context.Context, tracer trace.Tracer, name string, publish func() error) {
+	_, span := tracer.Start(ctx, name)
+	defer span.End()
+	if err := publish(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, name)
+	}
+}
+
 // runEventLoop starts the goroutine that manages event lifecycles, including
 // clip extraction scheduling, cooldowns, presence updates, MQTT publishing,
 // face recognition, and object re-identification.
@@ -930,7 +944,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			duration := endTime.Sub(ev.Timestamp)
 
 			endCtx := trace.ContextWithSpanContext(ctx, ae.rootSpanCtx)
-			_, endSpan := tracer.Start(endCtx, "event.end")
+			endCtx, endSpan := tracer.Start(endCtx, "event.end")
 
 			if err := db.UpdateEventEndTime(ev.ID, endTime); err != nil {
 				endSpan.RecordError(err)
@@ -943,13 +957,17 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 			// the time an event ends; the bounded wait only guards a wedged emit.
 			waitForEmit(ctx, ae.emitDone, emitWaitTimeout)
 
-			// Publish event end over MQTT
+			// Publish event end over MQTT. These run synchronously on the event
+			// loop, so each is wrapped in a child span: the MQTT round-trip is
+			// then visible as its own segment rather than hidden inside event.end.
 			if mc := sub.mqttClient.Load(); mc != nil {
-				if err := mc.PublishEvent(ev, nil); err != nil {
-					endSpan.RecordError(err)
-					endSpan.SetStatus(codes.Error, "publish event end")
-					slog.Error("failed to publish event end", "event", ev.ID, "error", err)
-				}
+				spanPublish(endCtx, tracer, "mqtt.publish_event_end", func() error {
+					if err := mc.PublishEvent(ev, nil); err != nil {
+						slog.Error("failed to publish event end", "event", ev.ID, "error", err)
+						return err
+					}
+					return nil
+				})
 
 				// Decrement object count
 				if counts, ok := objectCounts[ev.CameraName]; ok {
@@ -957,7 +975,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					if counts[ev.Label] < 0 {
 						counts[ev.Label] = 0
 					}
-					mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
+					spanPublish(endCtx, tracer, "mqtt.publish_object_count", func() error {
+						mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
+						return nil
+					})
 				}
 			}
 			endSpan.End()
@@ -1071,7 +1092,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 						objectCounts[event.CameraName] = make(map[string]int)
 					}
 					objectCounts[event.CameraName][event.Label]++
-					mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
+					spanPublish(evCtx, tracer, "mqtt.publish_object_count", func() error {
+						mc.PublishObjectCount(event.CameraName, event.Label, objectCounts[event.CameraName][event.Label])
+						return nil
+					})
 				}
 
 				// Offload snapshot save, MQTT create/snapshot publish, and push
@@ -1168,7 +1192,13 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 							slog.Error("failed to look up latest object name for zone", "zone", pe.ZoneName, "label", pe.Label, "error", err)
 						}
 					}
-					mc.PublishPresence(pe, objectName)
+					// Presence handling is otherwise untraced; this publish runs on
+					// the event loop, so span it (its own root trace) to surface the
+					// broker round-trip the loop blocks on.
+					spanPublish(ctx, tracer, "mqtt.publish_presence", func() error {
+						mc.PublishPresence(pe, objectName)
+						return nil
+					})
 				}
 
 			case ma := <-motionActivity:

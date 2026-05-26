@@ -3,6 +3,7 @@ package mqtt
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,11 +22,16 @@ type recordedPublish struct {
 	payload  []byte
 }
 
-// fakeToken implements pahomqtt.Token with a fixed error result.
-type fakeToken struct{ err error }
+// fakeToken implements pahomqtt.Token with a fixed error result. When stall is
+// set, WaitTimeout reports the deadline elapsed (the broker never acked),
+// modelling a wedged broker.
+type fakeToken struct {
+	err   error
+	stall bool
+}
 
 func (t *fakeToken) Wait() bool                     { return true }
-func (t *fakeToken) WaitTimeout(time.Duration) bool { return true }
+func (t *fakeToken) WaitTimeout(time.Duration) bool { return !t.stall }
 func (t *fakeToken) Done() <-chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
@@ -39,6 +45,7 @@ type fakePaho struct {
 	mu         sync.Mutex
 	publishes  []recordedPublish
 	publishErr error
+	stall      bool // when set, returned tokens never ack within the timeout
 }
 
 func (f *fakePaho) Publish(topic string, qos byte, retained bool, payload any) pahomqtt.Token {
@@ -52,7 +59,7 @@ func (f *fakePaho) Publish(topic string, qos byte, retained bool, payload any) p
 		b = []byte(p)
 	}
 	f.publishes = append(f.publishes, recordedPublish{topic: topic, qos: qos, retained: retained, payload: b})
-	return &fakeToken{err: f.publishErr}
+	return &fakeToken{err: f.publishErr, stall: f.stall}
 }
 
 func (f *fakePaho) calls() []recordedPublish {
@@ -81,7 +88,7 @@ func (f *fakePaho) OptionsReader() pahomqtt.ClientOptionsReader {
 
 func newTestClient() (*Client, *fakePaho) {
 	f := &fakePaho{}
-	return &Client{client: f, topic: "vedetta"}, f
+	return &Client{client: f, topic: "vedetta", publishTimeout: defaultPublishTimeout}, f
 }
 
 func requireOnePublish(t *testing.T, f *fakePaho) recordedPublish {
@@ -131,6 +138,21 @@ func TestClientPublishEvent_PropagatesTokenError(t *testing.T) {
 	err := c.PublishEvent(camera.Event{ID: "e1", CameraName: "front"}, nil)
 	if !errors.Is(err, f.publishErr) {
 		t.Fatalf("PublishEvent error = %v, want broker down", err)
+	}
+}
+
+// A publish whose broker never acknowledges must return a bounded timeout
+// error rather than blocking forever. This matters because several publishes
+// run synchronously on the single event-loop goroutine; an unbounded wait there
+// stalls the entire NVR if the broker wedges.
+func TestClientPublishEvent_TimesOutWhenBrokerStalls(t *testing.T) {
+	c, f := newTestClient()
+	f.stall = true
+	c.publishTimeout = 5 * time.Millisecond
+
+	err := c.PublishEvent(camera.Event{ID: "e1", CameraName: "front"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("PublishEvent on a stalled broker = %v, want a publish timeout error", err)
 	}
 }
 

@@ -359,6 +359,53 @@ func TestRunEventLoopDoesNotBlockOnSlowEmit(t *testing.T) {
 	}
 }
 
+// The synchronous MQTT publishes that run on the event loop are wrapped in a
+// child span so the time the loop spends blocked on the broker is attributable
+// in traces. The span must be a child of the surrounding event span.
+func TestSpanPublishRecordsChildSpan(t *testing.T) {
+	tracer, sr := newTestTracer()
+	parentCtx, parent := tracer.Start(context.Background(), "event.end")
+	parentSC := parent.SpanContext()
+
+	spanPublish(parentCtx, tracer, "mqtt.publish_event_end", func() error { return nil })
+	parent.End()
+
+	span := spanByName(sr.Ended(), "mqtt.publish_event_end")
+	if span == nil {
+		t.Fatal("mqtt.publish_event_end span not recorded")
+	}
+	if span.Parent().SpanID() != parentSC.SpanID() {
+		t.Errorf("parent = %v, want %v", span.Parent().SpanID(), parentSC.SpanID())
+	}
+	if span.SpanContext().TraceID() != parentSC.TraceID() {
+		t.Error("publish span not in the parent trace")
+	}
+	if span.Status().Code == codes.Error {
+		t.Error("status = Error on success, want unset")
+	}
+}
+
+// A publish error (e.g. the bounded wait timing out on a wedged broker) is
+// recorded on the span so it surfaces in the trace.
+func TestSpanPublishRecordsError(t *testing.T) {
+	tracer, sr := newTestTracer()
+	wantErr := errors.New("mqtt publish timed out after 5s")
+
+	spanPublish(context.Background(), tracer, "mqtt.publish_presence", func() error { return wantErr })
+
+	span := spanByName(sr.Ended(), "mqtt.publish_presence")
+	if span == nil {
+		t.Fatal("mqtt.publish_presence span not recorded")
+	}
+	if span.Status().Code != codes.Error {
+		t.Errorf("status = %v, want Error", span.Status().Code)
+	}
+	events := span.Events()
+	if len(events) == 0 || events[0].Name != "exception" {
+		t.Errorf("expected exception event from RecordError, got %v", events)
+	}
+}
+
 type stubClipSaver struct {
 	err   error
 	stats recording.ClipStats

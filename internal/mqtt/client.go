@@ -43,11 +43,29 @@ type Publisher interface {
 	Close()
 }
 
+// defaultPublishTimeout bounds how long a publish waits for the broker to
+// acknowledge. Several publishes run synchronously on the single event-loop
+// goroutine, so an unbounded wait would let a wedged broker stall the entire
+// NVR. Long enough for a healthy broker round-trip, short enough to fail fast.
+const defaultPublishTimeout = 5 * time.Second
+
 // Client wraps an MQTT connection for publishing detection events
 // and Home Assistant MQTT discovery messages.
 type Client struct {
-	client pahomqtt.Client
-	topic  string
+	client         pahomqtt.Client
+	topic          string
+	publishTimeout time.Duration
+}
+
+// waitPublish bounds the wait for an in-flight publish so a wedged broker
+// cannot block the caller (notably the event-loop goroutine) indefinitely. It
+// returns the publish error, or a timeout error if the broker did not
+// acknowledge within publishTimeout.
+func (c *Client) waitPublish(token pahomqtt.Token) error {
+	if !token.WaitTimeout(c.publishTimeout) {
+		return fmt.Errorf("mqtt publish timed out after %s", c.publishTimeout)
+	}
+	return token.Error()
 }
 
 func New(cfg config.MQTTConfig) (*Client, error) {
@@ -75,7 +93,7 @@ func New(cfg config.MQTTConfig) (*Client, error) {
 		opts.SetPassword(cfg.Password)
 	}
 
-	c := &Client{topic: topic}
+	c := &Client{topic: topic, publishTimeout: defaultPublishTimeout}
 
 	opts.SetOnConnectHandler(func(_ pahomqtt.Client) {
 		slog.Info("MQTT connected, publishing availability")
@@ -100,9 +118,8 @@ func New(cfg config.MQTTConfig) (*Client, error) {
 func (c *Client) publishAvailability(status string) {
 	topic := c.topic + "/availability"
 	token := c.client.Publish(topic, 1, true, status)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish availability", "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish availability", "error", err)
 	}
 }
 
@@ -118,16 +135,14 @@ func (c *Client) PublishEvent(event camera.Event, matchedObjects []string) error
 
 	topic := fmt.Sprintf("%s/events/%s", c.topic, event.CameraName)
 	token := c.client.Publish(topic, 1, false, payload)
-	token.Wait()
-	return token.Error()
+	return c.waitPublish(token)
 }
 
 func (c *Client) PublishObjectCount(cameraName, label string, count int) {
 	topic := fmt.Sprintf("%s/%s/%s", c.topic, cameraName, label)
 	payload := strconv.Itoa(count)
 	token := c.client.Publish(topic, 1, true, payload)
-	token.Wait()
-	if err := token.Error(); err != nil {
+	if err := c.waitPublish(token); err != nil {
 		slog.Error("failed to publish object count", "camera", cameraName, "label", label, "error", err)
 	}
 }
@@ -136,12 +151,16 @@ func (c *Client) PublishSnapshot(cameraName, label string, jpegData []byte) {
 	// Per-label snapshot (e.g., vedetta/front_door/person/snapshot)
 	labelTopic := fmt.Sprintf("%s/%s/%s/snapshot", c.topic, cameraName, label)
 	token := c.client.Publish(labelTopic, 0, true, jpegData)
-	token.Wait()
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish label snapshot", "camera", cameraName, "label", label, "error", err)
+	}
 
 	// Latest snapshot for this camera (e.g., vedetta/front_door/snapshot)
 	cameraTopic := fmt.Sprintf("%s/%s/snapshot", c.topic, cameraName)
 	token = c.client.Publish(cameraTopic, 0, true, jpegData)
-	token.Wait()
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish camera snapshot", "camera", cameraName, "error", err)
+	}
 }
 
 func (c *Client) PublishDoorbell(cameraName, person string, jpegData []byte) {
@@ -152,13 +171,17 @@ func (c *Client) PublishDoorbell(cameraName, person string, jpegData []byte) {
 	})
 	topic := fmt.Sprintf("%s/%s/doorbell", c.topic, cameraName)
 	token := c.client.Publish(topic, 1, false, payload)
-	token.Wait()
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish doorbell", "camera", cameraName, "error", err)
+	}
 
 	// Also publish snapshot on the doorbell snapshot topic (retained)
 	if len(jpegData) > 0 {
 		snapTopic := fmt.Sprintf("%s/%s/doorbell/snapshot", c.topic, cameraName)
 		token = c.client.Publish(snapTopic, 0, true, jpegData)
-		token.Wait()
+		if err := c.waitPublish(token); err != nil {
+			slog.Error("failed to publish doorbell snapshot", "camera", cameraName, "error", err)
+		}
 	}
 }
 
@@ -182,9 +205,8 @@ func (c *Client) PublishPresence(pe camera.PresenceEvent, objectName string) {
 
 	topic := fmt.Sprintf("%s/presence/%s/%s", c.topic, sanitizeName(pe.ZoneName), pe.Label)
 	token := c.client.Publish(topic, 1, true, payload)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish presence", "zone", pe.ZoneName, "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish presence", "zone", pe.ZoneName, "error", err)
 	}
 }
 
@@ -202,9 +224,8 @@ func (c *Client) PublishObjectSighting(objectName string, event camera.Event) {
 
 	topic := fmt.Sprintf("%s/objects/%s/sighted", c.topic, sanitizeName(objectName))
 	token := c.client.Publish(topic, 1, true, payload)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish object sighting", "object", objectName, "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish object sighting", "object", objectName, "error", err)
 	}
 }
 
@@ -217,10 +238,9 @@ func (c *Client) PublishCameraStatus(cameraName string, online bool, stopped boo
 	}
 	topic := fmt.Sprintf("%s/camera/%s/status", c.topic, cameraName)
 	token := c.client.Publish(topic, 1, true, status)
-	token.Wait()
-	if token.Error() != nil {
+	if err := c.waitPublish(token); err != nil {
 		slog.Error("failed to publish camera status",
-			"camera", cameraName, "error", token.Error())
+			"camera", cameraName, "error", err)
 	}
 }
 
@@ -288,9 +308,8 @@ func (c *Client) publishPresenceSensorDiscovery(z ZoneInfo) {
 
 	topic := fmt.Sprintf("homeassistant/binary_sensor/%s/config", objectID)
 	token := c.client.Publish(topic, 1, true, payload)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish presence discovery", "zone", z.ZoneName, "label", z.Label, "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish presence discovery", "zone", z.ZoneName, "label", z.Label, "error", err)
 	}
 }
 
@@ -319,7 +338,9 @@ func (c *Client) publishObjectTriggerDiscovery(obj ObjectInfo) {
 
 	topic := fmt.Sprintf("homeassistant/device_automation/%s_sighted/config", objectID)
 	token := c.client.Publish(topic, 1, true, payload)
-	token.Wait()
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish object trigger discovery", "object", obj.Name, "error", err)
+	}
 }
 
 func (c *Client) publishCameraDiscovery(cameraName string) {
@@ -352,9 +373,8 @@ func (c *Client) publishCameraDiscovery(cameraName string) {
 
 	sensorTopic := fmt.Sprintf("homeassistant/binary_sensor/%s/config", objectID)
 	token := c.client.Publish(sensorTopic, 1, true, sensorPayload)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish discovery", "camera", cameraName, "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish discovery", "camera", cameraName, "error", err)
 	}
 
 	// Device trigger for detection events
@@ -374,9 +394,8 @@ func (c *Client) publishCameraDiscovery(cameraName string) {
 
 	triggerTopic := fmt.Sprintf("homeassistant/device_automation/%s_detection/config", objectID)
 	token = c.client.Publish(triggerTopic, 1, true, triggerPayload)
-	token.Wait()
-	if token.Error() != nil {
-		slog.Error("failed to publish trigger discovery", "camera", cameraName, "error", token.Error())
+	if err := c.waitPublish(token); err != nil {
+		slog.Error("failed to publish trigger discovery", "camera", cameraName, "error", err)
 	}
 
 	// MQTT image entity for detection snapshots
@@ -392,7 +411,9 @@ func (c *Client) publishCameraDiscovery(cameraName string) {
 	if err == nil {
 		imageTopic := fmt.Sprintf("homeassistant/image/%s_snapshot/config", objectID)
 		token = c.client.Publish(imageTopic, 1, true, imagePayload)
-		token.Wait()
+		if err := c.waitPublish(token); err != nil {
+			slog.Error("failed to publish image discovery", "camera", cameraName, "error", err)
+		}
 	}
 
 	slog.Info("published HA discovery", "camera", cameraName)
@@ -424,8 +445,7 @@ func (c *Client) PublishDiskStatus(freeBytes, totalBytes uint64, recordingPaused
 	body := BuildDiskStatusPayload(freeBytes, totalBytes, recordingPaused)
 	topic := c.topic + "/status/disk"
 	token := c.client.Publish(topic, 1, true, body)
-	token.Wait()
-	if err := token.Error(); err != nil {
+	if err := c.waitPublish(token); err != nil {
 		slog.Error("failed to publish disk status", "topic", topic, "error", err)
 	}
 }
@@ -476,8 +496,7 @@ func (c *Client) PublishDiskDiscovery() {
 			continue
 		}
 		token := c.client.Publish(discoveryTopic, 1, true, body)
-		token.Wait()
-		if err := token.Error(); err != nil {
+		if err := c.waitPublish(token); err != nil {
 			slog.Error("failed to publish disk discovery", "topic", discoveryTopic, "error", err)
 		}
 	}
