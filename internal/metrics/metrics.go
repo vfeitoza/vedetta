@@ -76,6 +76,24 @@ var (
 		"vedetta_detect_input_dropped_total",
 		"Decoded frames dropped because the detection pipeline was busy.",
 	))
+
+	// HTTPRequestsTotal counts HTTP requests that reach the application,
+	// bucketed by status class (2xx, 4xx, ...). High-frequency and long-lived
+	// endpoints (metrics scrape, health, SSE/WS streams) are excluded at the
+	// recording site to keep the rate meaningful.
+	HTTPRequestsTotal = register(NewCounterLabeled(
+		"vedetta_http_requests_total",
+		"HTTP requests handled by the application, by status class.",
+		"status",
+	))
+	// HTTPRequestDuration times HTTP request handling, bucketed by status
+	// class, with buckets spanning typical web latencies (1ms-10s).
+	HTTPRequestDuration = register(NewHistogramLabeled(
+		"vedetta_http_request_duration_seconds",
+		"HTTP request handling latency, by status class.",
+		"status",
+		[]float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	))
 )
 
 // WriteProm renders every registered instrument in Prometheus text format,
@@ -94,14 +112,16 @@ func ResetForTest() {
 	}
 }
 
-// Histogram is a per-camera latency histogram with fixed, ascending second
-// bounds. It observes a time.Duration and is safe for concurrent use.
+// Histogram is a latency histogram with fixed, ascending second bounds, keyed
+// by a single label whose name is labelName (default "camera"). It observes a
+// time.Duration and is safe for concurrent use.
 type Histogram struct {
-	name     string
-	help     string
-	bounds   []float64 // upper bounds in seconds, ascending, excludes +Inf
-	boundsNs []int64   // same bounds in nanoseconds, for exact comparison
-	series   sync.Map  // camera string -> *histSeries
+	name      string
+	help      string
+	labelName string
+	bounds    []float64 // upper bounds in seconds, ascending, excludes +Inf
+	boundsNs  []int64   // same bounds in nanoseconds, for exact comparison
+	series    sync.Map  // label value string -> *histSeries
 }
 
 type histSeries struct {
@@ -118,19 +138,25 @@ type histSeries struct {
 	count  uint64
 }
 
-// NewHistogram builds a standalone histogram. bounds must be ascending second
-// values and exclude +Inf (it is appended implicitly).
+// NewHistogram builds a standalone histogram labeled by camera. bounds must be
+// ascending second values and exclude +Inf (it is appended implicitly).
 func NewHistogram(name, help string, bounds []float64) *Histogram {
+	return NewHistogramLabeled(name, help, "camera", bounds)
+}
+
+// NewHistogramLabeled builds a standalone histogram keyed by a single label
+// named labelName. bounds must be ascending second values and exclude +Inf.
+func NewHistogramLabeled(name, help, labelName string, bounds []float64) *Histogram {
 	boundsNs := make([]int64, len(bounds))
 	for i, b := range bounds {
 		boundsNs[i] = int64(b * float64(time.Second))
 	}
-	return &Histogram{name: name, help: help, bounds: bounds, boundsNs: boundsNs}
+	return &Histogram{name: name, help: help, labelName: labelName, bounds: bounds, boundsNs: boundsNs}
 }
 
-// Observe records one duration for the given camera.
-func (h *Histogram) Observe(camera string, d time.Duration) {
-	s := h.seriesFor(camera)
+// Observe records one duration for the given label value.
+func (h *Histogram) Observe(label string, d time.Duration) {
+	s := h.seriesFor(label)
 	ns := d.Nanoseconds()
 
 	// First bucket whose upper bound is >= the observation; else the +Inf
@@ -149,12 +175,12 @@ func (h *Histogram) Observe(camera string, d time.Duration) {
 	s.mu.Unlock()
 }
 
-func (h *Histogram) seriesFor(camera string) *histSeries {
-	if v, ok := h.series.Load(camera); ok {
+func (h *Histogram) seriesFor(label string) *histSeries {
+	if v, ok := h.series.Load(label); ok {
 		return v.(*histSeries)
 	}
 	s := &histSeries{counts: make([]uint64, len(h.bounds)+1)}
-	actual, _ := h.series.LoadOrStore(camera, s)
+	actual, _ := h.series.LoadOrStore(label, s)
 	return actual.(*histSeries)
 }
 
@@ -163,10 +189,10 @@ func (h *Histogram) WriteProm(w io.Writer) {
 	fmt.Fprintf(w, "# HELP %s %s\n", h.name, h.help)
 	fmt.Fprintf(w, "# TYPE %s histogram\n", h.name)
 
-	for _, camera := range h.sortedCameras() {
-		v, _ := h.series.Load(camera)
+	for _, value := range h.sortedValues() {
+		v, _ := h.series.Load(value)
 		s := v.(*histSeries)
-		label := escapeLabel(camera)
+		label := escapeLabel(value)
 
 		// Snapshot the series under its lock so the emitted buckets, sum, and
 		// count are mutually consistent even while frames are being observed.
@@ -180,27 +206,27 @@ func (h *Histogram) WriteProm(w io.Writer) {
 		var cumulative uint64
 		for i, b := range h.bounds {
 			cumulative += counts[i]
-			fmt.Fprintf(w, "%s_bucket{camera=\"%s\",le=\"%s\"} %d\n",
-				h.name, label, formatBound(b), cumulative)
+			fmt.Fprintf(w, "%s_bucket{%s=\"%s\",le=\"%s\"} %d\n",
+				h.name, h.labelName, label, formatBound(b), cumulative)
 		}
 		// +Inf overflow bucket equals the total count.
 		cumulative += counts[len(h.bounds)]
-		fmt.Fprintf(w, "%s_bucket{camera=\"%s\",le=\"+Inf\"} %d\n", h.name, label, cumulative)
+		fmt.Fprintf(w, "%s_bucket{%s=\"%s\",le=\"+Inf\"} %d\n", h.name, h.labelName, label, cumulative)
 
 		sum := float64(sumNs) / float64(time.Second)
-		fmt.Fprintf(w, "%s_sum{camera=\"%s\"} %s\n", h.name, label, formatFloat(sum))
-		fmt.Fprintf(w, "%s_count{camera=\"%s\"} %d\n", h.name, label, total)
+		fmt.Fprintf(w, "%s_sum{%s=\"%s\"} %s\n", h.name, h.labelName, label, formatFloat(sum))
+		fmt.Fprintf(w, "%s_count{%s=\"%s\"} %d\n", h.name, h.labelName, label, total)
 	}
 }
 
-func (h *Histogram) sortedCameras() []string {
-	var cameras []string
+func (h *Histogram) sortedValues() []string {
+	var values []string
 	h.series.Range(func(k, _ any) bool {
-		cameras = append(cameras, k.(string))
+		values = append(values, k.(string))
 		return true
 	})
-	sort.Strings(cameras)
-	return cameras
+	sort.Strings(values)
+	return values
 }
 
 func (h *Histogram) reset() {
@@ -210,26 +236,34 @@ func (h *Histogram) reset() {
 	})
 }
 
-// Counter is a per-camera monotonic counter, safe for concurrent use.
+// Counter is a monotonic counter keyed by a single label whose name is
+// labelName (default "camera"), safe for concurrent use.
 type Counter struct {
-	name   string
-	help   string
-	series sync.Map // camera string -> *atomic.Int64
+	name      string
+	help      string
+	labelName string
+	series    sync.Map // label value string -> *atomic.Int64
 }
 
-// NewCounter builds a standalone counter.
+// NewCounter builds a standalone counter labeled by camera.
 func NewCounter(name, help string) *Counter {
-	return &Counter{name: name, help: help}
+	return NewCounterLabeled(name, help, "camera")
 }
 
-// Inc adds one to the camera's counter.
-func (c *Counter) Inc(camera string) { c.Add(camera, 1) }
+// NewCounterLabeled builds a standalone counter keyed by a single label named
+// labelName.
+func NewCounterLabeled(name, help, labelName string) *Counter {
+	return &Counter{name: name, help: help, labelName: labelName}
+}
 
-// Add adds n to the camera's counter.
-func (c *Counter) Add(camera string, n int64) {
-	v, ok := c.series.Load(camera)
+// Inc adds one to the given label value's counter.
+func (c *Counter) Inc(label string) { c.Add(label, 1) }
+
+// Add adds n to the given label value's counter.
+func (c *Counter) Add(label string, n int64) {
+	v, ok := c.series.Load(label)
 	if !ok {
-		v, _ = c.series.LoadOrStore(camera, new(atomic.Int64))
+		v, _ = c.series.LoadOrStore(label, new(atomic.Int64))
 	}
 	v.(*atomic.Int64).Add(n)
 }
@@ -239,16 +273,16 @@ func (c *Counter) WriteProm(w io.Writer) {
 	fmt.Fprintf(w, "# HELP %s %s\n", c.name, c.help)
 	fmt.Fprintf(w, "# TYPE %s counter\n", c.name)
 
-	var cameras []string
+	var values []string
 	c.series.Range(func(k, _ any) bool {
-		cameras = append(cameras, k.(string))
+		values = append(values, k.(string))
 		return true
 	})
-	sort.Strings(cameras)
+	sort.Strings(values)
 
-	for _, camera := range cameras {
-		v, _ := c.series.Load(camera)
-		fmt.Fprintf(w, "%s{camera=\"%s\"} %d\n", c.name, escapeLabel(camera), v.(*atomic.Int64).Load())
+	for _, value := range values {
+		v, _ := c.series.Load(value)
+		fmt.Fprintf(w, "%s{%s=\"%s\"} %d\n", c.name, c.labelName, escapeLabel(value), v.(*atomic.Int64).Load())
 	}
 }
 

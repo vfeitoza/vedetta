@@ -26,6 +26,7 @@ import (
 	"github.com/rvben/vedetta/internal/camera"
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
+	"github.com/rvben/vedetta/internal/metrics"
 	"github.com/rvben/vedetta/internal/notify"
 	"github.com/rvben/vedetta/internal/recording"
 	"github.com/rvben/vedetta/internal/rtsp"
@@ -613,9 +614,18 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 		lw := &statusLoggingResponseWriter{ResponseWriter: w}
 		start := time.Now()
 		next.ServeHTTP(lw, r)
+		elapsed := time.Since(start)
 		status := lw.status
 		if status == 0 {
 			status = http.StatusOK
+		}
+		// Record RED metrics for the same set of requests we trace: excludes
+		// the metrics scrape (self-reference), health polls, and long-lived
+		// SSE/WS streams whose durations would otherwise swamp the histogram.
+		if shouldTraceRequest(r) {
+			class := statusClass(status)
+			metrics.HTTPRequestsTotal.Inc(class)
+			metrics.HTTPRequestDuration.Observe(class, elapsed)
 		}
 		slog.Info("http request",
 			"method", r.Method,
@@ -625,9 +635,18 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 			"if_none_match", r.Header.Get("If-None-Match"),
 			"cache_control", r.Header.Get("Cache-Control"),
 			"remote", r.RemoteAddr,
-			"dur_ms", time.Since(start).Milliseconds(),
+			"dur_ms", elapsed.Milliseconds(),
 		)
 	})
+}
+
+// statusClass maps an HTTP status code to its class label (e.g. 404 -> "4xx").
+// Codes outside 100-599 render as "other".
+func statusClass(code int) string {
+	if code < 100 || code > 599 {
+		return "other"
+	}
+	return fmt.Sprintf("%dxx", code/100)
 }
 
 func formatBytes(bytes int64) string {

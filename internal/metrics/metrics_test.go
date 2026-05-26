@@ -98,6 +98,57 @@ func TestCounterPerCameraMonotonicSortedEscaped(t *testing.T) {
 	}
 }
 
+// A labeled instrument renders its series under a custom label name instead of
+// the default "camera", so the same histogram and counter machinery can
+// describe non-camera dimensions such as HTTP status class.
+func TestLabeledInstrumentsUseCustomLabelName(t *testing.T) {
+	c := NewCounterLabeled("vedetta_http_requests_total", "requests", "status")
+	c.Inc("2xx")
+	c.Add("5xx", 3)
+
+	gotCounter := render(c)
+	wantCounter := strings.Join([]string{
+		"# HELP vedetta_http_requests_total requests",
+		"# TYPE vedetta_http_requests_total counter",
+		`vedetta_http_requests_total{status="2xx"} 1`,
+		`vedetta_http_requests_total{status="5xx"} 3`,
+		"",
+	}, "\n")
+	if gotCounter != wantCounter {
+		t.Errorf("labeled counter output mismatch:\n--- got ---\n%s\n--- want ---\n%s", gotCounter, wantCounter)
+	}
+
+	h := NewHistogramLabeled("vedetta_http_request_duration_seconds", "latency", "status", []float64{0.01})
+	h.Observe("4xx", time.Millisecond)
+
+	gotHist := render(h)
+	for _, want := range []string{
+		`vedetta_http_request_duration_seconds_bucket{status="4xx",le="0.01"} 1`,
+		`vedetta_http_request_duration_seconds_bucket{status="4xx",le="+Inf"} 1`,
+		`vedetta_http_request_duration_seconds_count{status="4xx"} 1`,
+	} {
+		if !strings.Contains(gotHist, want) {
+			t.Errorf("labeled histogram missing %q:\n%s", want, gotHist)
+		}
+	}
+}
+
+// The default constructors keep the "camera" label so the existing
+// detection-pipeline instruments stay byte-stable.
+func TestDefaultConstructorsKeepCameraLabel(t *testing.T) {
+	c := NewCounter("vedetta_test_total", "h")
+	c.Inc("front")
+	if !strings.Contains(render(c), `vedetta_test_total{camera="front"} 1`) {
+		t.Errorf("default counter dropped the camera label:\n%s", render(c))
+	}
+
+	h := NewHistogram("vedetta_test_seconds", "h", []float64{0.01})
+	h.Observe("front", time.Millisecond)
+	if !strings.Contains(render(h), `vedetta_test_seconds_count{camera="front"} 1`) {
+		t.Errorf("default histogram dropped the camera label:\n%s", render(h))
+	}
+}
+
 // The package WriteProm renders every registered instrument; ResetForTest
 // clears the accumulated series so tests do not bleed into one another.
 func TestPackageWritePromAndReset(t *testing.T) {
