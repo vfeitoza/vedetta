@@ -869,6 +869,20 @@ func TestTracingValidationRejectsBadProtocol(t *testing.T) {
 	}
 }
 
+func TestLoggingValidationRejectsBadProtocol(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"logging:\n  enabled: true\n  endpoint: otel:4318\n  protocol: smoke\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid logging.protocol")
+	}
+}
+
 func TestLoggingDisabledByDefault(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Logging.Enabled {

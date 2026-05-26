@@ -604,6 +604,18 @@ func Load(path string) (*Config, error) {
 		cfg.Tracing.ServiceName = "vedetta"
 	}
 
+	if cfg.Logging.Protocol == "" {
+		cfg.Logging.Protocol = "http"
+	}
+	switch cfg.Logging.Protocol {
+	case "http", "http/protobuf", "grpc":
+	default:
+		return nil, fmt.Errorf("logging.protocol: must be \"http\", \"http/protobuf\", or \"grpc\"")
+	}
+	if cfg.Logging.ServiceName == "" {
+		cfg.Logging.ServiceName = "vedetta"
+	}
+
 	return cfg, nil
 }
 
