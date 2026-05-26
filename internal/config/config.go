@@ -592,6 +592,10 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Normalize to match the runtime resolver (otelexport.ParseProtocol): trim
+	// and lower-case so values like "GRPC" or " grpc " validate and are stored
+	// canonically rather than rejected here but accepted at export time.
+	cfg.Tracing.Protocol = strings.ToLower(strings.TrimSpace(cfg.Tracing.Protocol))
 	if cfg.Tracing.Protocol == "" {
 		cfg.Tracing.Protocol = "http"
 	}
@@ -604,6 +608,7 @@ func Load(path string) (*Config, error) {
 		cfg.Tracing.ServiceName = "vedetta"
 	}
 
+	cfg.Logging.Protocol = strings.ToLower(strings.TrimSpace(cfg.Logging.Protocol))
 	if cfg.Logging.Protocol == "" {
 		cfg.Logging.Protocol = "http"
 	}

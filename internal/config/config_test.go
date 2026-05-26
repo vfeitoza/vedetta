@@ -883,6 +883,42 @@ func TestLoggingValidationRejectsBadProtocol(t *testing.T) {
 	}
 }
 
+func TestTracingProtocolNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"tracing:\n  enabled: true\n  endpoint: otel:4318\n  protocol: GRPC\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected a normalizable tracing.protocol: %v", err)
+	}
+	if cfg.Tracing.Protocol != "grpc" {
+		t.Errorf("tracing.protocol = %q, want normalized \"grpc\"", cfg.Tracing.Protocol)
+	}
+}
+
+func TestLoggingProtocolNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"logging:\n  enabled: true\n  endpoint: otel:4318\n  protocol: \" grpc \"\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected a normalizable logging.protocol: %v", err)
+	}
+	if cfg.Logging.Protocol != "grpc" {
+		t.Errorf("logging.protocol = %q, want normalized \"grpc\"", cfg.Logging.Protocol)
+	}
+}
+
 func TestLoggingDisabledByDefault(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Logging.Enabled {
