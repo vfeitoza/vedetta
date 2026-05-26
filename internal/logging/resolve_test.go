@@ -99,4 +99,14 @@ func TestResolveFallbackInheritsTracingTransport(t *testing.T) {
 	}, get(map[string]string{"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/protobuf"})); got != "http/protobuf" {
 		t.Errorf("logs env must override tracing fallback protocol: %q", got)
 	}
+
+	// In the fallback case the GENERIC protocol env must NOT override the tracing
+	// fallback protocol - that would pair the wrong wire with the tracing
+	// endpoint. Only a logs-specific protocol (config or env) may override.
+	if got := resolveProtocol(Config{
+		FallbackEndpoint: "trace:4317",
+		FallbackProtocol: "grpc",
+	}, get(map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"})); got != "grpc" {
+		t.Errorf("generic env must not break fallback atomicity: %q", got)
+	}
 }

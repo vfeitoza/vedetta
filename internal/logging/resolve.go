@@ -52,11 +52,12 @@ func resolveEndpoint(cfg Config) (ep otelexport.Endpoint, explicit bool) {
 
 // resolveProtocol picks the OTLP transport for logs. The protocol selects the
 // exporter constructor, so it must be decided up front. Logging's own protocol
-// wins, then logs-specific env, then generic env (per the OTLP spec). When logs
-// reuse the tracing endpoint and nothing above selected a protocol, tracing's
-// protocol is reused so a scheme-less gRPC collector is not probed with HTTP.
-// The tracing protocol is consulted only while falling back, so it never leaks
-// onto a logging endpoint of its own. The default is http/protobuf.
+// wins, then logs-specific env. When logs reuse the tracing endpoint, tracing's
+// protocol is reused next - ahead of the generic env - so a generic
+// OTEL_EXPORTER_OTLP_PROTOCOL cannot pair the wrong wire with the tracing
+// endpoint; the transport stays atomic. The tracing protocol is consulted only
+// while falling back, so it never leaks onto a logging endpoint of its own.
+// Otherwise the generic env applies, then the default http/protobuf.
 func resolveProtocol(cfg Config, getenv func(string) string) string {
 	if p := otelexport.ParseProtocol(cfg.Protocol); p != "" {
 		return p
@@ -64,13 +65,13 @@ func resolveProtocol(cfg Config, getenv func(string) string) string {
 	if p := otelexport.ParseProtocol(getenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")); p != "" {
 		return p
 	}
-	if p := otelexport.ParseProtocol(getenv("OTEL_EXPORTER_OTLP_PROTOCOL")); p != "" {
-		return p
-	}
 	if usingFallback(cfg) {
 		if p := otelexport.ParseProtocol(cfg.FallbackProtocol); p != "" {
 			return p
 		}
+	}
+	if p := otelexport.ParseProtocol(getenv("OTEL_EXPORTER_OTLP_PROTOCOL")); p != "" {
+		return p
 	}
 	return "http/protobuf"
 }
