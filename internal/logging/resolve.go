@@ -6,8 +6,11 @@ import (
 	"github.com/rvben/vedetta/internal/otelexport"
 )
 
-// Config mirrors config.LoggingConfig plus the tracing endpoint fallback. Kept
-// here so the logging package does not import config.
+// Config mirrors config.LoggingConfig plus the tracing transport fallback. Kept
+// here so the logging package does not import config. The Fallback* fields carry
+// the tracing exporter's transport so that, when logging specifies no endpoint of
+// its own, logs reuse tracing's endpoint, protocol, and insecure flag as one unit
+// rather than a mismatched mix.
 type Config struct {
 	Enabled          bool
 	Endpoint         string
@@ -15,6 +18,15 @@ type Config struct {
 	Insecure         bool
 	ServiceName      string
 	FallbackEndpoint string // tracing endpoint, used when Endpoint is empty
+	FallbackProtocol string // tracing protocol, used when Endpoint is empty
+	FallbackInsecure bool   // tracing insecure flag, used when Endpoint is empty
+}
+
+// usingFallback reports whether logs have no endpoint of their own and will
+// reuse the tracing endpoint. Endpoint/protocol/insecure fallback are coupled
+// through this predicate so the tracing transport is reused atomically.
+func usingFallback(cfg Config) bool {
+	return strings.TrimSpace(cfg.Endpoint) == "" && strings.TrimSpace(cfg.FallbackEndpoint) != ""
 }
 
 // resolveEndpoint decides the explicit OTLP endpoint for logs. It only ever
@@ -25,21 +37,26 @@ type Config struct {
 // OTEL_EXPORTER_OTLP_ENDPOINT). The generic env is never read here, because
 // doing so and passing it explicitly would override the SDK's signal-specific
 // precedence. Config/fallback values are trimmed so a whitespace endpoint
-// defers to env rather than becoming a bogus explicit option.
+// defers to env rather than becoming a bogus explicit option. When the tracing
+// endpoint is reused, its paired insecure flag is used (not the logging one),
+// so a scheme-less plaintext tracing collector is not probed over TLS.
 func resolveEndpoint(cfg Config) (ep otelexport.Endpoint, explicit bool) {
-	raw := strings.TrimSpace(cfg.Endpoint)
-	if raw == "" {
-		raw = strings.TrimSpace(cfg.FallbackEndpoint)
+	if raw := strings.TrimSpace(cfg.Endpoint); raw != "" {
+		return otelexport.Classify(raw, cfg.Insecure), true
 	}
-	if raw == "" {
-		return otelexport.Endpoint{}, false
+	if raw := strings.TrimSpace(cfg.FallbackEndpoint); raw != "" {
+		return otelexport.Classify(raw, cfg.FallbackInsecure), true
 	}
-	return otelexport.Classify(raw, cfg.Insecure), true
+	return otelexport.Endpoint{}, false
 }
 
 // resolveProtocol picks the OTLP transport for logs. The protocol selects the
-// exporter constructor, so it must be decided up front. Logs-specific env wins
-// over the generic env, per the OTLP spec; the default is http/protobuf.
+// exporter constructor, so it must be decided up front. Logging's own protocol
+// wins, then logs-specific env, then generic env (per the OTLP spec). When logs
+// reuse the tracing endpoint and nothing above selected a protocol, tracing's
+// protocol is reused so a scheme-less gRPC collector is not probed with HTTP.
+// The tracing protocol is consulted only while falling back, so it never leaks
+// onto a logging endpoint of its own. The default is http/protobuf.
 func resolveProtocol(cfg Config, getenv func(string) string) string {
 	if p := otelexport.ParseProtocol(cfg.Protocol); p != "" {
 		return p
@@ -49,6 +66,11 @@ func resolveProtocol(cfg Config, getenv func(string) string) string {
 	}
 	if p := otelexport.ParseProtocol(getenv("OTEL_EXPORTER_OTLP_PROTOCOL")); p != "" {
 		return p
+	}
+	if usingFallback(cfg) {
+		if p := otelexport.ParseProtocol(cfg.FallbackProtocol); p != "" {
+			return p
+		}
 	}
 	return "http/protobuf"
 }

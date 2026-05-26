@@ -56,3 +56,47 @@ func TestResolveProtocolPrefersConfigThenLogsEnvThenGenericThenDefault(t *testin
 		t.Errorf("default protocol must be http/protobuf: %q", got)
 	}
 }
+
+func TestResolveFallbackInheritsTracingTransport(t *testing.T) {
+	noenv := func(string) string { return "" }
+
+	// Falling back to a scheme-less tracing endpoint inherits the tracing
+	// insecure flag, not the logging one.
+	ep, explicit := resolveEndpoint(Config{
+		FallbackEndpoint: "trace:4317",
+		FallbackInsecure: true,
+		Insecure:         false, // logging default; must NOT be used for the fallback
+	})
+	if !explicit || ep.Value != "trace:4317" || !ep.Insecure {
+		t.Fatalf("fallback must inherit tracing insecure: explicit=%v ep=%+v", explicit, ep)
+	}
+
+	// Falling back to the tracing endpoint also reuses tracing's protocol, so a
+	// gRPC collector isn't probed with HTTP.
+	if got := resolveProtocol(Config{
+		FallbackEndpoint: "trace:4317",
+		FallbackProtocol: "grpc",
+	}, noenv); got != "grpc" {
+		t.Errorf("fallback must reuse tracing protocol: %q", got)
+	}
+
+	// When logging has its OWN endpoint, the tracing fallback protocol must NOT
+	// leak in (it would mismatch logging's endpoint).
+	if got := resolveProtocol(Config{
+		Endpoint:         "http://logs:4318",
+		FallbackProtocol: "grpc",
+	}, noenv); got != "http/protobuf" {
+		t.Errorf("own endpoint must not inherit tracing protocol: %q", got)
+	}
+
+	// An explicit logs protocol env still beats the tracing fallback protocol.
+	get := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	if got := resolveProtocol(Config{
+		FallbackEndpoint: "trace:4317",
+		FallbackProtocol: "grpc",
+	}, get(map[string]string{"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/protobuf"})); got != "http/protobuf" {
+		t.Errorf("logs env must override tracing fallback protocol: %q", got)
+	}
+}
