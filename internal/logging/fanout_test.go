@@ -257,3 +257,31 @@ func TestFanoutWithAttrsGivesEachArmIndependentSlice(t *testing.T) {
 		t.Errorf("caller's attrs slice must not be mutated, got %v", attrs)
 	}
 }
+
+func TestFanoutWithAttrsIsolatesGroupedAttrs(t *testing.T) {
+	var observerSaw string
+	// arm 0 rewrites a nested group attr in place (it owns its slice).
+	mutator := attrCaptureFunc(func(a []slog.Attr) {
+		if len(a) > 0 && a[0].Value.Kind() == slog.KindGroup {
+			if g := a[0].Value.Group(); len(g) > 0 {
+				g[0] = slog.String("inner", "clobbered")
+			}
+		}
+	})
+	// arm 1 reads the nested group attr; it must not see the mutator's clobber.
+	observer := attrCaptureFunc(func(a []slog.Attr) {
+		if len(a) > 0 && a[0].Value.Kind() == slog.KindGroup {
+			if g := a[0].Value.Group(); len(g) > 0 {
+				observerSaw = g[0].Value.String()
+			}
+		}
+	})
+
+	f := newFanout(mutator, observer)
+	attrs := []slog.Attr{slog.Group("grp", slog.String("inner", "orig"))}
+	_ = f.WithAttrs(attrs)
+
+	if observerSaw != "orig" {
+		t.Errorf("observer arm must see its own group copy, got %q", observerSaw)
+	}
+}

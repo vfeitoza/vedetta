@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"slices"
 )
 
 // fanoutHandler broadcasts every record to all arms. It is used to tee logs to
@@ -43,11 +42,30 @@ func (f *fanoutHandler) Handle(ctx context.Context, r slog.Record) error {
 	return errs
 }
 
+// cloneAttrs returns a deep copy of attrs so each fanout arm owns its slice and
+// any nested group backing arrays. slog's WithAttrs contract grants the handler
+// ownership of the slice it receives; recursing into groups keeps that ownership
+// true per arm even when an arm rewrites grouped attrs in place. Only group
+// values are recursed; scalar/immutable values are copied by value.
+func cloneAttrs(attrs []slog.Attr) []slog.Attr {
+	if attrs == nil {
+		return nil
+	}
+	out := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		if a.Value.Kind() == slog.KindGroup {
+			a.Value = slog.GroupValue(cloneAttrs(a.Value.Group())...)
+		}
+		out[i] = a
+	}
+	return out
+}
+
 func (f *fanoutHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	derived := make([]slog.Handler, len(f.arms))
 	for i, h := range f.arms {
-		// Each arm owns its attrs slice per the slog contract; give each its own copy.
-		derived[i] = h.WithAttrs(slices.Clone(attrs))
+		// Each arm owns its attrs (incl. nested groups) per the slog contract.
+		derived[i] = h.WithAttrs(cloneAttrs(attrs))
 	}
 	return &fanoutHandler{arms: derived}
 }
