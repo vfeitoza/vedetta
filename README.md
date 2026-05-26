@@ -193,6 +193,42 @@ The default topic prefix is `vedetta`. Messages are published under:
 
 The web dashboard is served at `/` and uses htmx partials for dynamic updates.
 
+## Monitoring
+
+`/metrics` serves Prometheus metrics: HTTP request rate and latency by status
+class, per-camera detection and decode latency, frames processed/dropped,
+camera reconnect counts, and storage/disk usage. Like the rest of the API the
+endpoint requires authentication, so its labels (camera names, online state,
+activity counts) are never readable anonymously.
+
+Scrape it with a least-privilege bearer token. Create one scoped to
+`metrics:read` via `POST /api/tokens`. A token principal can only grant scopes
+it already holds, so mint the scrape token from an admin browser session or from
+a token that carries the `*` scope. The `metrics:read` scope can read `/metrics`
+and nothing else, so a leaked scrape credential cannot pull snapshots, events,
+or the people/faces database:
+
+```sh
+curl -X POST https://vedetta-host/api/tokens \
+  -H "Authorization: Bearer <token with the * scope>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "prometheus", "scopes": ["metrics:read"]}'
+```
+
+The response returns the raw token once; use it as the scrape credential:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: vedetta
+    scheme: https
+    authorization:
+      type: Bearer
+      credentials: "<metrics:read token>"
+    static_configs:
+      - targets: ["vedetta-host:5050"]
+```
+
 ## Development
 
 Prerequisites: Go 1.22+. Vedetta no longer downloads the ONNX model or OpenH264 at runtime; install them ahead of time or bundle them with your deployment.

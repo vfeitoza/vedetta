@@ -897,6 +897,13 @@ func (p *Principal) Allows(method, path string) bool {
 	if !strings.HasPrefix(path, "/api/") && path != "/metrics" {
 		return false
 	}
+	// /metrics accepts a dedicated least-privilege scrape scope alongside the
+	// general read scopes, so a long-lived Prometheus token can read metrics
+	// without also being able to pull snapshots, events, or the people/faces
+	// database. Only safe methods qualify; metrics:read grants nothing else.
+	if path == "/metrics" {
+		return isSafeMethod(method) && p.HasAnyScope("metrics:read", "api:read", "api:*", "*")
+	}
 	if path == "/api/tokens" || strings.HasPrefix(path, "/api/tokens/") {
 		if isSafeMethod(method) {
 			return p.HasAnyScope("tokens:read", "tokens:write", "api:*", "*")

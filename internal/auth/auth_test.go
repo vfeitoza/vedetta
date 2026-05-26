@@ -286,6 +286,49 @@ func TestAdminScopeDoesNotOverRestrict(t *testing.T) {
 	}
 }
 
+// metrics:read is a least-privilege scrape scope: it may read /metrics and
+// nothing else, so a leaked Prometheus scrape token cannot pull snapshots,
+// events, or the people/faces database.
+func TestMetricsReadScopeIsLeastPrivilege(t *testing.T) {
+	metricsTok := &Principal{Username: "prometheus", Kind: AuthKindToken, Scopes: []string{"metrics:read"}}
+
+	if !metricsTok.Allows(http.MethodGet, "/metrics") {
+		t.Error("metrics:read must allow GET /metrics")
+	}
+
+	denied := [][2]string{
+		{http.MethodGet, "/api/cameras"},
+		{http.MethodGet, "/api/events"},
+		{http.MethodGet, "/api/settings/mqtt"},
+		{http.MethodGet, "/api/tokens"},
+		{http.MethodPost, "/api/cameras/test-rtsp"},
+		{http.MethodDelete, "/api/events"},
+		{http.MethodGet, "/"},
+		// A read scope must not grant a write even on its own endpoint.
+		{http.MethodPost, "/metrics"},
+	}
+	for _, d := range denied {
+		if metricsTok.Allows(d[0], d[1]) {
+			t.Errorf("metrics:read must be denied on %s %s", d[0], d[1])
+		}
+	}
+}
+
+// Adding the metrics:read carve-out must not narrow the endpoint: tokens that
+// already could read the whole API keep reading /metrics.
+func TestMetricsEndpointAcceptsExistingReadScopes(t *testing.T) {
+	for _, sc := range [][]string{{"api:read"}, {"api:*"}, {"*"}} {
+		p := &Principal{Username: "admin", Kind: AuthKindToken, Scopes: sc}
+		if !p.Allows(http.MethodGet, "/metrics") {
+			t.Errorf("scope %v must still allow GET /metrics", sc)
+		}
+	}
+	session := &Principal{Username: "admin", Kind: AuthKindSession}
+	if !session.Allows(http.MethodGet, "/metrics") {
+		t.Error("session must still allow GET /metrics")
+	}
+}
+
 func TestChecker_DBAuth(t *testing.T) {
 	dir := t.TempDir()
 	db, err := storage.New(filepath.Join(dir, "test.db"))
