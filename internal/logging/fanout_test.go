@@ -223,3 +223,37 @@ func TestFanoutWithAttrsAndGroupPropagateAndDoNotMutateReceiver(t *testing.T) {
 		t.Error("original fanout must remain functional and unmodified")
 	}
 }
+
+// attrCaptureFunc is a slog.Handler whose WithAttrs runs a callback on the
+// slice it is handed (the slog contract says the handler owns that slice), then
+// returns itself. It lets a test prove the fanout gives each arm an independent
+// attrs slice.
+type attrCaptureFunc func([]slog.Attr)
+
+func (attrCaptureFunc) Enabled(context.Context, slog.Level) bool  { return true }
+func (attrCaptureFunc) Handle(context.Context, slog.Record) error { return nil }
+func (f attrCaptureFunc) WithAttrs(a []slog.Attr) slog.Handler    { f(a); return f }
+func (f attrCaptureFunc) WithGroup(string) slog.Handler           { return f }
+
+func TestFanoutWithAttrsGivesEachArmIndependentSlice(t *testing.T) {
+	var seenByObserver []slog.Attr
+	// arm 0 mutates the slice it owns (allowed by the contract): clobbers elem 0.
+	mutator := attrCaptureFunc(func(a []slog.Attr) {
+		if len(a) > 0 {
+			a[0] = slog.String("clobbered", "yes")
+		}
+	})
+	// arm 1 records what it was handed; it must not see the mutator's clobber.
+	observer := attrCaptureFunc(func(a []slog.Attr) { seenByObserver = a })
+
+	f := newFanout(mutator, observer)
+	attrs := []slog.Attr{slog.String("orig", "val")}
+	_ = f.WithAttrs(attrs)
+
+	if len(seenByObserver) != 1 || seenByObserver[0].Key != "orig" {
+		t.Errorf("observer arm must see its own copy, got %v", seenByObserver)
+	}
+	if attrs[0].Key != "orig" {
+		t.Errorf("caller's attrs slice must not be mutated, got %v", attrs)
+	}
+}

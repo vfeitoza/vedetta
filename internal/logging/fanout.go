@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 )
 
 // fanoutHandler broadcasts every record to all arms. It is used to tee logs to
@@ -45,7 +46,8 @@ func (f *fanoutHandler) Handle(ctx context.Context, r slog.Record) error {
 func (f *fanoutHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	derived := make([]slog.Handler, len(f.arms))
 	for i, h := range f.arms {
-		derived[i] = h.WithAttrs(attrs)
+		// Each arm owns its attrs slice per the slog contract; give each its own copy.
+		derived[i] = h.WithAttrs(slices.Clone(attrs))
 	}
 	return &fanoutHandler{arms: derived}
 }
