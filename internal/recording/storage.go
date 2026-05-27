@@ -435,20 +435,16 @@ func resolveWindow(req DeleteRequest) (from, to time.Time, err error) {
 // to clip and snapshot files once they are deleted from disk. *storage.DB
 // satisfies it.
 type clipRefClearer interface {
-	UpdateEventClipPath(eventID, clipPath string) error
+	ClearEventClip(eventID string) error
 	UpdateEventClipAvailability(eventID string, available bool) error
 	UpdateEventSnapshotPath(eventID, snapshotPath string) error
 	UpdateEventSnapshotAvailability(eventID string, available bool) error
 }
 
-// clearClipRef removes the DB reference to a deleted clip file. It joins both
-// update errors so a failure leaves a clear trail instead of silently leaving
-// the row pointing at a file that no longer exists.
+// clearClipRef removes the DB reference to a deleted clip file, zeroing the
+// clip path, availability, size, and recompression state in one write.
 func clearClipRef(db clipRefClearer, eventID string) error {
-	return errors.Join(
-		db.UpdateEventClipPath(eventID, ""),
-		db.UpdateEventClipAvailability(eventID, false),
-	)
+	return db.ClearEventClip(eventID)
 }
 
 // clearSnapshotRef removes the DB reference to a deleted snapshot file.

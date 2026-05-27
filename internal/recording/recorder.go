@@ -215,7 +215,7 @@ func (r *Recorder) StartContinuousRecording(ctx context.Context, stoppedCameras 
 
 // SaveClip extracts a clip around the event timestamp and persists its
 // path on the event row. Blocks on segmentOpMu so a concurrent manual
-// delete cannot run between ExtractClip and UpdateEventClipPath.
+// delete cannot run between ExtractClip and SetEventClip.
 func (r *Recorder) SaveClip(ctx context.Context, event camera.Event) (ClipStats, error) {
 	r.segmentOpMu.Lock()
 	defer r.segmentOpMu.Unlock()
@@ -228,8 +228,8 @@ func (r *Recorder) saveClipLocked(ctx context.Context, event camera.Event) (Clip
 		return stats, fmt.Errorf("extract clip: %w", err)
 	}
 
-	if err := r.db.UpdateEventClipPath(event.ID, clipPath); err != nil {
-		slog.Error("failed to update event clip path", "error", err)
+	if err := r.db.SetEventClip(event.ID, clipPath, stats.OutputBytes); err != nil {
+		slog.Error("failed to record event clip", "error", err)
 	}
 
 	slog.Info("clip saved",

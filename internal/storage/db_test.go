@@ -300,21 +300,6 @@ func TestCountEventsToday(t *testing.T) {
 	}
 }
 
-func TestUpdateEventClipPath(t *testing.T) {
-	db := newTestDB(t)
-	ev := makeEvent("clip-test", "cam1", "person", 0.9, time.Now().UTC())
-	mustSaveEvent(t, db, ev)
-
-	if err := db.UpdateEventClipPath("clip-test", "/clips/new.mp4"); err != nil {
-		t.Fatalf("UpdateEventClipPath: %v", err)
-	}
-
-	got, _ := db.GetEventByID("clip-test")
-	if got.ClipPath != "/clips/new.mp4" {
-		t.Errorf("ClipPath = %q, want %q", got.ClipPath, "/clips/new.mp4")
-	}
-}
-
 func TestUpdateEventSnapshotPath(t *testing.T) {
 	db := newTestDB(t)
 	ev := makeEvent("snap-test", "cam1", "person", 0.9, time.Now().UTC())

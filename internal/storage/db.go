@@ -92,11 +92,6 @@ func (d *DB) UpdateEventEndTime(eventID string, endTime time.Time) error {
 	return err
 }
 
-func (d *DB) UpdateEventClipPath(eventID, clipPath string) error {
-	_, err := d.db.Exec("UPDATE events SET clip_path = ?, clip_available = ? WHERE id = ?", clipPath, clipPath != "", eventID)
-	return err
-}
-
 func (d *DB) UpdateEventSnapshotPath(eventID, snapshotPath string) error {
 	_, err := d.db.Exec("UPDATE events SET snapshot_path = ?, snapshot_available = ? WHERE id = ?", snapshotPath, snapshotPath != "", eventID)
 	return err
