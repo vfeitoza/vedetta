@@ -214,6 +214,32 @@ func TestStorageBreakdown_SameFilesystemDetection(t *testing.T) {
 	}
 }
 
+func TestStorageBreakdown_RecompressionStateNotCached(t *testing.T) {
+	r, _ := newTestRecorder(t)
+
+	// Warm the 30s breakdown cache while the recompressor is idle.
+	first, err := r.StorageBreakdown()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Recompression.IsRunning {
+		t.Fatalf("recompressor should start idle")
+	}
+
+	// A manual pass starts after the cache was built. The cheap recompression
+	// fields must reflect live state, not the 30s-stale cached snapshot, so the
+	// storage page shows Running immediately after triggering a pass.
+	r.recompressor.isRunning.Store(true)
+
+	second, err := r.StorageBreakdown()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Recompression.IsRunning {
+		t.Error("cached breakdown served stale recompression state: is_running=false while a pass is running")
+	}
+}
+
 func TestDeleteStorage_All_PropagatesOpenSegmentProtection(t *testing.T) {
 	tmp := t.TempDir()
 	db := openTestStorageDB(t)

@@ -118,7 +118,13 @@ const breakdownTTL = 30 * time.Second
 // by GET /api/storage. The cache TTL is 30s.
 func (r *Recorder) StorageBreakdown() (*StorageBreakdown, error) {
 	if v := r.cachedBreakdown(); v != nil {
-		return v, nil
+		// Recompression state is cheap to read and changes independently of
+		// the 30s breakdown cache. Refresh it on every read (over a shallow
+		// copy, leaving the cached value untouched) so the storage page
+		// reflects an in-flight pass immediately after triggering one.
+		fresh := *v
+		fresh.Recompression = r.recompressionStats()
+		return &fresh, nil
 	}
 
 	openByCamera := make(map[string]string)
