@@ -32,18 +32,27 @@ func NewMetrics() *Metrics { return &Metrics{} }
 // WriteProm renders the counters in Prometheus text format, appending to w.
 // Called from internal/api/handler_health.go GetMetrics.
 func (m *Metrics) WriteProm(w io.Writer) {
+	fmt.Fprintf(w, "# HELP vedetta_notify_events_received_total Total notification events received by the dispatcher.\n# TYPE vedetta_notify_events_received_total counter\n")
 	fmt.Fprintf(w, "vedetta_notify_events_received_total %d\n", m.EventsReceived.Load())
+
+	fmt.Fprintf(w, "# HELP vedetta_notify_events_sent_total Notification events processed by outcome (sent, cooldown, muted, disabled, dropped).\n# TYPE vedetta_notify_events_sent_total counter\n")
 	fmt.Fprintf(w, "vedetta_notify_events_sent_total{result=\"sent\"} %d\n", m.EventsSent.Load())
 	fmt.Fprintf(w, "vedetta_notify_events_sent_total{result=\"cooldown\"} %d\n", m.EventsCooldown.Load())
 	fmt.Fprintf(w, "vedetta_notify_events_sent_total{result=\"muted\"} %d\n", m.EventsMuted.Load())
 	fmt.Fprintf(w, "vedetta_notify_events_sent_total{result=\"disabled\"} %d\n", m.EventsDisabled.Load())
 	fmt.Fprintf(w, "vedetta_notify_events_sent_total{result=\"dropped\"} %d\n", m.EventsDropped.Load())
+
+	fmt.Fprintf(w, "# HELP vedetta_notify_push_send_total Web push delivery attempts by HTTP status outcome.\n# TYPE vedetta_notify_push_send_total counter\n")
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"ok\"} %d\n", m.PushSendOK.Load())
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"410\"} %d\n", m.PushSend410.Load())
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"401\"} %d\n", m.PushSend401.Load())
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"429\"} %d\n", m.PushSend429.Load())
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"timeout\"} %d\n", m.PushSendTimeout.Load())
 	fmt.Fprintf(w, "vedetta_notify_push_send_total{status=\"error\"} %d\n", m.PushSendError.Load())
+
+	fmt.Fprintf(w, "# HELP vedetta_notify_subscriptions_gauge Current number of active push subscriptions.\n# TYPE vedetta_notify_subscriptions_gauge gauge\n")
 	fmt.Fprintf(w, "vedetta_notify_subscriptions_gauge %d\n", m.SubscriptionCount.Load())
+
+	fmt.Fprintf(w, "# HELP vedetta_notify_queue_depth_gauge Current depth of the notification dispatch queue.\n# TYPE vedetta_notify_queue_depth_gauge gauge\n")
 	fmt.Fprintf(w, "vedetta_notify_queue_depth_gauge %d\n", m.QueueDepth.Load())
 }

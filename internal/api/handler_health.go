@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -185,6 +186,11 @@ func (s *Server) GetHealthReady(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// writePromScalar emits a single unlabeled metric with its HELP and TYPE.
+func writePromScalar(b *strings.Builder, typ, name, help string, value int64) {
+	fmt.Fprintf(b, "# HELP %s %s\n# TYPE %s %s\n%s %d\n", name, help, name, typ, name, value)
+}
+
 func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 
@@ -208,22 +214,36 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	segmentCount, _ := s.db.CountSegments()
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "vedetta_up 1\n")
-	fmt.Fprintf(&b, "vedetta_ready %d\n", boolMetric(s.ready.Load()))
-	fmt.Fprintf(&b, "vedetta_cameras_total %d\n", len(cameraStatuses))
-	fmt.Fprintf(&b, "vedetta_cameras_online %d\n", online)
-	fmt.Fprintf(&b, "vedetta_cameras_degraded %d\n", degraded)
-	fmt.Fprintf(&b, "vedetta_events_total %d\n", eventCount)
-	fmt.Fprintf(&b, "vedetta_segments_total %d\n", segmentCount)
-	fmt.Fprintf(&b, "vedetta_storage_bytes %d\n", storageStats.TotalBytes)
-	fmt.Fprintf(&b, "vedetta_disk_available_bytes %d\n", storageStats.DiskAvailable)
-	fmt.Fprintf(&b, "vedetta_recording_paused %d\n", boolMetric(storageStats.RecordingPaused))
-	fmt.Fprintf(&b, "vedetta_disk_low %d\n", boolMetric(storageStats.DiskLow))
+
+	// Scalar gauges and counters: one HELP+TYPE per family, one sample.
+	writePromScalar(&b, "gauge", "vedetta_up", "Whether the Vedetta process is running (always 1).", 1)
+	writePromScalar(&b, "gauge", "vedetta_ready", "Whether all subsystems have finished initializing.", int64(boolMetric(s.ready.Load())))
+	writePromScalar(&b, "gauge", "vedetta_cameras_total", "Total number of configured cameras.", int64(len(cameraStatuses)))
+	writePromScalar(&b, "gauge", "vedetta_cameras_online", "Number of cameras whose RTSP source is currently connected.", int64(online))
+	writePromScalar(&b, "gauge", "vedetta_cameras_degraded", "Number of cameras in a degraded state.", int64(degraded))
+	// vedetta_events and vedetta_segments are gauges: they decrease as retention prunes rows.
+	writePromScalar(&b, "gauge", "vedetta_events", "Current number of event rows (decreases as retention prunes).", int64(eventCount))
+	writePromScalar(&b, "gauge", "vedetta_segments", "Current number of segment rows (decreases as retention prunes).", int64(segmentCount))
+	writePromScalar(&b, "gauge", "vedetta_storage_bytes", "Total bytes used by recorded segments.", storageStats.TotalBytes)
+	writePromScalar(&b, "gauge", "vedetta_disk_available_bytes", "Bytes available on the recording disk.", int64(storageStats.DiskAvailable))
+	writePromScalar(&b, "gauge", "vedetta_recording_paused", "Whether recording is paused due to low disk space (1) or not (0).", int64(boolMetric(storageStats.RecordingPaused)))
+	writePromScalar(&b, "gauge", "vedetta_disk_low", "Whether disk space is below the low-water threshold (1) or not (0).", int64(boolMetric(storageStats.DiskLow)))
+
+	// Per-camera labeled families — each emitted as a contiguous block.
+	fmt.Fprintf(&b, "# HELP vedetta_camera_online Whether the camera's RTSP source is connected (1) or not (0).\n# TYPE vedetta_camera_online gauge\n")
 	for _, st := range cameraStatuses {
 		fmt.Fprintf(&b, "vedetta_camera_online{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Online))
+	}
+
+	fmt.Fprintf(&b, "# HELP vedetta_camera_degraded Whether the camera is in a degraded state (1) or not (0).\n# TYPE vedetta_camera_degraded gauge\n")
+	for _, st := range cameraStatuses {
 		fmt.Fprintf(&b, "vedetta_camera_degraded{camera=%q} %d\n", promLabel(st.Name), boolMetric(st.Degraded))
-		// A flapping camera (repeatedly dropping its RTSP connection) shows up
-		// as a rising reconnect rate here, distinct from a steadily-offline one.
+	}
+
+	// A flapping camera (repeatedly dropping its RTSP connection) shows up as a
+	// rising reconnect rate, distinct from a steadily-offline one.
+	fmt.Fprintf(&b, "# HELP vedetta_camera_reconnects_total Total number of RTSP reconnect attempts per camera.\n# TYPE vedetta_camera_reconnects_total counter\n")
+	for _, st := range cameraStatuses {
 		if s.cameras != nil {
 			if cam := s.cameras.GetCamera(st.Name); cam != nil {
 				fmt.Fprintf(&b, "vedetta_camera_reconnects_total{camera=%q} %d\n", promLabel(st.Name), cam.Reconnects())
@@ -235,10 +255,42 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	// pipeline shed frames to slow clients rather than blocking. A rising count
 	// means live overlay / playback is silently degrading for those viewers.
 	if s.detectionHub != nil {
-		fmt.Fprintf(&b, "vedetta_detection_frames_dropped_total %d\n", s.detectionHub.DroppedFrames())
+		writePromScalar(&b, "counter", "vedetta_detection_frames_dropped_total", "Detection-overlay SSE frames dropped to slow clients.", s.detectionHub.DroppedFrames())
 	}
 	if s.mse != nil {
-		fmt.Fprintf(&b, "vedetta_mse_frames_dropped_total %d\n", s.mse.DroppedFrames())
+		writePromScalar(&b, "counter", "vedetta_mse_frames_dropped_total", "MSE fMP4 frames dropped to slow clients.", s.mse.DroppedFrames())
+	}
+
+	// Active live-stream viewers by camera and transport.
+	type streamClient struct {
+		camera, transport string
+		n                 int
+	}
+	var rows []streamClient
+	if s.mse != nil {
+		for cam, n := range s.mse.ClientCounts() {
+			rows = append(rows, streamClient{cam, "mse", n})
+		}
+	}
+	if s.streams != nil {
+		for cam, n := range s.streams.ClientCounts() {
+			rows = append(rows, streamClient{cam, "webrtc", n})
+		}
+	}
+	if s.mjpegViewers != nil {
+		for cam, n := range s.mjpegViewers.counts() {
+			rows = append(rows, streamClient{cam, "mjpeg", n})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].camera != rows[j].camera {
+			return rows[i].camera < rows[j].camera
+		}
+		return rows[i].transport < rows[j].transport
+	})
+	fmt.Fprintf(&b, "# HELP vedetta_stream_clients Active live-stream viewers by camera and transport.\n# TYPE vedetta_stream_clients gauge\n")
+	for _, r := range rows {
+		fmt.Fprintf(&b, "vedetta_stream_clients{camera=%q,transport=%q} %d\n", promLabel(r.camera), r.transport, r.n)
 	}
 
 	// Push notification counters — only emitted when a dispatcher is wired.
