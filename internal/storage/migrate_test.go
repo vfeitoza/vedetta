@@ -99,6 +99,16 @@ func TestMigrate_UpgradesLegacySchema(t *testing.T) {
 		}
 	}
 
+	for _, col := range []string{"recompressed", "recompressed_at", "recompress_failures", "clip_size_bytes"} {
+		exists, err := columnExists(db, "events", col)
+		if err != nil {
+			t.Fatalf("columnExists(%s): %v", col, err)
+		}
+		if !exists {
+			t.Errorf("expected v0->v3 upgrade to add events.%s", col)
+		}
+	}
+
 	if got := mustUserVersion(t, db); got != currentSchemaVersion {
 		t.Errorf("user_version = %d, want %d", got, currentSchemaVersion)
 	}
@@ -389,6 +399,19 @@ func TestMigrate_V2UpgradesToClipRecompress(t *testing.T) {
 	// Re-running migrate must be a no-op.
 	if err := migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)
+	}
+
+	// A normal write must work against the upgraded schema.
+	wrapped := &DB{db: db}
+	if err := wrapped.SaveEvent(camera.Event{
+		ID:         "e1",
+		CameraName: "cam1",
+		Label:      "person",
+		Score:      0.9,
+		Box:        [4]int{1, 2, 3, 4},
+		Timestamp:  time.Now(),
+	}); err != nil {
+		t.Fatalf("SaveEvent after v2->v3 upgrade: %v", err)
 	}
 }
 

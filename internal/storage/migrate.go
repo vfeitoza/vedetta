@@ -35,7 +35,7 @@ const baselineSchema = `
 		object_name TEXT,
 		sub_label TEXT,
 		recompressed INTEGER NOT NULL DEFAULT 0,
-		recompressed_at TIMESTAMP,
+		recompressed_at DATETIME,
 		recompress_failures INTEGER NOT NULL DEFAULT 0,
 		clip_size_bytes INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -277,17 +277,17 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	// Version 3: clip recompression state on the events table, mirroring the
-	// segments recompression columns. ensureColumn is idempotent, so an
-	// existing v2 database gains the columns and a fresh database (already
-	// covered by baselineSchema) is a clean no-op. The index on (camera,
-	// end_time) is created here rather than in baselineSchema because
-	// end_time is absent from pre-v1 databases at baseline-schema time and
-	// would cause a "no such column" error before the v1 backfill runs.
+	// Version 3: extends the events table with the same recompression-state
+	// pattern used for segments. ensureColumn is idempotent, so an existing
+	// v2 database gains the columns and a fresh database (already covered by
+	// baselineSchema) is a clean no-op. The index on (camera, end_time) is
+	// created here rather than in baselineSchema because end_time is absent
+	// from pre-v1 databases at baseline-schema time and would cause a
+	// "no such column" error before the v1 backfill runs.
 	if version < 3 {
 		for _, c := range []legacyColumn{
 			{"events", "recompressed", "ALTER TABLE events ADD COLUMN recompressed INTEGER NOT NULL DEFAULT 0"},
-			{"events", "recompressed_at", "ALTER TABLE events ADD COLUMN recompressed_at TIMESTAMP"},
+			{"events", "recompressed_at", "ALTER TABLE events ADD COLUMN recompressed_at DATETIME"},
 			{"events", "recompress_failures", "ALTER TABLE events ADD COLUMN recompress_failures INTEGER NOT NULL DEFAULT 0"},
 			{"events", "clip_size_bytes", "ALTER TABLE events ADD COLUMN clip_size_bytes INTEGER NOT NULL DEFAULT 0"},
 		} {
