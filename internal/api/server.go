@@ -103,6 +103,9 @@ type Server struct {
 	// Per-camera detection-frame fan-out for the live overlay.
 	detectionHub *detectionHub
 
+	// Per-camera count of active MJPEG streaming connections, used by /metrics.
+	mjpegViewers *mjpegViewers
+
 	objectRematchMu      sync.Mutex
 	objectRematchRunning map[int64]bool
 	objectRematchPending map[int64]bool
@@ -134,6 +137,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 		mux:                  http.NewServeMux(),
 		sseClients:           make(map[chan []byte]struct{}),
 		detectionHub:         newDetectionHub(),
+		mjpegViewers:         newMJPEGViewers(),
 		objectRematchRunning: make(map[int64]bool),
 		objectRematchPending: make(map[int64]bool),
 	}

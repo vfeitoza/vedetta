@@ -245,6 +245,9 @@ func (s *Server) GetMJPEG(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 
+	s.mjpegViewers.add(name)
+	defer s.mjpegViewers.remove(name)
+
 	handler := stream.MJPEGHandlerRGB24(cam.SnapshotRGB24, cam.FrameSize())
 	handler.ServeHTTP(w, r)
 }
