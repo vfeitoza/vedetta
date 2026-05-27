@@ -90,11 +90,11 @@ type Server struct {
 	// http.Server, which the serve goroutine reads concurrently.
 	activeHandler swappableHandler
 
-	mux                  *http.ServeMux
-	funcMap              template.FuncMap
-	ready                atomic.Bool
-	setupHandler         *SetupHandler
-	setupMode            bool
+	mux          *http.ServeMux
+	funcMap      template.FuncMap
+	ready        atomic.Bool
+	setupHandler *SetupHandler
+	setupMode    bool
 
 	// SSE event bus for real-time browser notifications
 	sseMu      sync.Mutex

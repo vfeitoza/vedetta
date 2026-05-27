@@ -134,7 +134,7 @@ func TestCropRegion_EmptyBox(t *testing.T) {
 func TestNmsFaces(t *testing.T) {
 	faces := []scrfdFace{
 		{box: [4]int{0, 0, 100, 100}, score: 0.9},
-		{box: [4]int{5, 5, 105, 105}, score: 0.8}, // high overlap with first
+		{box: [4]int{5, 5, 105, 105}, score: 0.8},     // high overlap with first
 		{box: [4]int{200, 200, 300, 300}, score: 0.7}, // no overlap
 	}
 

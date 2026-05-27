@@ -161,7 +161,7 @@ func TestSaveSnapshotDefaultQuality(t *testing.T) {
 
 func TestColorForLabel(t *testing.T) {
 	tests := []struct {
-		label string
+		label   string
 		r, g, b uint8
 	}{
 		{"person", 255, 0, 0},

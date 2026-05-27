@@ -8,18 +8,18 @@ import (
 // Zone represents a spatial region on a camera view.
 // Coordinates are percentages (0.0-1.0) relative to the frame dimensions.
 type Zone struct {
-	ID              int      `json:"id"`
-	Camera          string   `json:"camera"`
-	Name            string   `json:"name"`
+	ID              int         `json:"id"`
+	Camera          string      `json:"camera"`
+	Name            string      `json:"name"`
 	Points          [][]float64 `json:"points"`
-	X1              float64  `json:"-"`
-	Y1              float64  `json:"-"`
-	X2              float64  `json:"-"`
-	Y2              float64  `json:"-"`
-	Labels          []string `json:"labels"`
-	TrackPresence   bool     `json:"track_presence"`
-	FaceRecognition bool     `json:"face_recognition"`
-	Enabled         bool     `json:"enabled"`
+	X1              float64     `json:"-"`
+	Y1              float64     `json:"-"`
+	X2              float64     `json:"-"`
+	Y2              float64     `json:"-"`
+	Labels          []string    `json:"labels"`
+	TrackPresence   bool        `json:"track_presence"`
+	FaceRecognition bool        `json:"face_recognition"`
+	Enabled         bool        `json:"enabled"`
 }
 
 // ZonePresence tracks the presence state of a label within a zone.

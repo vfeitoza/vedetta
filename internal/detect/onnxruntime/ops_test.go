@@ -1326,8 +1326,8 @@ func TestResizeBilinear(t *testing.T) {
 func TestResizeWithSizes(t *testing.T) {
 	x := NewTensor([]int64{1, 1, 2, 2}, []float32{1, 2, 3, 4})
 	roi := NewTensor([]int64{0}, nil)
-	scales := NewTensor([]int64{0}, nil)                        // empty scales
-	sizes := NewTensor([]int64{4}, []float32{1, 1, 4, 4})      // explicit output size
+	scales := NewTensor([]int64{0}, nil)                  // empty scales
+	sizes := NewTensor([]int64{4}, []float32{1, 1, 4, 4}) // explicit output size
 	attrs := NewAttributes()
 	attrs.Strings["mode"] = "nearest"
 	out, err := Execute("Resize", []*Tensor{x, roi, scales, sizes}, attrs)

@@ -12,9 +12,9 @@ import (
 //
 // Not safe for concurrent use. Each goroutine needs its own instance.
 type GoBackend struct {
-	session  *onnxruntime.Session
-	inputMap map[string]*onnxruntime.Tensor
-	inputKey string
+	session   *onnxruntime.Session
+	inputMap  map[string]*onnxruntime.Tensor
+	inputKey  string
 	outputKey string
 }
 

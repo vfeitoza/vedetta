@@ -79,7 +79,7 @@ func TestCleanSegments_RetainDaysZeroStillHonorsPerCameraOverride(t *testing.T) 
 		return path
 	}
 
-	shortOld := seed("cam_short", "old.mp4", 2*24*time.Hour)      // > 1d override → delete
+	shortOld := seed("cam_short", "old.mp4", 2*24*time.Hour)       // > 1d override → delete
 	defaultOld := seed("cam_default", "old.mp4", 100*24*time.Hour) // global unlimited → keep
 
 	rec.cleanSegments()
@@ -118,8 +118,8 @@ func TestRunCleanup_RetainDaysZeroKeepsMotionActivity(t *testing.T) {
 // forever when event_retain_days <= 0.
 func TestRunCleanup_EventRetainZeroKeepsClips(t *testing.T) {
 	rec, _ := newTestRecorder(t)
-	rec.config.RetainDays = 7    // segments cleanup enabled but irrelevant here
-	rec.config.EventRetain = 0   // unlimited event media
+	rec.config.RetainDays = 7  // segments cleanup enabled but irrelevant here
+	rec.config.EventRetain = 0 // unlimited event media
 	rec.eventConfig.RetainDays = 0
 
 	clipDir := filepath.Join(rec.config.Path, "cam1", "clips", "2024-01-01")

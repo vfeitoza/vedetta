@@ -11,10 +11,10 @@ import (
 
 // Wire types
 const (
-	wireVarint  = 0
-	wire64Bit   = 1
-	wireBytes   = 2
-	wire32Bit   = 5
+	wireVarint = 0
+	wire64Bit  = 1
+	wireBytes  = 2
+	wire32Bit  = 5
 )
 
 // protoReader provides sequential reading of protobuf wire format.

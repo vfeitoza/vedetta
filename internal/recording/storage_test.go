@@ -176,10 +176,10 @@ func TestDeleteStorage_DryRun_NoFilesystemChanges(t *testing.T) {
 func TestDeleteStorage_RejectsInvalidShapes(t *testing.T) {
 	r := &Recorder{}
 	cases := []DeleteRequest{
-		{Target: DeleteSegments},                                        // missing camera + window
-		{Target: DeleteSegments, Camera: "cam-a"},                       // missing window
-		{Target: DeleteSegments, Camera: "cam-a", From: "2026-01-01"},   // only From, no To
-		{Target: DeleteFreeBytes},                                       // missing free_bytes_target
+		{Target: DeleteSegments},                                         // missing camera + window
+		{Target: DeleteSegments, Camera: "cam-a"},                        // missing window
+		{Target: DeleteSegments, Camera: "cam-a", From: "2026-01-01"},    // only From, no To
+		{Target: DeleteFreeBytes},                                        // missing free_bytes_target
 		{Target: DeleteFreeBytes, FreeBytesTarget: 100, Camera: "cam-a"}, // extra fields
 		{Target: "garbage"},
 	}

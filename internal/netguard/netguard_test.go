@@ -100,8 +100,8 @@ func TestBlockedReason(t *testing.T) {
 		{"fe80::1", true},
 		{"0.0.0.0", true},
 		{"::", true},
-		{"224.0.0.1", true},   // link-local multicast
-		{"ff02::1", true},     // interface/link-local multicast v6
+		{"224.0.0.1", true}, // link-local multicast
+		{"ff02::1", true},   // interface/link-local multicast v6
 	}
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {

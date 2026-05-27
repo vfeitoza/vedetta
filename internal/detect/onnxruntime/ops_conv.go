@@ -122,8 +122,8 @@ func opConv(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 	effKH := (kH-1)*dilH + 1
 	effKW := (kW-1)*dilW + 1
-	outH := (H + padTop + padBottom - effKH) / strideH + 1
-	outW := (W + padLeft + padRight - effKW) / strideW + 1
+	outH := (H+padTop+padBottom-effKH)/strideH + 1
+	outW := (W+padLeft+padRight-effKW)/strideW + 1
 
 	if outH <= 0 || outW <= 0 {
 		return nil, fmt.Errorf("conv: invalid output dimensions %dx%d", outH, outW)
@@ -294,8 +294,8 @@ func opConvSiLU(inputs []*Tensor, attrs *Attributes) ([]*Tensor, error) {
 
 	effKH := (kH-1)*dilH + 1
 	effKW := (kW-1)*dilW + 1
-	outH := (H + padTop + padBottom - effKH) / strideH + 1
-	outW := (W + padLeft + padRight - effKW) / strideW + 1
+	outH := (H+padTop+padBottom-effKH)/strideH + 1
+	outW := (W+padLeft+padRight-effKW)/strideW + 1
 
 	if outH <= 0 || outW <= 0 {
 		return nil, fmt.Errorf("convSiLU: invalid output dimensions %dx%d", outH, outW)
@@ -388,7 +388,6 @@ func applySiLU(dst []float32, bias []float32, chanOffset, mPerGroup, outSpatial 
 		}
 	}
 }
-
 
 // im2colNoPadNoDil is an optimized version for the common case of no padding and no dilation.
 // Eliminates bounds checking in the inner loop.

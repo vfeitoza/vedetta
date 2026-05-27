@@ -201,7 +201,7 @@ type mseConsumer struct {
 	// Once finalized, samples accumulate in pendingVideo until ~250ms
 	// worth has been collected, then they're emitted as a single
 	// fMP4 fragment.
-	pendingVideo     []*fmp4.Sample
+	pendingVideo      []*fmp4.Sample
 	pendingVideoTicks uint32
 
 	// vtimer turns the decode-order AU stream into fMP4 samples with
@@ -216,7 +216,7 @@ type mseConsumer struct {
 
 	// Audio batching. AAC samples have a fixed 1024-sample duration so
 	// no in-flight handling is needed.
-	pendingAudio     []*fmp4.Sample
+	pendingAudio      []*fmp4.Sample
 	pendingAudioTicks uint32
 }
 

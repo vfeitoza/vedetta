@@ -1987,9 +1987,9 @@ func TestClipCandidates_EligibilityAndOrdering(t *testing.T) {
 	now := time.Now().UTC()
 	old := now.Add(-48 * time.Hour)
 
-	mustClipEvent(t, db, "big", "cam1", old, 500)            // eligible, large
+	mustClipEvent(t, db, "big", "cam1", old, 500)                  // eligible, large
 	mustClipEvent(t, db, "small", "cam1", old.Add(time.Hour), 100) // eligible, smaller, newer
-	mustClipEvent(t, db, "toonew", "cam1", now, 900)         // too new (after cutoff)
+	mustClipEvent(t, db, "toonew", "cam1", now, 900)               // too new (after cutoff)
 
 	// Ineligible: already recompressed.
 	mustClipEvent(t, db, "done", "cam1", old, 700)

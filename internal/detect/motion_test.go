@@ -123,7 +123,7 @@ func TestMotionDetector_TwoSeparateRegions(t *testing.T) {
 	// Two separate bright rectangles far apart
 	frame2 := makeRGB(w, h, 50, 50, 50)
 	drawRect(frame2, w, 10, 10, 40, 40, 200, 200, 200)   // left side
-	drawRect(frame2, w, 150, 60, 190, 90, 200, 200, 200)  // right side
+	drawRect(frame2, w, 150, 60, 190, 90, 200, 200, 200) // right side
 
 	regions := md.Detect(frame2, w, h)
 	if len(regions) != 2 {

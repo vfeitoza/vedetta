@@ -19,15 +19,15 @@ import (
 
 // Label colors by detection class
 var labelColors = map[string]color.RGBA{
-	"person":    {R: 255, G: 0, B: 0, A: 255},       // Red
-	"car":       {R: 0, G: 0, B: 255, A: 255},        // Blue
-	"truck":     {R: 0, G: 100, B: 255, A: 255},      // Light blue
-	"bicycle":   {R: 255, G: 165, B: 0, A: 255},      // Orange
-	"motorcycle":{R: 255, G: 100, B: 0, A: 255},      // Dark orange
-	"bus":       {R: 100, G: 0, B: 255, A: 255},      // Purple
-	"cat":       {R: 0, G: 255, B: 0, A: 255},        // Green
-	"dog":       {R: 0, G: 200, B: 100, A: 255},      // Teal
-	"bird":      {R: 255, G: 255, B: 0, A: 255},      // Yellow
+	"person":     {R: 255, G: 0, B: 0, A: 255},   // Red
+	"car":        {R: 0, G: 0, B: 255, A: 255},   // Blue
+	"truck":      {R: 0, G: 100, B: 255, A: 255}, // Light blue
+	"bicycle":    {R: 255, G: 165, B: 0, A: 255}, // Orange
+	"motorcycle": {R: 255, G: 100, B: 0, A: 255}, // Dark orange
+	"bus":        {R: 100, G: 0, B: 255, A: 255}, // Purple
+	"cat":        {R: 0, G: 255, B: 0, A: 255},   // Green
+	"dog":        {R: 0, G: 200, B: 100, A: 255}, // Teal
+	"bird":       {R: 255, G: 255, B: 0, A: 255}, // Yellow
 }
 
 var defaultColor = color.RGBA{R: 0, G: 255, B: 255, A: 255} // Cyan
@@ -163,11 +163,21 @@ func drawThickBox(img *image.RGBA, box [4]int, c color.RGBA, thickness int) {
 	x1, y1, x2, y2 := box[0], box[1], box[2], box[3]
 	bounds := img.Bounds()
 
-	if x1 < bounds.Min.X { x1 = bounds.Min.X }
-	if y1 < bounds.Min.Y { y1 = bounds.Min.Y }
-	if x2 > bounds.Max.X { x2 = bounds.Max.X }
-	if y2 > bounds.Max.Y { y2 = bounds.Max.Y }
-	if x1 >= x2 || y1 >= y2 { return }
+	if x1 < bounds.Min.X {
+		x1 = bounds.Min.X
+	}
+	if y1 < bounds.Min.Y {
+		y1 = bounds.Min.Y
+	}
+	if x2 > bounds.Max.X {
+		x2 = bounds.Max.X
+	}
+	if y2 > bounds.Max.Y {
+		y2 = bounds.Max.Y
+	}
+	if x1 >= x2 || y1 >= y2 {
+		return
+	}
 
 	stride := img.Stride
 	pix := img.Pix
@@ -176,21 +186,32 @@ func drawThickBox(img *image.RGBA, box [4]int, c color.RGBA, thickness int) {
 
 	setPixel := func(x, y int) {
 		off := (y-minY)*stride + (x-minX)*4
-		pix[off] = c.R; pix[off+1] = c.G; pix[off+2] = c.B; pix[off+3] = c.A
+		pix[off] = c.R
+		pix[off+1] = c.G
+		pix[off+2] = c.B
+		pix[off+3] = c.A
 	}
 
 	for t := 0; t < thickness; t++ {
 		if y := y1 + t; y < bounds.Max.Y {
-			for x := x1; x < x2; x++ { setPixel(x, y) }
+			for x := x1; x < x2; x++ {
+				setPixel(x, y)
+			}
 		}
 		if y := y2 - 1 - t; y >= bounds.Min.Y {
-			for x := x1; x < x2; x++ { setPixel(x, y) }
+			for x := x1; x < x2; x++ {
+				setPixel(x, y)
+			}
 		}
 		if x := x1 + t; x < bounds.Max.X {
-			for y := y1; y < y2; y++ { setPixel(x, y) }
+			for y := y1; y < y2; y++ {
+				setPixel(x, y)
+			}
 		}
 		if x := x2 - 1 - t; x >= bounds.Min.X {
-			for y := y1; y < y2; y++ { setPixel(x, y) }
+			for y := y1; y < y2; y++ {
+				setPixel(x, y)
+			}
 		}
 	}
 }

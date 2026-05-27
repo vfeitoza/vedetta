@@ -18,13 +18,13 @@ const (
 
 // ONNX attribute types (from onnx.proto AttributeProto.AttributeType)
 const (
-	attrFloat     = 1
-	attrInt       = 2
-	attrString    = 3
-	attrTensor    = 4
-	attrFloats    = 6
-	attrInts      = 7
-	attrStrings   = 8
+	attrFloat   = 1
+	attrInt     = 2
+	attrString  = 3
+	attrTensor  = 4
+	attrFloats  = 6
+	attrInts    = 7
+	attrStrings = 8
 )
 
 // ModelProto is the top-level ONNX model container.
@@ -44,11 +44,11 @@ type GraphProto struct {
 
 // NodeProto represents a single operation in the graph.
 type NodeProto struct {
-	Inputs   []string
-	Outputs  []string
-	Name     string
-	OpType   string
-	Attrs    []*AttributeProto
+	Inputs  []string
+	Outputs []string
+	Name    string
+	OpType  string
+	Attrs   []*AttributeProto
 }
 
 // AttributeProto holds an operator attribute.
@@ -65,10 +65,10 @@ type AttributeProto struct {
 
 // TensorProto holds a tensor (weights/constants).
 type TensorProto struct {
-	Name     string
-	Dims     []int64
-	DataType int32
-	RawData  []byte
+	Name      string
+	Dims      []int64
+	DataType  int32
+	RawData   []byte
 	FloatData []float32
 	Int64Data []int64
 	Int32Data []int32

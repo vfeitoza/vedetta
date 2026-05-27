@@ -112,7 +112,7 @@ func TestCreateObjectFromCameraTrack_InvalidBox(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	cases := []struct {
-		name string
+		name           string
 		x1, y1, x2, y2 float64
 	}{
 		{"negative_x1", -0.1, 0.1, 0.5, 0.5},

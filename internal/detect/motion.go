@@ -33,7 +33,7 @@ func MotionScore(prev, curr []byte) float64 {
 
 // MotionRegion represents a contiguous area of detected motion.
 type MotionRegion struct {
-	Box   [4]int  // x1, y1, x2, y2
+	Box   [4]int // x1, y1, x2, y2
 	Area  int
 	Score float64 // fraction of pixels above threshold within the region
 }
@@ -47,9 +47,9 @@ type MotionDetector struct {
 	bg        []float64 // background model (grayscale, one value per pixel)
 
 	// Pre-allocated working buffers, sized on first Detect call.
-	gray    []uint8
-	blurred []uint8
-	binary  []uint8
+	gray         []uint8
+	blurred      []uint8
+	binary       []uint8
 	labels       []int
 	parent       []int
 	lastCoverage float64

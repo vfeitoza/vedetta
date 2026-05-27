@@ -43,9 +43,9 @@ func TestTensorSize(t *testing.T) {
 		shape []int64
 		want  int
 	}{
-		{[]int64{}, 1},        // scalar
-		{[]int64{5}, 5},       // vector
-		{[]int64{2, 3}, 6},    // matrix
+		{[]int64{}, 1},         // scalar
+		{[]int64{5}, 5},        // vector
+		{[]int64{2, 3}, 6},     // matrix
 		{[]int64{2, 3, 4}, 24}, // 3D
 	}
 	for _, tt := range tests {

@@ -94,7 +94,7 @@ func TestFrameFromDecodedRejectsGeometryLargerThanBuffer(t *testing.T) {
 // out-of-bounds-indexes in a pure-Go consumer.
 func TestFrameFromDecodedRejectsDegenerateGeometry(t *testing.T) {
 	cases := []struct {
-		name                       string
+		name                   string
 		w, h, yStride, cStride int32
 	}{
 		{"zero width", 0, 4, 4, 2},

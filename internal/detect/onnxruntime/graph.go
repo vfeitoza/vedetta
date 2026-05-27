@@ -20,12 +20,12 @@ type Session struct {
 
 	// Indexed tensor storage for Run() — avoids map[string]*Tensor overhead.
 	// tensorIDs maps tensor names to integer indices in the values slice.
-	tensorIDs    map[string]int
-	numTensors   int
-	initIDs      []int // indices of initializers in values slice
-	initTensors  []*Tensor
-	inputIDs     []int // indices of user inputs (ordered by inputNames)
-	outputIDs    []int // indices of outputs (ordered by outputNames)
+	tensorIDs   map[string]int
+	numTensors  int
+	initIDs     []int // indices of initializers in values slice
+	initTensors []*Tensor
+	inputIDs    []int // indices of user inputs (ordered by inputNames)
+	outputIDs   []int // indices of outputs (ordered by outputNames)
 	// Per-node: precomputed input/output indices into values slice.
 	nodeInputIDs  [][]int
 	nodeOutputIDs [][]int

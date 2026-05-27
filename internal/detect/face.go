@@ -25,11 +25,11 @@ const (
 
 // FaceResult holds a single detected and embedded face.
 type FaceResult struct {
-	Box        [4]int         // face bounding box in original frame coords [x1,y1,x2,y2]
-	Landmarks  [5][2]float32  // 5 facial keypoints in original frame coords
-	Confidence float32        // face detection confidence
-	Embedding  []float32      // 512-dim L2-normalized embedding
-	CropPath   string         // path to saved 112x112 aligned JPEG
+	Box        [4]int        // face bounding box in original frame coords [x1,y1,x2,y2]
+	Landmarks  [5][2]float32 // 5 facial keypoints in original frame coords
+	Confidence float32       // face detection confidence
+	Embedding  []float32     // 512-dim L2-normalized embedding
+	CropPath   string        // path to saved 112x112 aligned JPEG
 }
 
 // FaceRecognizer detects faces and computes embeddings using SCRFD + MobileFaceNet.
@@ -50,11 +50,11 @@ type FaceRecognizer struct {
 
 // FaceRecognizerConfig holds configuration for the face recognition pipeline.
 type FaceRecognizerConfig struct {
-	SCRFDModelPath      string  // path to SCRFD ONNX model (optional, auto-download)
-	MobileFaceNetPath   string  // path to MobileFaceNet ONNX model (optional, auto-download)
-	MinFaceSize         int     // minimum face height in pixels (default 60)
-	MatchThreshold      float64 // cosine similarity threshold (default 0.55)
-	CropDir             string  // directory to save aligned face crops
+	SCRFDModelPath    string  // path to SCRFD ONNX model (optional, auto-download)
+	MobileFaceNetPath string  // path to MobileFaceNet ONNX model (optional, auto-download)
+	MinFaceSize       int     // minimum face height in pixels (default 60)
+	MatchThreshold    float64 // cosine similarity threshold (default 0.55)
+	CropDir           string  // directory to save aligned face crops
 }
 
 // NewFaceRecognizer creates a face recognition pipeline with SCRFD + MobileFaceNet.

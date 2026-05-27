@@ -40,7 +40,7 @@ func TestPrepareInput_SquareImage(t *testing.T) {
 func TestNMS_RemovesDuplicates(t *testing.T) {
 	detections := []Detection{
 		{Label: "person", Score: 0.9, Box: [4]int{10, 10, 100, 100}},
-		{Label: "person", Score: 0.8, Box: [4]int{12, 12, 102, 102}}, // overlaps heavily
+		{Label: "person", Score: 0.8, Box: [4]int{12, 12, 102, 102}},   // overlaps heavily
 		{Label: "person", Score: 0.7, Box: [4]int{200, 200, 300, 300}}, // separate
 	}
 
