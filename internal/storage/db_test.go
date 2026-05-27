@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -1873,5 +1874,72 @@ func TestPerDayCameraSegmentBytes(t *testing.T) {
 		} else if r.Bytes != w {
 			t.Errorf("day %q bytes = %d, want %d", r.Date, r.Bytes, w)
 		}
+	}
+}
+
+// QueryRowForTest exposes the wrapped *sql.DB for assertions on columns not
+// surfaced by a typed query.
+func (d *DB) QueryRowForTest(query string, args ...any) *sql.Row {
+	return d.db.QueryRow(query, args...)
+}
+
+// --- Task 2: SetEventClip / ClearEventClip ---
+
+func TestSetEventClip_PersistsAndResetsState(t *testing.T) {
+	db := newTestDB(t)
+	ev := makeEvent("clip-set", "cam1", "person", 0.9, time.Now().UTC())
+	mustSaveEvent(t, db, ev)
+
+	// Pretend a prior recompression happened.
+	if err := db.MarkClipRecompressed("clip-set", 111); err != nil {
+		t.Fatalf("MarkClipRecompressed: %v", err)
+	}
+
+	if err := db.SetEventClip("clip-set", "/clips/new.mp4", 4242); err != nil {
+		t.Fatalf("SetEventClip: %v", err)
+	}
+
+	got, _ := db.GetEventByID("clip-set")
+	if got.ClipPath != "/clips/new.mp4" || !got.ClipAvailable {
+		t.Errorf("ClipPath=%q available=%v, want /clips/new.mp4 true", got.ClipPath, got.ClipAvailable)
+	}
+	st, ok, err := db.GetClipRecompressState("clip-set")
+	if err != nil || !ok {
+		t.Fatalf("GetClipRecompressState: ok=%v err=%v", ok, err)
+	}
+	if st.Recompressed {
+		t.Error("SetEventClip must reset recompressed to false")
+	}
+	var size int64
+	if err := db.QueryRowForTest("SELECT clip_size_bytes FROM events WHERE id = ?", "clip-set").Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size != 4242 {
+		t.Errorf("clip_size_bytes = %d, want 4242", size)
+	}
+}
+
+func TestClearEventClip_ZeroesPathSizeAndState(t *testing.T) {
+	db := newTestDB(t)
+	ev := makeEvent("clip-clear", "cam1", "person", 0.9, time.Now().UTC())
+	mustSaveEvent(t, db, ev)
+	if err := db.SetEventClip("clip-clear", "/clips/x.mp4", 999); err != nil {
+		t.Fatalf("SetEventClip: %v", err)
+	}
+
+	if err := db.ClearEventClip("clip-clear"); err != nil {
+		t.Fatalf("ClearEventClip: %v", err)
+	}
+
+	got, _ := db.GetEventByID("clip-clear")
+	if got.ClipPath != "" || got.ClipAvailable {
+		t.Errorf("after clear ClipPath=%q available=%v, want empty/false", got.ClipPath, got.ClipAvailable)
+	}
+	var size int64
+	if err := db.QueryRowForTest("SELECT clip_size_bytes FROM events WHERE id = ?", "clip-clear").Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size != 0 {
+		t.Errorf("clip_size_bytes = %d, want 0", size)
 	}
 }

@@ -111,6 +111,37 @@ func (d *DB) UpdateEventClipAvailability(eventID string, available bool) error {
 	return err
 }
 
+// SetEventClip records a freshly written clip on its event row: it stores the
+// clip path, marks the clip available, records its on-disk size, and RESETS the
+// recompression state. The reset is what makes re-extraction correct: a fresh
+// full-resolution clip must start un-recompressed even if the prior clip on
+// this row had been recompressed.
+func (d *DB) SetEventClip(eventID, clipPath string, sizeBytes int64) error {
+	_, err := d.db.Exec(`
+		UPDATE events
+		SET clip_path = ?, clip_available = 1, clip_size_bytes = ?,
+		    recompressed = 0, recompressed_at = NULL, recompress_failures = 0
+		WHERE id = ?`,
+		clipPath, sizeBytes, eventID,
+	)
+	return err
+}
+
+// ClearEventClip drops the clip reference after the clip file is deleted: it
+// blanks the path, marks the clip unavailable, zeroes the recorded size, and
+// resets the recompression state so a cleared row never appears eligible and
+// carries no stale recompression flags.
+func (d *DB) ClearEventClip(eventID string) error {
+	_, err := d.db.Exec(`
+		UPDATE events
+		SET clip_path = '', clip_available = 0, clip_size_bytes = 0,
+		    recompressed = 0, recompressed_at = NULL, recompress_failures = 0
+		WHERE id = ?`,
+		eventID,
+	)
+	return err
+}
+
 // UpdateEventMediaAvailability sets both media-availability flags in a single
 // row write. Used by reconciliation, which recomputes both at once.
 func (d *DB) UpdateEventMediaAvailability(eventID string, snapshotAvailable, clipAvailable bool) error {
@@ -783,6 +814,55 @@ func (d *DB) IncrementSegmentRecompressFailures(id int64) error {
 		id,
 	)
 	return err
+}
+
+// MarkClipRecompressed updates an event after its clip was successfully
+// recompressed: it sets the flag, the timestamp, and the new on-disk size.
+func (d *DB) MarkClipRecompressed(eventID string, newSize int64) error {
+	_, err := d.db.Exec(`
+		UPDATE events
+		SET recompressed = 1, recompressed_at = ?, clip_size_bytes = ?
+		WHERE id = ?`,
+		utc(time.Now()), newSize, eventID,
+	)
+	return err
+}
+
+// IncrementClipRecompressFailures increments the failure counter for a clip.
+// Once it reaches 3, the clip is excluded from future recompression queries.
+func (d *DB) IncrementClipRecompressFailures(eventID string) error {
+	_, err := d.db.Exec(
+		"UPDATE events SET recompress_failures = recompress_failures + 1 WHERE id = ?",
+		eventID,
+	)
+	return err
+}
+
+// ClipRecompressState is the minimal row state needed to revalidate a clip
+// recompression candidate under the segment-operation lock.
+type ClipRecompressState struct {
+	ClipPath      string
+	ClipAvailable bool
+	Recompressed  bool
+}
+
+// GetClipRecompressState reads the revalidation fields for one event. The bool
+// return reports whether the row exists. GetEventByID returns a camera.Event
+// without recompression fields, so a dedicated query is used here.
+func (d *DB) GetClipRecompressState(eventID string) (ClipRecompressState, bool, error) {
+	var s ClipRecompressState
+	var clipPath sql.NullString
+	err := d.db.QueryRow(
+		"SELECT clip_path, clip_available, recompressed FROM events WHERE id = ?", eventID,
+	).Scan(&clipPath, &s.ClipAvailable, &s.Recompressed)
+	if err == sql.ErrNoRows {
+		return ClipRecompressState{}, false, nil
+	}
+	if err != nil {
+		return ClipRecompressState{}, false, err
+	}
+	s.ClipPath = clipPath.String
+	return s, true, nil
 }
 
 // GetRecordingDays returns sorted day numbers that have segments for the given camera and month.
