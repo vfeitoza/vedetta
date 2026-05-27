@@ -11,7 +11,7 @@ import (
 // currentSchemaVersion is the schema version this build expects. It is stored
 // in SQLite's PRAGMA user_version. A database reporting a lower version is
 // upgraded by migrate; databases created before versioning report 0.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // baselineSchema creates every table and index for a fresh database. It is
 // idempotent (CREATE ... IF NOT EXISTS) and a cheap no-op for existing DBs.
@@ -34,6 +34,10 @@ const baselineSchema = `
 		zone_name TEXT,
 		object_name TEXT,
 		sub_label TEXT,
+		recompressed INTEGER NOT NULL DEFAULT 0,
+		recompressed_at TIMESTAMP,
+		recompress_failures INTEGER NOT NULL DEFAULT 0,
+		clip_size_bytes INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -270,6 +274,29 @@ func migrate(db *sql.DB) error {
 	if version < 2 {
 		if err := recanonicalizeTimestamps(db); err != nil {
 			return fmt.Errorf("recanonicalize timestamps: %w", err)
+		}
+	}
+
+	// Version 3: clip recompression state on the events table, mirroring the
+	// segments recompression columns. ensureColumn is idempotent, so an
+	// existing v2 database gains the columns and a fresh database (already
+	// covered by baselineSchema) is a clean no-op. The index on (camera,
+	// end_time) is created here rather than in baselineSchema because
+	// end_time is absent from pre-v1 databases at baseline-schema time and
+	// would cause a "no such column" error before the v1 backfill runs.
+	if version < 3 {
+		for _, c := range []legacyColumn{
+			{"events", "recompressed", "ALTER TABLE events ADD COLUMN recompressed INTEGER NOT NULL DEFAULT 0"},
+			{"events", "recompressed_at", "ALTER TABLE events ADD COLUMN recompressed_at TIMESTAMP"},
+			{"events", "recompress_failures", "ALTER TABLE events ADD COLUMN recompress_failures INTEGER NOT NULL DEFAULT 0"},
+			{"events", "clip_size_bytes", "ALTER TABLE events ADD COLUMN clip_size_bytes INTEGER NOT NULL DEFAULT 0"},
+		} {
+			if err := ensureColumn(db, c.table, c.column, c.ddl); err != nil {
+				return fmt.Errorf("backfill column %s.%s: %w", c.table, c.column, err)
+			}
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_clip_recompress ON events(camera, end_time)`); err != nil {
+			return fmt.Errorf("create idx_events_clip_recompress: %w", err)
 		}
 	}
 

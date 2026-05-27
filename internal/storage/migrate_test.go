@@ -320,6 +320,78 @@ func TestColumnExists(t *testing.T) {
 	}
 }
 
+// TestMigrate_FreshDBHasClipRecompressColumns verifies baselineSchema defines
+// the clip recompression columns on a brand-new database.
+func TestMigrate_FreshDBHasClipRecompressColumns(t *testing.T) {
+	db, _ := openRaw(t)
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, col := range []string{"recompressed", "recompressed_at", "recompress_failures", "clip_size_bytes"} {
+		exists, err := columnExists(db, "events", col)
+		if err != nil {
+			t.Fatalf("columnExists(%s): %v", col, err)
+		}
+		if !exists {
+			t.Errorf("fresh DB missing events.%s", col)
+		}
+	}
+}
+
+// TestMigrate_V2UpgradesToClipRecompress simulates a v2 database (current
+// baseline without the clip recompression columns) and verifies the v3 block
+// adds them and stamps the new version.
+func TestMigrate_V2UpgradesToClipRecompress(t *testing.T) {
+	db, _ := openRaw(t)
+
+	// A v2 events table: every column the v2 baseline had, but none of the
+	// v3 clip-recompression columns.
+	if _, err := db.Exec(`
+		CREATE TABLE events (
+			id TEXT PRIMARY KEY,
+			camera TEXT NOT NULL,
+			label TEXT NOT NULL,
+			score REAL NOT NULL,
+			box_x1 INTEGER, box_y1 INTEGER, box_x2 INTEGER, box_y2 INTEGER,
+			timestamp DATETIME NOT NULL,
+			end_time DATETIME,
+			snapshot_path TEXT,
+			snapshot_available BOOLEAN NOT NULL DEFAULT 0,
+			clip_path TEXT,
+			clip_available BOOLEAN NOT NULL DEFAULT 0,
+			zone_name TEXT,
+			object_name TEXT,
+			sub_label TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := setUserVersion(db, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, col := range []string{"recompressed", "recompressed_at", "recompress_failures", "clip_size_bytes"} {
+		exists, err := columnExists(db, "events", col)
+		if err != nil {
+			t.Fatalf("columnExists(%s): %v", col, err)
+		}
+		if !exists {
+			t.Errorf("v2->v3 upgrade missing events.%s", col)
+		}
+	}
+	if got := mustUserVersion(t, db); got != currentSchemaVersion {
+		t.Errorf("user_version = %d, want %d", got, currentSchemaVersion)
+	}
+	// Re-running migrate must be a no-op.
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
 // TestEnsureColumn_SurfacesRealErrors verifies the helper no longer swallows
 // genuine failures: adding a column to a non-existent table must error rather
 // than be silently ignored. Adding an already-present column is a clean no-op.
