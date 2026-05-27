@@ -17,9 +17,10 @@ type Config struct {
 	Protocol         string
 	Insecure         bool
 	ServiceName      string
-	FallbackEndpoint string // tracing endpoint, used when Endpoint is empty
-	FallbackProtocol string // tracing protocol, used when Endpoint is empty
-	FallbackInsecure bool   // tracing insecure flag, used when Endpoint is empty
+	Headers          map[string]string // sent on every OTLP export request (e.g. X-Scope-OrgID for multi-tenant Loki)
+	FallbackEndpoint string            // tracing endpoint, used when Endpoint is empty
+	FallbackProtocol string            // tracing protocol, used when Endpoint is empty
+	FallbackInsecure bool              // tracing insecure flag, used when Endpoint is empty
 }
 
 // usingFallback reports whether logs have no endpoint of their own and will

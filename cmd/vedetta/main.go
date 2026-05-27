@@ -408,6 +408,7 @@ func wireLogging(ctx context.Context, cfg *config.Config, base slog.Handler) *lo
 		Protocol:         cfg.Logging.Protocol,
 		Insecure:         cfg.Logging.Insecure,
 		ServiceName:      cfg.Logging.ServiceName,
+		Headers:          cfg.Logging.Headers,
 		FallbackEndpoint: cfg.Tracing.Endpoint,
 		FallbackProtocol: cfg.Tracing.Protocol,
 		FallbackInsecure: cfg.Tracing.Insecure,

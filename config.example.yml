@@ -197,3 +197,8 @@ logging:
   # reused tracing endpoint keeps tracing's insecure flag.
   insecure: true
   service_name: vedetta
+  # Headers attached to every OTLP log export request. The common use is a tenant
+  # header for a multi-tenant backend, e.g. X-Scope-OrgID for Loki. Omit when the
+  # backend needs none.
+  # headers:
+  #   X-Scope-OrgID: vedetta

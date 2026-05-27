@@ -943,6 +943,40 @@ func TestLoggingProtocolUnsetSurvivesForFallback(t *testing.T) {
 	}
 }
 
+func TestLoggingHeadersParsed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"logging:\n  enabled: true\n  endpoint: http://loki:3100/otlp/v1/logs\n" +
+		"  headers:\n    X-Scope-OrgID: vedetta\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if got := cfg.Logging.Headers["X-Scope-OrgID"]; got != "vedetta" {
+		t.Errorf("logging.headers[X-Scope-OrgID] = %q, want \"vedetta\"", got)
+	}
+}
+
+func TestLoggingRejectsEmptyHeaderKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"cameras:\n  - name: c1\n    url: rtsp://x/y\n" +
+		"logging:\n  enabled: true\n  endpoint: http://loki:3100/otlp/v1/logs\n" +
+		"  headers:\n    \"\": vedetta\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for empty logging.headers key")
+	}
+}
+
 func TestLoggingDisabledByDefault(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Logging.Enabled {

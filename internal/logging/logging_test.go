@@ -127,6 +127,50 @@ func TestInitExportsToOTLPReceiverWithResourceAndCorrelation(t *testing.T) {
 	}
 }
 
+func TestInitSendsConfiguredHeaders(t *testing.T) {
+	// Multi-tenant log backends (e.g. Loki) require a tenant header on every
+	// push. Configured headers must reach the OTLP receiver on the export request.
+	gotHeader := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case gotHeader <- r.Header.Get("X-Scope-OrgID"):
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	base := baseHandler(&buf)
+	p, err := Init(context.Background(), Config{
+		Enabled:     true,
+		Endpoint:    srv.URL,
+		Protocol:    "http/protobuf",
+		ServiceName: "vedetta-test",
+		Headers:     map[string]string{"X-Scope-OrgID": "vedetta"},
+	}, "v9.9.9", base)
+	if err != nil {
+		t.Fatalf("Init returned %v", err)
+	}
+
+	slog.New(p.Handler()).Info("hello-loki")
+
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Shutdown(sctx); err != nil {
+		t.Fatalf("Shutdown returned %v", err)
+	}
+
+	select {
+	case h := <-gotHeader:
+		if h != "vedetta" {
+			t.Errorf("X-Scope-OrgID header = %q, want \"vedetta\"", h)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no OTLP export received")
+	}
+}
+
 // noopExporter is a log.Exporter that discards all records and succeeds on all
 // lifecycle calls. It is used in tests that need Init to reach the
 // provider-creation path without a real OTLP collector.

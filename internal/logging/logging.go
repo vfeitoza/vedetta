@@ -108,6 +108,9 @@ func buildExporter(ctx context.Context, cfg Config, getenv func(string) string) 
 				}
 			}
 		}
+		if len(cfg.Headers) > 0 {
+			opts = append(opts, otlploggrpc.WithHeaders(cfg.Headers))
+		}
 		return otlploggrpc.New(ctx, opts...)
 	}
 	var opts []otlploghttp.Option
@@ -120,6 +123,9 @@ func buildExporter(ctx context.Context, cfg Config, getenv func(string) string) 
 				opts = append(opts, otlploghttp.WithInsecure())
 			}
 		}
+	}
+	if len(cfg.Headers) > 0 {
+		opts = append(opts, otlploghttp.WithHeaders(cfg.Headers))
 	}
 	return otlploghttp.New(ctx, opts...)
 }

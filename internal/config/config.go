@@ -106,6 +106,9 @@ type LoggingConfig struct {
 	Protocol    string `yaml:"protocol"`
 	Insecure    bool   `yaml:"insecure"`
 	ServiceName string `yaml:"service_name"`
+	// Headers are attached to every OTLP log export request. The common use is a
+	// tenant header for a multi-tenant backend, e.g. X-Scope-OrgID for Loki.
+	Headers map[string]string `yaml:"headers"`
 }
 
 // OpenH264Config controls OpenH264 codec auto-install behavior.
@@ -620,6 +623,11 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Logging.ServiceName == "" {
 		cfg.Logging.ServiceName = "vedetta"
+	}
+	for k := range cfg.Logging.Headers {
+		if strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("logging.headers: header name must not be empty")
+		}
 	}
 
 	return cfg, nil
