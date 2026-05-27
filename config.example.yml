@@ -43,8 +43,9 @@ recording:
   retain_days: 7            # delete continuous segments after N days
   event_retain_days: 30     # keep event clips longer
 
-  # Maximum total storage used by segments+clips. Triggers proactive trimming
-  # of the oldest segments. Recommended: 80-90% of the recording disk size.
+  # Maximum total storage used by segments (clips are not counted). Triggers
+  # proactive trimming of the oldest segments. Recommended: 80-90% of the
+  # recording disk size.
   # Default: empty (unlimited — relies purely on retain_days, risky on constrained disks).
   # max_storage: "400GB"
 
@@ -62,8 +63,10 @@ recording:
     min_retention: 1h       # keep at least this much, even in emergency
     batch_size: 50          # max segments dropped per emergency pass
 
-  # Tiered storage: scheduled overnight recompression of old segments to
-  # smaller resolutions, freeing disk while preserving history.
+  # Tiered storage: scheduled overnight recompression of old continuous
+  # segments AND aged event clips to smaller resolutions, freeing disk while
+  # preserving history. The same after_days / target / schedule / priority
+  # apply to both.
   tiered_storage:
     enabled: false
     after_days: 3           # only recompress segments older than this
