@@ -35,6 +35,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.3](https://github.com/rvben/vedetta/compare/v0.7.2...v0.7.3) - 2026-05-27
+
+### Added
+
+- **api**: surface clips_recompressed in health and system partial ([80c3a2c](https://github.com/rvben/vedetta/commit/80c3a2c9da954b144e6c012de3df6e5d0df612d0))
+- **recording**: expose clips_recompressed in recompression stats ([931d9e0](https://github.com/rvben/vedetta/commit/931d9e09223830c929444f821ad29d407a4dae94))
+- **recording**: label recompression kind in logs ([c108133](https://github.com/rvben/vedetta/commit/c10813387cf4402105cc5c7b13437080cdb85364))
+- **recording**: recompress event clips alongside segments ([6f4f1e5](https://github.com/rvben/vedetta/commit/6f4f1e58c91e64be70efb0de144119c8822bf8e7))
+- **storage**: backfill legacy clip sizes and reconcile missing files ([04e4bd5](https://github.com/rvben/vedetta/commit/04e4bd5d20e3d3fca28ff95249a442b821b10672))
+- **storage**: add GetClipRecompressState revalidation read ([2c4d04e](https://github.com/rvben/vedetta/commit/2c4d04ed71cf629fcf1a31e59bac8619bea49f6d))
+- **storage**: add clip recompress mark/increment/reset-stuck methods ([c6be6ab](https://github.com/rvben/vedetta/commit/c6be6ab32a05c3e72da13e10d7eeb48589b9a6f2))
+- **storage**: add clip recompression candidate queries ([7590757](https://github.com/rvben/vedetta/commit/7590757e59a87d322d184464207879bef373724a))
+- **storage**: add SetEventClip/ClearEventClip resetting clip recompression state ([bd47611](https://github.com/rvben/vedetta/commit/bd47611e63307bcac83cfc3a93136f1c2389530c))
+- **storage**: add events clip-recompression columns and v3 migration ([44370a1](https://github.com/rvben/vedetta/commit/44370a1fb94b8cc618fb778792ab1d6ff6456029))
+
+### Fixed
+
+- **recording**: preserve event clip mtime across recompression so retention is unaffected ([d1c2872](https://github.com/rvben/vedetta/commit/d1c287264f48e53080b405eb23a15f444e0e7abd))
+- **recording**: skip to next-largest segment when largest is HLS-served ([96b0cab](https://github.com/rvben/vedetta/commit/96b0cab8a2f55e2ebac00f1d1736144aa719c9e0))
+
 ## [0.7.2](https://github.com/rvben/vedetta/compare/v0.7.1...v0.7.2) - 2026-05-27
 
 ### Added
