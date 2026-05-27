@@ -32,6 +32,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.0](https://github.com/rvben/vedetta/compare/v0.6.2...v0.7.0) - 2026-05-27
+
+### Added
+
+- **logging**: wire OTLP log export into startup ([7015822](https://github.com/rvben/vedetta/commit/70158222a5202f667dc0078ab5e37e6b8b39fe93))
+- **config**: add logging OTLP export config block ([9f38842](https://github.com/rvben/vedetta/commit/9f38842ce6f6915f66fc7a81d444b2f3a8ece097))
+- **logging**: add OTLP log exporter Init and Provider ([625c3d2](https://github.com/rvben/vedetta/commit/625c3d290f126b560ccd358b479983f1c8ae1ba5))
+- **logging**: add logs OTLP endpoint/protocol resolution ([efe1f3a](https://github.com/rvben/vedetta/commit/efe1f3a43a8732c09b4ef215e466b4fcaed27884))
+- **logging**: add fan-out slog handler ([af6e42b](https://github.com/rvben/vedetta/commit/af6e42bcd644aeec9b62914743df5967d28cfe8e))
+- **logging**: add level-gate slog handler ([6f13d4e](https://github.com/rvben/vedetta/commit/6f13d4e8e5542e803f9ba2fa1816fda79454885f))
+- **otelexport**: add shared OTLP endpoint classification ([411c1f4](https://github.com/rvben/vedetta/commit/411c1f4487510b63d11e811140c6e736675c1d68))
+- **auth**: add least-privilege metrics:read scope for /metrics scraping ([243e4c5](https://github.com/rvben/vedetta/commit/243e4c5dea9f07dfa753788a0eee8ab0a512bb4c))
+
+### Fixed
+
+- **config**: keep logging.protocol unset so transport fallback works ([74fdef1](https://github.com/rvben/vedetta/commit/74fdef1b6b9ade56aa2e3b6517eee2711032b333))
+- **config**: normalize tracing and logging protocol before validation ([da1ae0c](https://github.com/rvben/vedetta/commit/da1ae0c5c548890489762fec416ee30c13090cb2))
+- **config**: validate logging.protocol like tracing ([09b2c2e](https://github.com/rvben/vedetta/commit/09b2c2e45cb91e51343e5b6acc93733b1479c7ff))
+- **logging,tracing**: share rate-limited OTLP error handler across signals ([124fe71](https://github.com/rvben/vedetta/commit/124fe71450e35c04631e58634bc88b9ed4112c05))
+- **logging**: tracing fallback protocol beats generic env for atomicity ([2937850](https://github.com/rvben/vedetta/commit/293785054090a112a47642ff65335fa9e14a836c))
+- **logging**: reuse tracing transport atomically on endpoint fallback ([34c5945](https://github.com/rvben/vedetta/commit/34c5945576e433bba20102744011b5e7e89d37e0))
+- **logging**: deep-clone grouped attrs per arm in fanout WithAttrs ([ca0c0be](https://github.com/rvben/vedetta/commit/ca0c0be8a22a640b8a5a6d55f9ee6d2975e5b1b7))
+- **logging**: clone attrs per arm in fanout WithAttrs ([48cdc31](https://github.com/rvben/vedetta/commit/48cdc3105fd89a750ab4a566a73fb15e886a430c))
+- **logging**: enforce level floor in levelGate.Handle for fan-out use ([01eae28](https://github.com/rvben/vedetta/commit/01eae28c31f1d75429454dc8fe3914b9f658224b))
+
 ## [0.6.2](https://github.com/rvben/vedetta/compare/v0.6.1...v0.6.2) - 2026-05-26
 
 ### Added
