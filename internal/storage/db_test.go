@@ -2079,3 +2079,27 @@ func TestResetStuckClipRecompressFailures_ClearsCappedClips(t *testing.T) {
 		t.Errorf("expected 1 eligible after reset, got %d", len(got))
 	}
 }
+
+// --- Task 5: GetClipRecompressState revalidation read ---
+
+func TestGetClipRecompressState(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	mustClipEvent(t, db, "rs", "cam1", now.Add(-48*time.Hour), 1000)
+
+	st, ok, err := db.GetClipRecompressState("rs")
+	if err != nil || !ok {
+		t.Fatalf("GetClipRecompressState: ok=%v err=%v", ok, err)
+	}
+	if st.ClipPath != "/clips/rs.mp4" || !st.ClipAvailable || st.Recompressed {
+		t.Errorf("state = %+v, want path /clips/rs.mp4, available true, recompressed false", st)
+	}
+
+	_, ok, err = db.GetClipRecompressState("does-not-exist")
+	if err != nil {
+		t.Fatalf("err for missing row: %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false for missing row")
+	}
+}
