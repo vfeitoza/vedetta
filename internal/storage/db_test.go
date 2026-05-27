@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -2101,5 +2102,63 @@ func TestGetClipRecompressState(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected ok=false for missing row")
+	}
+}
+
+// --- Task 6: BackfillClipSizes ---
+
+func TestBackfillClipSizes(t *testing.T) {
+	db := newTestDB(t)
+	dir := t.TempDir()
+	now := time.Now().UTC()
+
+	// Real file on disk, but the row has clip_size_bytes = 0 (legacy).
+	realPath := filepath.Join(dir, "real.mp4")
+	if err := os.WriteFile(realPath, make([]byte, 321), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evReal := makeEvent("real", "cam1", "person", 0.9, now.Add(-time.Hour))
+	evReal.EndTime = now.Add(-time.Hour)
+	mustSaveEvent(t, db, evReal)
+	if _, err := db.db.Exec("UPDATE events SET clip_path = ?, clip_available = 1, clip_size_bytes = 0 WHERE id = ?", realPath, "real"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Available row whose file is missing: must be reconciled to unavailable.
+	evGhost := makeEvent("ghost", "cam1", "person", 0.9, now.Add(-time.Hour))
+	evGhost.EndTime = now.Add(-time.Hour)
+	mustSaveEvent(t, db, evGhost)
+	if _, err := db.db.Exec("UPDATE events SET clip_path = ?, clip_available = 1, clip_size_bytes = 0 WHERE id = ?", filepath.Join(dir, "missing.mp4"), "ghost"); err != nil {
+		t.Fatal(err)
+	}
+
+	examined, err := db.BackfillClipSizes(100)
+	if err != nil {
+		t.Fatalf("BackfillClipSizes: %v", err)
+	}
+	if examined != 2 {
+		t.Errorf("examined = %d, want 2", examined)
+	}
+
+	var realSize int64
+	if err := db.QueryRowForTest("SELECT clip_size_bytes FROM events WHERE id = ?", "real").Scan(&realSize); err != nil {
+		t.Fatal(err)
+	}
+	if realSize != 321 {
+		t.Errorf("real clip_size_bytes = %d, want 321", realSize)
+	}
+
+	st, _, _ := db.GetClipRecompressState("ghost")
+	if st.ClipAvailable {
+		t.Error("ghost clip should be reconciled to unavailable")
+	}
+
+	// A second pass examines nothing (real now has a size, ghost is unavailable).
+	examined, err = db.BackfillClipSizes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if examined != 0 {
+		t.Errorf("second pass examined = %d, want 0", examined)
 	}
 }

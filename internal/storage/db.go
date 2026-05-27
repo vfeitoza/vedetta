@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -945,6 +946,51 @@ func (d *DB) GetClipRecompressState(eventID string) (ClipRecompressState, bool, 
 	}
 	s.ClipPath = clipPath.String
 	return s, true, nil
+}
+
+// BackfillClipSizes stats up to batch clips that are available but have no
+// recorded size (legacy rows at clip_size_bytes = 0) and persists their on-disk
+// size. A clip whose file is missing is reconciled to clip_available = 0 (the
+// same conclusion reconcileEventMediaAvailability reaches), so every examined
+// row leaves the candidate set and a bounded caller loop terminates. Returns
+// the number of rows examined.
+func (d *DB) BackfillClipSizes(batch int) (int, error) {
+	rows, err := d.db.Query(`
+		SELECT id, clip_path FROM events
+		WHERE clip_available = 1 AND clip_size_bytes = 0 AND clip_path != ''
+		LIMIT ?`, batch)
+	if err != nil {
+		return 0, err
+	}
+	type pending struct{ id, path string }
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.path); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		todo = append(todo, p)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	for _, p := range todo {
+		fi, statErr := os.Stat(p.path)
+		if statErr != nil {
+			if _, err := d.db.Exec("UPDATE events SET clip_available = 0 WHERE id = ?", p.id); err != nil {
+				return len(todo), err
+			}
+			continue
+		}
+		if _, err := d.db.Exec("UPDATE events SET clip_size_bytes = ? WHERE id = ?", fi.Size(), p.id); err != nil {
+			return len(todo), err
+		}
+	}
+	return len(todo), nil
 }
 
 // GetRecordingDays returns sorted day numbers that have segments for the given camera and month.
