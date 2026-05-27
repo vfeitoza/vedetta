@@ -93,6 +93,9 @@ type TracingConfig struct {
 	Protocol    string `yaml:"protocol"`
 	Insecure    bool   `yaml:"insecure"`
 	ServiceName string `yaml:"service_name"`
+	// Headers are attached to every OTLP trace export request. The common use is
+	// a tenant header for a multi-tenant backend, e.g. X-Scope-OrgID for Tempo.
+	Headers map[string]string `yaml:"headers"`
 }
 
 // LoggingConfig controls opt-in OTLP log export to a collector (e.g. for Loki).
@@ -608,6 +611,11 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Tracing.ServiceName == "" {
 		cfg.Tracing.ServiceName = "vedetta"
+	}
+	for k := range cfg.Tracing.Headers {
+		if strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("tracing.headers: header name must not be empty")
+		}
 	}
 
 	// Unlike tracing, logging.protocol is left empty when unset. The logging

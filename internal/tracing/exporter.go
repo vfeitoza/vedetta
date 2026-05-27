@@ -57,6 +57,9 @@ func buildExporter(ctx context.Context, cfg Config, getenv func(string) string) 
 				opts = append(opts, otlptracegrpc.WithInsecure())
 			}
 		}
+		if len(cfg.Headers) > 0 {
+			opts = append(opts, otlptracegrpc.WithHeaders(cfg.Headers))
+		}
 		return otlptracegrpc.New(ctx, opts...)
 	}
 	// default: OTLP/HTTP ("http", "http/protobuf", or unset)
@@ -68,6 +71,9 @@ func buildExporter(ctx context.Context, cfg Config, getenv func(string) string) 
 		if re.Insecure {
 			opts = append(opts, otlptracehttp.WithInsecure())
 		}
+	}
+	if len(cfg.Headers) > 0 {
+		opts = append(opts, otlptracehttp.WithHeaders(cfg.Headers))
 	}
 	return otlptracehttp.New(ctx, opts...)
 }

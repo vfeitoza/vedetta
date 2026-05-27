@@ -29,6 +29,7 @@ type Config struct {
 	Protocol    string
 	Insecure    bool
 	ServiceName string
+	Headers     map[string]string // sent on every OTLP export request (e.g. X-Scope-OrgID for multi-tenant Tempo)
 }
 
 const instrumentationScope = "github.com/rvben/vedetta"

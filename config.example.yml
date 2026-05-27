@@ -176,6 +176,11 @@ tracing:
   # Ignored for https:// URLs.
   insecure: true
   service_name: vedetta
+  # Headers attached to every OTLP trace export request. The common use is a
+  # tenant header for a multi-tenant backend, e.g. X-Scope-OrgID for Tempo. Omit
+  # when the backend needs none.
+  # headers:
+  #   X-Scope-OrgID: vedetta
 
 # Optional OTLP log export (opt-in, default off). When enabled, logs are written
 # to both stdout (as before) AND shipped to an OpenTelemetry collector (e.g. for
