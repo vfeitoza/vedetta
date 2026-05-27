@@ -337,6 +337,17 @@ func (r *Recompressor) processOne() bool {
 		return true
 	}
 
+	// Clip retention deletes by file mtime, so capture the clip's mtime before
+	// transcoding and restore it afterward. Recompression rewrites the file
+	// (temp + rename), which would otherwise reset the retention clock and keep
+	// the clip far longer than event_retain_days.
+	var clipModTime time.Time
+	if best.kind == kindClip {
+		if fi, statErr := os.Stat(best.path); statErr == nil {
+			clipModTime = fi.ModTime()
+		}
+	}
+
 	start := time.Now()
 	result, err := r.safeTranscode(best.path)
 	if err != nil {
@@ -354,6 +365,11 @@ func (r *Recompressor) processOne() bool {
 	if err := r.markRecompressed(best, newSize); err != nil {
 		slog.Error("recompression: failed to mark recompressed", "kind", best.kind, "path", best.path, "error", err)
 		return true
+	}
+	if best.kind == kindClip && !result.Skipped && !clipModTime.IsZero() {
+		if cherr := os.Chtimes(best.path, clipModTime, clipModTime); cherr != nil {
+			slog.Warn("recompression: failed to preserve clip mtime", "id", best.eventID, "path", best.path, "error", cherr)
+		}
 	}
 	if result.Skipped {
 		slog.Debug("recompression: skipped (already small enough)", "path", best.path)

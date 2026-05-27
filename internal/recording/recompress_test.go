@@ -658,3 +658,45 @@ func TestRecompressor_ConcurrentWithCleanup(t *testing.T) {
 		}
 	}
 }
+
+func TestRecompressor_PreservesClipModTimeAcrossRecompression(t *testing.T) {
+	_, db := newTestRecompressor(t)
+	dir := t.TempDir()
+
+	clipPath := seedClip(t, db, dir, "clipM", "cam1", 47*time.Hour, 500)
+
+	// Set a known old mtime so the retention-by-mtime logic treats this clip as
+	// nearly expiring. After recompression the mtime must be restored to this
+	// value, not bumped to now.
+	oldMod := time.Now().Add(-47 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(clipPath, oldMod, oldMod); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.TieredStorageConfig{
+		Enabled: true, AfterDays: 1, Schedule: "00:00-23:59",
+		Interval: time.Second, Priority: "largest", TargetWidth: 640, TargetHeight: 360,
+	}
+	r := NewRecompressor(cfg, []config.CameraConfig{{Name: "cam1"}}, db, &sync.Mutex{})
+
+	// Fake transcode rewrites the file (mimicking the real temp+rename mtime bump)
+	// and returns a smaller size.
+	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {
+		if err := os.WriteFile(path, make([]byte, 50), 0o644); err != nil {
+			return media.TranscodeResult{}, err
+		}
+		return media.TranscodeResult{OriginalSize: 500, NewSize: 50}, nil
+	}
+
+	if !r.processOne() {
+		t.Fatal("processOne returned false, want true")
+	}
+
+	fi, err := os.Stat(clipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := fi.ModTime().Sub(oldMod); d > 2*time.Second || d < -2*time.Second {
+		t.Errorf("clip mtime not preserved: got %v, want ~%v (diff %v)", fi.ModTime(), oldMod, d)
+	}
+}
