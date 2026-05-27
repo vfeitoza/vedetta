@@ -1919,6 +1919,30 @@ func TestSetEventClip_PersistsAndResetsState(t *testing.T) {
 	}
 }
 
+// mustClipEvent saves an event with an end time and an attached clip of the
+// given size, making it a recompression candidate.
+func mustClipEvent(t *testing.T, db *DB, id, cam string, endTime time.Time, size int64) {
+	t.Helper()
+	ev := makeEvent(id, cam, "person", 0.9, endTime.Add(-time.Minute))
+	ev.EndTime = endTime
+	mustSaveEvent(t, db, ev)
+	if err := db.SetEventClip(id, "/clips/"+id+".mp4", size); err != nil {
+		t.Fatalf("SetEventClip(%s): %v", id, err)
+	}
+}
+
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestClearEventClip_ZeroesPathSizeAndState(t *testing.T) {
 	db := newTestDB(t)
 	ev := makeEvent("clip-clear", "cam1", "person", 0.9, time.Now().UTC())
@@ -1941,5 +1965,60 @@ func TestClearEventClip_ZeroesPathSizeAndState(t *testing.T) {
 	}
 	if size != 0 {
 		t.Errorf("clip_size_bytes = %d, want 0", size)
+	}
+}
+
+// --- Task 3: clip recompression candidate queries ---
+
+func TestClipCandidates_EligibilityAndOrdering(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	old := now.Add(-48 * time.Hour)
+
+	mustClipEvent(t, db, "big", "cam1", old, 500)            // eligible, large
+	mustClipEvent(t, db, "small", "cam1", old.Add(time.Hour), 100) // eligible, smaller, newer
+	mustClipEvent(t, db, "toonew", "cam1", now, 900)         // too new (after cutoff)
+
+	// Ineligible: already recompressed.
+	mustClipEvent(t, db, "done", "cam1", old, 700)
+	if err := db.MarkClipRecompressed("done", 70); err != nil {
+		t.Fatal(err)
+	}
+	// Ineligible: at the failure cap.
+	mustClipEvent(t, db, "stuck", "cam1", old, 800)
+	for i := 0; i < 3; i++ {
+		if err := db.IncrementClipRecompressFailures("stuck"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Ineligible: clip not available.
+	mustClipEvent(t, db, "gone", "cam1", old, 600)
+	if err := db.ClearEventClip("gone"); err != nil {
+		t.Fatal(err)
+	}
+
+	cutoff := now.Add(-1 * time.Hour)
+
+	bySize, err := db.GetClipRecompressionCandidatesBySize("cam1", cutoff, 10)
+	if err != nil {
+		t.Fatalf("GetClipRecompressionCandidatesBySize: %v", err)
+	}
+	gotIDs := func(cs []ClipRecord) []string {
+		out := make([]string, len(cs))
+		for i, c := range cs {
+			out[i] = c.EventID
+		}
+		return out
+	}
+	if want := []string{"big", "small"}; !equalStrs(gotIDs(bySize), want) {
+		t.Errorf("by size = %v, want %v", gotIDs(bySize), want)
+	}
+
+	byAge, err := db.GetClipsForRecompression("cam1", cutoff)
+	if err != nil {
+		t.Fatalf("GetClipsForRecompression: %v", err)
+	}
+	if want := []string{"big", "small"}; !equalStrs(gotIDs(byAge), want) {
+		t.Errorf("by age = %v, want %v", gotIDs(byAge), want)
 	}
 }

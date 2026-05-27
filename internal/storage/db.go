@@ -816,6 +816,88 @@ func (d *DB) IncrementSegmentRecompressFailures(id int64) error {
 	return err
 }
 
+// ClipRecord identifies an event clip eligible for recompression.
+type ClipRecord struct {
+	EventID            string
+	Camera             string
+	ClipPath           string
+	ClipSizeBytes      int64
+	EndTime            time.Time
+	RecompressFailures int
+}
+
+// clipRecompressEligible is the shared WHERE clause selecting clips that can be
+// recompressed: a present clip file (clip_available), an event that has ended
+// before the cutoff, not yet recompressed, and under the 3-failure cap. The
+// single positional parameter is the cutoff.
+const clipRecompressEligible = `clip_available = 1 AND end_time IS NOT NULL AND end_time < ? AND recompressed = 0 AND recompress_failures < 3`
+
+// GetClipsForRecompression returns eligible clips for a camera ordered oldest
+// first (for priority=oldest).
+func (d *DB) GetClipsForRecompression(camera string, cutoff time.Time) ([]ClipRecord, error) {
+	rows, err := d.db.Query(`
+		SELECT id, camera, clip_path, clip_size_bytes, end_time, recompress_failures
+		FROM events
+		WHERE camera = ? AND `+clipRecompressEligible+`
+		ORDER BY end_time ASC`,
+		camera, utc(cutoff),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanClips(rows)
+}
+
+// GetClipRecompressionCandidatesBySize returns eligible clips for a camera
+// ordered largest first (for priority=largest), capped at limit.
+func (d *DB) GetClipRecompressionCandidatesBySize(camera string, cutoff time.Time, limit int) ([]ClipRecord, error) {
+	rows, err := d.db.Query(`
+		SELECT id, camera, clip_path, clip_size_bytes, end_time, recompress_failures
+		FROM events
+		WHERE camera = ? AND `+clipRecompressEligible+`
+		ORDER BY clip_size_bytes DESC, end_time ASC
+		LIMIT ?`,
+		camera, utc(cutoff), limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanClips(rows)
+}
+
+func scanClips(rows *sql.Rows) ([]ClipRecord, error) {
+	var out []ClipRecord
+	for rows.Next() {
+		var c ClipRecord
+		var clipPath sql.NullString
+		var endTime sql.NullTime
+		if err := rows.Scan(&c.EventID, &c.Camera, &clipPath, &c.ClipSizeBytes, &endTime, &c.RecompressFailures); err != nil {
+			return nil, err
+		}
+		c.ClipPath = clipPath.String
+		if endTime.Valid {
+			c.EndTime = endTime.Time
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ResetStuckClipRecompressFailures clears the failure counter for clips that
+// hit the 3-failure cap without being recompressed, so a transiently missing
+// codec does not permanently exclude a clip. Returns the number of rows reset.
+func (d *DB) ResetStuckClipRecompressFailures() (int64, error) {
+	res, err := d.db.Exec(
+		"UPDATE events SET recompress_failures = 0 WHERE recompress_failures >= 3 AND recompressed = 0 AND clip_available = 1",
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // MarkClipRecompressed updates an event after its clip was successfully
 // recompressed: it sets the flag, the timestamp, and the new on-disk size.
 func (d *DB) MarkClipRecompressed(eventID string, newSize int64) error {
