@@ -355,6 +355,50 @@ func TestLoadErrors(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	// Strict decoding turns silently-ignored config keys (typos, removed/dead
+	// options like a former tracing.sample_ratio) into hard errors, so a stale
+	// or misspelled key can never be silently dropped.
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "unknown top-level key",
+			yaml: "cameras:\n  - name: front\n    url: rtsp://localhost/stream\nnonsense: true\n",
+		},
+		{
+			name: "unknown nested key",
+			yaml: "cameras:\n  - name: front\n    url: rtsp://localhost/stream\ntracing:\n  sample_ratio: 0.05\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.yaml)
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load() should reject unknown config keys")
+			}
+			if got := err.Error(); !contains(got, "parsing config") {
+				t.Errorf("error %q should be wrapped as a parse error", got)
+			}
+		})
+	}
+}
+
+func TestLoadExampleConfig(t *testing.T) {
+	// The shipped reference config must parse under strict decoding: every key it
+	// documents has to map to a real struct field, so the example can never drift
+	// into documenting a dead or misspelled option.
+	path := filepath.Join("..", "..", "config.example.yml")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("example config not found: %v", err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("config.example.yml must load cleanly: %v", err)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load("/nonexistent/path/config.yaml")
 	if err == nil {

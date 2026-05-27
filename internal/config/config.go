@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"net/url"
 	"os"
@@ -471,7 +474,12 @@ func Load(path string) (*Config, error) {
 
 	cfg := Defaults()
 
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	// Strict decoding: unknown keys (typos, removed/dead options) are errors
+	// rather than silently dropped, so config can never lie about what it sets.
+	// An empty document yields io.EOF, which keeps the defaults above.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
