@@ -523,3 +523,15 @@ func TestRecompressor_RunNowDrainsSegmentsAndClips(t *testing.T) {
 		t.Error("processOne should return false after draining")
 	}
 }
+
+func TestRecompressKind_String(t *testing.T) {
+	if got := kindSegment.String(); got != "segment" {
+		t.Errorf("kindSegment.String() = %q, want \"segment\"", got)
+	}
+	if got := kindClip.String(); got != "clip" {
+		t.Errorf("kindClip.String() = %q, want \"clip\"", got)
+	}
+	if got := recompressKind(99).String(); got != "unknown" {
+		t.Errorf("recompressKind(99).String() = %q, want \"unknown\"", got)
+	}
+}

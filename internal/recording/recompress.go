@@ -204,6 +204,18 @@ const (
 	kindClip
 )
 
+// String renders the kind for structured logs.
+func (k recompressKind) String() string {
+	switch k {
+	case kindSegment:
+		return "segment"
+	case kindClip:
+		return "clip"
+	default:
+		return "unknown"
+	}
+}
+
 // recompressTarget is a data-only candidate for recompression. Segment IDs are
 // int64 and clip (event) IDs are string, so the target carries both rather than
 // a lossy stringly-typed id; behavior is selected by kind.
