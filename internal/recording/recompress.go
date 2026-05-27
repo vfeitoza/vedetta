@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
-// Recompressor runs scheduled overnight transcoding of old segments.
+// Recompressor runs scheduled overnight transcoding of old segments and event clips.
 type Recompressor struct {
 	cfg     config.TieredStorageConfig
 	cameras []config.CameraConfig
@@ -32,6 +33,7 @@ type Recompressor struct {
 	mu                   sync.Mutex
 	lastRun              time.Time
 	segmentsRecompressed int64
+	clipsRecompressed    int64
 	bytesReclaimed       int64
 }
 
@@ -45,6 +47,7 @@ func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConf
 type RecompressorStats struct {
 	LastRun              time.Time
 	SegmentsRecompressed int64
+	ClipsRecompressed    int64
 	BytesReclaimed       int64
 	IsRunning            bool
 }
@@ -56,6 +59,7 @@ func (r *Recompressor) Stats() RecompressorStats {
 	return RecompressorStats{
 		LastRun:              r.lastRun,
 		SegmentsRecompressed: r.segmentsRecompressed,
+		ClipsRecompressed:    r.clipsRecompressed,
 		BytesReclaimed:       r.bytesReclaimed,
 		IsRunning:            r.isRunning.Load(),
 	}
@@ -78,6 +82,18 @@ func (r *Recompressor) Start(ctx context.Context) {
 	} else if reset > 0 {
 		slog.Info("recompression: reset stuck failure counters", "segments", reset)
 	}
+
+	if reset, err := r.db.ResetStuckClipRecompressFailures(); err != nil {
+		slog.Warn("recompression: failed to reset stuck clip failures", "error", err)
+	} else if reset > 0 {
+		slog.Info("recompression: reset stuck clip failure counters", "clips", reset)
+	}
+
+	// Backfill missing clip sizes once, in bounded batches under the shared
+	// lock, before the worker starts. The largest-first query orders by
+	// clip_size_bytes, so legacy rows at 0 would otherwise lose to any
+	// positive-size candidate until nothing else was eligible.
+	r.backfillClipSizes()
 
 	go func() {
 		interval := r.cfg.Interval
@@ -157,10 +173,55 @@ func (r *Recompressor) safeTranscode(path string) (result media.TranscodeResult,
 	return r.transcodeFn(path, r.cfg.TargetWidth, r.cfg.TargetHeight)
 }
 
-// processOne picks the single best eligible segment across all enabled cameras and transcodes it.
-// When priority is "largest" (default), picks the segment with the most bytes to reclaim.
-// When priority is "oldest", picks the segment with the earliest end time.
-// Returns true if a segment was processed, false if nothing was eligible.
+// backfillClipSizes runs the one-time clip size backfill in bounded batches.
+// Each batch is taken under the shared lock so it cannot race manual delete /
+// re-extract / cleanup into a stale size.
+func (r *Recompressor) backfillClipSizes() {
+	const batch = 200
+	total := 0
+	for {
+		r.lock.Lock()
+		examined, err := r.db.BackfillClipSizes(batch)
+		r.lock.Unlock()
+		if err != nil {
+			slog.Warn("recompression: clip size backfill failed", "error", err)
+			return
+		}
+		total += examined
+		if examined < batch {
+			break
+		}
+	}
+	if total > 0 {
+		slog.Info("recompression: backfilled clip sizes", "examined", total)
+	}
+}
+
+type recompressKind int
+
+const (
+	kindSegment recompressKind = iota
+	kindClip
+)
+
+// recompressTarget is a data-only candidate for recompression. Segment IDs are
+// int64 and clip (event) IDs are string, so the target carries both rather than
+// a lossy stringly-typed id; behavior is selected by kind.
+type recompressTarget struct {
+	kind      recompressKind
+	segID     int64  // valid when kind == kindSegment
+	eventID   string // valid when kind == kindClip
+	camera    string
+	path      string
+	sizeBytes int64
+	endTime   time.Time
+	failures  int
+}
+
+// processOne picks the single best eligible artifact (segment or clip) across
+// all enabled cameras, ranked by the configured priority, and transcodes it.
+// Returns true if an artifact was processed (or deliberately skipped after
+// acquiring the lock), false if nothing was eligible.
 func (r *Recompressor) processOne() bool {
 	now := time.Now()
 
@@ -169,10 +230,30 @@ func (r *Recompressor) processOne() bool {
 		priority = "largest"
 	}
 
-	var bestSeg *storage.SegmentRecord
+	var best *recompressTarget
+	consider := func(c recompressTarget) {
+		if best == nil {
+			t := c
+			best = &t
+			return
+		}
+		if priority == "largest" {
+			if c.sizeBytes > best.sizeBytes {
+				t := c
+				best = &t
+			}
+		} else if c.endTime.Before(best.endTime) {
+			t := c
+			best = &t
+		}
+	}
+
 	for camName, eff := range r.eligibleCameras() {
 		cutoff := now.Add(-time.Duration(eff.AfterDays) * 24 * time.Hour)
 
+		// Best segment candidate. Skip in-use (HLS-served) segments during
+		// selection so an in-use segment never becomes the best target and
+		// stalls the whole cycle.
 		var segs []storage.SegmentRecord
 		var err error
 		if priority == "largest" {
@@ -181,91 +262,159 @@ func (r *Recompressor) processOne() bool {
 			segs, err = r.db.GetSegmentsForRecompression(camName, cutoff)
 		}
 		if err != nil {
-			slog.Warn("recompression: query failed", "camera", camName, "error", err)
-			continue
-		}
-		if len(segs) == 0 {
-			continue
-		}
-		candidate := segs[0]
-
-		if bestSeg == nil {
-			bestSeg = &candidate
-			continue
-		}
-		if priority == "largest" {
-			if candidate.SizeBytes > bestSeg.SizeBytes {
-				bestSeg = &candidate
-			}
+			slog.Warn("recompression: segment query failed", "camera", camName, "error", err)
 		} else {
-			if candidate.EndTime.Before(bestSeg.EndTime) {
-				bestSeg = &candidate
+			for _, s := range segs {
+				if media.HLSPathInUse(s.Path) {
+					continue
+				}
+				consider(recompressTarget{
+					kind: kindSegment, segID: s.ID, camera: s.Camera,
+					path: s.Path, sizeBytes: s.SizeBytes, endTime: s.EndTime,
+					failures: s.RecompressFailures,
+				})
+				break // segs is priority-ordered; first non-in-use wins
 			}
+		}
+
+		// Best clip candidate. Clips are not HLS-served, so no in-use check.
+		var clips []storage.ClipRecord
+		if priority == "largest" {
+			clips, err = r.db.GetClipRecompressionCandidatesBySize(camName, cutoff, 1)
+		} else {
+			clips, err = r.db.GetClipsForRecompression(camName, cutoff)
+		}
+		if err != nil {
+			slog.Warn("recompression: clip query failed", "camera", camName, "error", err)
+		} else if len(clips) > 0 {
+			c := clips[0]
+			consider(recompressTarget{
+				kind: kindClip, eventID: c.EventID, camera: c.Camera,
+				path: c.ClipPath, sizeBytes: c.ClipSizeBytes, endTime: c.EndTime,
+				failures: c.RecompressFailures,
+			})
 		}
 	}
 
-	if bestSeg == nil {
+	if best == nil {
 		return false
 	}
 
-	if media.HLSPathInUse(bestSeg.Path) {
-		slog.Debug("recompression: skipping in-use segment", "path", bestSeg.Path)
-		return false
-	}
-
-	// Acquire the shared segment-operation lock before touching the file or
-	// the DB row. TryLock is intentional: the recompressor is a background
-	// optimization and it is preferable to skip a cycle rather than block a
-	// user-initiated delete or urgent cleanup that may be waiting.
+	// Acquire the shared segment-operation lock. TryLock is intentional: the
+	// recompressor is a background optimization and it is preferable to skip a
+	// cycle than to block a user-initiated delete or urgent cleanup.
 	if !r.lock.TryLock() {
-		slog.Debug("recompression: skipping (another segment operation in flight)", "path", bestSeg.Path)
+		slog.Debug("recompression: skipping (another operation in flight)", "path", best.path)
 		return false
 	}
 	defer r.lock.Unlock()
 
+	// Revalidate under the lock: candidate selection happened before we held
+	// the lock, so cleanup / delete / re-extract may have changed DB or
+	// filesystem state.
+	if !r.revalidate(best) {
+		return true
+	}
+
 	start := time.Now()
-	result, err := r.safeTranscode(bestSeg.Path)
+	result, err := r.safeTranscode(best.path)
 	if err != nil {
 		slog.Warn("recompression: failed",
-			"camera", bestSeg.Camera,
-			"path", bestSeg.Path,
-			"error", err,
-			"retry", bestSeg.RecompressFailures+1,
-		)
-		if dbErr := r.db.IncrementSegmentRecompressFailures(bestSeg.ID); dbErr != nil {
-			slog.Error("recompression: failed to increment failure count", "id", bestSeg.ID, "error", dbErr)
-		}
+			"kind", best.kind, "camera", best.camera, "path", best.path,
+			"error", err, "retry", best.failures+1)
+		r.incrementFailure(best)
 		return true
 	}
 
+	newSize := result.NewSize
 	if result.Skipped {
-		// Mark as done so it is never reconsidered
-		if err := r.db.MarkSegmentRecompressed(bestSeg.ID, bestSeg.SizeBytes); err != nil {
-			slog.Error("recompression: failed to mark skipped segment", "id", bestSeg.ID, "error", err)
-		}
-		slog.Debug("recompression: skipped (already small enough)", "path", bestSeg.Path)
+		newSize = best.sizeBytes
+	}
+	if err := r.markRecompressed(best, newSize); err != nil {
+		slog.Error("recompression: failed to mark recompressed", "kind", best.kind, "path", best.path, "error", err)
 		return true
 	}
-
-	if err := r.db.MarkSegmentRecompressed(bestSeg.ID, result.NewSize); err != nil {
-		slog.Error("recompression: failed to mark segment recompressed", "id", bestSeg.ID, "error", err)
+	if result.Skipped {
+		slog.Debug("recompression: skipped (already small enough)", "path", best.path)
 		return true
 	}
 
 	saved := result.OriginalSize - result.NewSize
 	r.mu.Lock()
 	r.lastRun = time.Now()
-	r.segmentsRecompressed++
+	switch best.kind {
+	case kindSegment:
+		r.segmentsRecompressed++
+	case kindClip:
+		r.clipsRecompressed++
+	}
 	r.bytesReclaimed += saved
 	r.mu.Unlock()
 
 	slog.Info("recompression: completed",
-		"camera", bestSeg.Camera,
-		"path", bestSeg.Path,
+		"kind", best.kind, "camera", best.camera, "path", best.path,
 		"original_mb", result.OriginalSize/(1024*1024),
 		"new_mb", result.NewSize/(1024*1024),
 		"saved_mb", saved/(1024*1024),
-		"duration", time.Since(start).Round(time.Second),
-	)
+		"duration", time.Since(start).Round(time.Second))
 	return true
+}
+
+// revalidate re-reads the target's row under the lock and returns true only if
+// the artifact is still eligible to transcode.
+func (r *Recompressor) revalidate(t *recompressTarget) bool {
+	switch t.kind {
+	case kindSegment:
+		seg, err := r.db.GetSegmentByID(t.segID)
+		if err != nil {
+			slog.Warn("recompression: revalidate segment failed", "id", t.segID, "error", err)
+			return false
+		}
+		return seg != nil && !seg.Recompressed
+	case kindClip:
+		st, ok, err := r.db.GetClipRecompressState(t.eventID)
+		if err != nil {
+			slog.Warn("recompression: revalidate clip failed", "id", t.eventID, "error", err)
+			return false
+		}
+		if !ok || !st.ClipAvailable || st.Recompressed || st.ClipPath != t.path {
+			return false
+		}
+		// Missing-file check: cleanup may have deleted the file after
+		// selection, or a legacy row may carry a stale clip_available. Flip
+		// availability off and skip rather than waste a transcode or record a
+		// spurious failure. Relevant under priority=oldest, which ignores size
+		// and could otherwise pick a size-0 missing clip.
+		if _, err := os.Stat(t.path); err != nil {
+			if uerr := r.db.UpdateEventClipAvailability(t.eventID, false); uerr != nil {
+				slog.Warn("recompression: clear stale clip availability", "id", t.eventID, "error", uerr)
+			}
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func (r *Recompressor) markRecompressed(t *recompressTarget, newSize int64) error {
+	switch t.kind {
+	case kindSegment:
+		return r.db.MarkSegmentRecompressed(t.segID, newSize)
+	case kindClip:
+		return r.db.MarkClipRecompressed(t.eventID, newSize)
+	}
+	return nil
+}
+
+func (r *Recompressor) incrementFailure(t *recompressTarget) {
+	var err error
+	switch t.kind {
+	case kindSegment:
+		err = r.db.IncrementSegmentRecompressFailures(t.segID)
+	case kindClip:
+		err = r.db.IncrementClipRecompressFailures(t.eventID)
+	}
+	if err != nil {
+		slog.Error("recompression: failed to increment failure count", "kind", t.kind, "error", err)
+	}
 }
