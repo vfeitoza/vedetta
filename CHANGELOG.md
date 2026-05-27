@@ -34,6 +34,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.2](https://github.com/rvben/vedetta/compare/v0.7.1...v0.7.2) - 2026-05-27
+
+### Added
+
+- **config**: reject unknown keys with strict YAML decoding ([80e995c](https://github.com/rvben/vedetta/commit/80e995c64a961824a2b476d60ac66ab66f270b31))
+- **tracing**: support OTLP export headers in config ([c11aa33](https://github.com/rvben/vedetta/commit/c11aa33a675b72b97d34e4ae75e6d0dccede40ba))
+
 ## [0.7.1](https://github.com/rvben/vedetta/compare/v0.7.0...v0.7.1) - 2026-05-27
 
 ### Added
