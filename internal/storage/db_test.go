@@ -2022,3 +2022,60 @@ func TestClipCandidates_EligibilityAndOrdering(t *testing.T) {
 		t.Errorf("by age = %v, want %v", gotIDs(byAge), want)
 	}
 }
+
+// --- Task 4: MarkClipRecompressed / IncrementClipRecompressFailures / ResetStuckClipRecompressFailures ---
+
+func TestMarkClipRecompressed_SetsFlagTimestampSize(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	mustClipEvent(t, db, "mc", "cam1", now.Add(-48*time.Hour), 1000)
+
+	if err := db.MarkClipRecompressed("mc", 250); err != nil {
+		t.Fatalf("MarkClipRecompressed: %v", err)
+	}
+
+	st, ok, err := db.GetClipRecompressState("mc")
+	if err != nil || !ok {
+		t.Fatalf("GetClipRecompressState: ok=%v err=%v", ok, err)
+	}
+	if !st.Recompressed {
+		t.Error("expected recompressed=true")
+	}
+	var size int64
+	var at sql.NullTime
+	if err := db.QueryRowForTest("SELECT clip_size_bytes, recompressed_at FROM events WHERE id = ?", "mc").Scan(&size, &at); err != nil {
+		t.Fatal(err)
+	}
+	if size != 250 {
+		t.Errorf("clip_size_bytes = %d, want 250", size)
+	}
+	if !at.Valid {
+		t.Error("expected recompressed_at to be set")
+	}
+}
+
+func TestResetStuckClipRecompressFailures_ClearsCappedClips(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	mustClipEvent(t, db, "stuck", "cam1", now.Add(-48*time.Hour), 1000)
+	for i := 0; i < 3; i++ {
+		if err := db.IncrementClipRecompressFailures("stuck"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Not eligible while at the cap.
+	if got, _ := db.GetClipsForRecompression("cam1", now.Add(-time.Hour)); len(got) != 0 {
+		t.Fatalf("expected 0 eligible at cap, got %d", len(got))
+	}
+
+	reset, err := db.ResetStuckClipRecompressFailures()
+	if err != nil {
+		t.Fatalf("ResetStuckClipRecompressFailures: %v", err)
+	}
+	if reset != 1 {
+		t.Errorf("reset = %d, want 1", reset)
+	}
+	if got, _ := db.GetClipsForRecompression("cam1", now.Add(-time.Hour)); len(got) != 1 {
+		t.Errorf("expected 1 eligible after reset, got %d", len(got))
+	}
+}
