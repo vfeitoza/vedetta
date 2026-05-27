@@ -535,3 +535,13 @@ func TestRecompressKind_String(t *testing.T) {
 		t.Errorf("recompressKind(99).String() = %q, want \"unknown\"", got)
 	}
 }
+
+func TestRecompressionStats_HasClipsField(t *testing.T) {
+	// The recording.RecompressionStats snapshot must expose ClipsRecompressed
+	// so the API layer can surface it.
+	var s RecompressionStats
+	s.ClipsRecompressed = 7
+	if s.ClipsRecompressed != 7 {
+		t.Fatalf("ClipsRecompressed = %d, want 7", s.ClipsRecompressed)
+	}
+}

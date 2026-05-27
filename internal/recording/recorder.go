@@ -37,6 +37,7 @@ type RecompressionStats struct {
 	IsRunning            bool      `json:"is_running"`
 	LastRun              time.Time `json:"last_run,omitempty"`
 	SegmentsRecompressed int64     `json:"segments_recompressed"`
+	ClipsRecompressed    int64     `json:"clips_recompressed"`
 	BytesReclaimed       int64     `json:"bytes_reclaimed"`
 }
 
@@ -319,6 +320,7 @@ func (r *Recorder) RefreshStats() {
 		IsRunning:            rStats.IsRunning,
 		LastRun:              rStats.LastRun,
 		SegmentsRecompressed: rStats.SegmentsRecompressed,
+		ClipsRecompressed:    rStats.ClipsRecompressed,
 		BytesReclaimed:       rStats.BytesReclaimed,
 	}
 
