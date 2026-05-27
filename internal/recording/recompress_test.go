@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -543,5 +544,62 @@ func TestRecompressionStats_HasClipsField(t *testing.T) {
 	s.ClipsRecompressed = 7
 	if s.ClipsRecompressed != 7 {
 		t.Fatalf("ClipsRecompressed = %d, want 7", s.ClipsRecompressed)
+	}
+}
+
+func TestRecompressor_ConcurrentWithCleanup(t *testing.T) {
+	_, db := newTestRecompressor(t)
+	dir := t.TempDir()
+	lock := &sync.Mutex{}
+
+	for i := 0; i < 20; i++ {
+		seedClip(t, db, dir, fmt.Sprintf("c%d", i), "cam1", time.Duration(40+i)*time.Hour, 100+i)
+	}
+
+	cfg := config.TieredStorageConfig{
+		Enabled: true, AfterDays: 1, Schedule: "00:00-23:59",
+		Interval: time.Second, Priority: "largest", TargetWidth: 640, TargetHeight: 360,
+	}
+	r := NewRecompressor(cfg, []config.CameraConfig{{Name: "cam1"}}, db, lock)
+	r.transcodeFn = func(string, int, int) (media.TranscodeResult, error) {
+		return media.TranscodeResult{OriginalSize: 100, NewSize: 10}, nil
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Recompressor.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 30; i++ {
+			r.processOne()
+		}
+	}()
+	// Backfill batches (take the lock like Start would).
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+			lock.Lock()
+			_, _ = db.BackfillClipSizes(5)
+			lock.Unlock()
+		}
+	}()
+	// Simulated cleanup clearing clip refs under the lock.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+			lock.Lock()
+			_ = db.ClearEventClip(fmt.Sprintf("c%d", i))
+			lock.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	// State must be consistent: processOne drains without panicking or racing.
+	for i := 0; i < 30; i++ {
+		if !r.processOne() {
+			break
+		}
 	}
 }
