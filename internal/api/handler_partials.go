@@ -444,6 +444,7 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		RecompressRunning    bool
 		RecompressLastRun    string
 		RecompressSegments   int64
+		RecompressClips      int64
 		RecompressBytesSaved string
 		UpdateAvailable      bool
 		UpdateVersion        string
@@ -475,6 +476,7 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 		RecompressRunning:    rc.IsRunning,
 		RecompressLastRun:    lastRunStr,
 		RecompressSegments:   rc.SegmentsRecompressed,
+		RecompressClips:      rc.ClipsRecompressed,
 		RecompressBytesSaved: formatBytes(rc.BytesReclaimed),
 		OpenH264:             openH264,
 		OpenH264UI:           describeOpenH264Status(openH264),
@@ -589,6 +591,7 @@ const systemPartialTemplate = `<div class="sys-card">
   <div class="sys-card-body">
     <div class="sys-row"><span class="key">Last run</span><span class="val">{{.RecompressLastRun}}</span></div>
     <div class="sys-row"><span class="key">Segments</span><span class="val">{{.RecompressSegments}}</span></div>
+    <div class="sys-row"><span class="key">Clips</span><span class="val">{{.RecompressClips}}</span></div>
     <div class="sys-row"><span class="key">Space saved</span><span class="val">{{.RecompressBytesSaved}}</span></div>
     <div style="margin-top: 0.75rem">
       {{if .RecompressRunning}}

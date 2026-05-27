@@ -110,6 +110,7 @@ func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 				"recompression": map[string]any{
 					"enabled":               storageStats.Recompression.Enabled,
 					"segments_recompressed": storageStats.Recompression.SegmentsRecompressed,
+					"clips_recompressed":    storageStats.Recompression.ClipsRecompressed,
 					"bytes_reclaimed":       storageStats.Recompression.BytesReclaimed,
 					"last_run":              storageStats.Recompression.LastRun,
 				},

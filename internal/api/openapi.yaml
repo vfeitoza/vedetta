@@ -2951,12 +2951,16 @@ components:
 
     RecompressionStats:
       type: object
-      required: [enabled, segments_recompressed, bytes_reclaimed]
+      required: [enabled, segments_recompressed, clips_recompressed, bytes_reclaimed]
       properties:
         enabled:
           type: boolean
         segments_recompressed:
           type: integer
+          format: int64
+        clips_recompressed:
+          type: integer
+          format: int64
         bytes_reclaimed:
           type: integer
           format: int64
