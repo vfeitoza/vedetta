@@ -90,6 +90,20 @@
       </div>
     </section>
 
+    <section class="settings-panel storage-panel" id="recompress-panel" hidden>
+      <div class="settings-panel-header">
+        <h2>Recompression</h2>
+        <p>Aged segments and event clips are re-encoded to a lower resolution to reclaim disk space. Runs on a schedule; trigger a full pass now to process every eligible artifact immediately.</p>
+      </div>
+      <div class="storage-recompress">
+        <div id="recompress-stats" class="stats-row"></div>
+        <div class="storage-maint">
+          <div class="storage-maint-spacer"></div>
+          <button id="recompress-run-btn" class="btn btn-sm btn-primary">Run now</button>
+        </div>
+      </div>
+    </section>
+
     <section class="settings-panel storage-panel">
       <div class="settings-panel-header">
         <h2>Recent activity</h2>

@@ -60,11 +60,12 @@ type DayBytes struct {
 
 // StorageBreakdown is the response shape of GET /api/storage.
 type StorageBreakdown struct {
-	Recording       FilesystemStats   `json:"recording"`
-	Snapshots       FilesystemStats   `json:"snapshots"`
-	RecordingPaused bool              `json:"recording_paused"`
-	Projection      any               `json:"projection"`
-	Cameras         []CameraBreakdown `json:"cameras"`
+	Recording       FilesystemStats    `json:"recording"`
+	Snapshots       FilesystemStats    `json:"snapshots"`
+	RecordingPaused bool               `json:"recording_paused"`
+	Recompression   RecompressionStats `json:"recompression"`
+	Projection      any                `json:"projection"`
+	Cameras         []CameraBreakdown  `json:"cameras"`
 }
 
 // DeleteTarget enumerates the four valid delete shapes.
@@ -144,6 +145,7 @@ func (r *Recorder) StorageBreakdown() (*StorageBreakdown, error) {
 	out.Recording.UsedBytes = out.Recording.SegmentBytes + out.Recording.ClipBytes
 	out.Snapshots.UsedBytes = r.totalSnapshotBytes()
 	out.RecordingPaused = r.recordingPaused()
+	out.Recompression = r.recompressionStats()
 	out.Projection = r.projection()
 
 	r.storeBreakdown(out)

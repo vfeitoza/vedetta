@@ -109,6 +109,7 @@ func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
 				"recording_paused": storageStats.RecordingPaused,
 				"recompression": map[string]any{
 					"enabled":               storageStats.Recompression.Enabled,
+					"is_running":            storageStats.Recompression.IsRunning,
 					"segments_recompressed": storageStats.Recompression.SegmentsRecompressed,
 					"clips_recompressed":    storageStats.Recompression.ClipsRecompressed,
 					"bytes_reclaimed":       storageStats.Recompression.BytesReclaimed,

@@ -429,58 +429,40 @@ func (s *Server) handleSystemPartial(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	type sysData struct {
-		Version              string
-		Uptime               string
-		Decoder              string
-		GoVersion            string
-		CameraCount          int
-		OnlineCount          int
-		Statuses             []camera.CameraStatus
-		TotalBytes           int64
-		TotalStr             string
-		SegCount             int
-		Storage              []storageEntry
-		RecompressEnabled    bool
-		RecompressRunning    bool
-		RecompressLastRun    string
-		RecompressSegments   int64
-		RecompressClips      int64
-		RecompressBytesSaved string
-		UpdateAvailable      bool
-		UpdateVersion        string
-		UpdateURL            string
-		OpenH264             media.OpenH264Status
-		OpenH264UI           openH264Presentation
-		OpenH264SourceLabel  string
-	}
-
-	rc := stats.Recompression
-	lastRunStr := "never"
-	if !rc.LastRun.IsZero() {
-		lastRunStr = rc.LastRun.Format("2006-01-02 15:04")
+		Version             string
+		Uptime              string
+		Decoder             string
+		GoVersion           string
+		CameraCount         int
+		OnlineCount         int
+		Statuses            []camera.CameraStatus
+		TotalBytes          int64
+		TotalStr            string
+		SegCount            int
+		Storage             []storageEntry
+		UpdateAvailable     bool
+		UpdateVersion       string
+		UpdateURL           string
+		OpenH264            media.OpenH264Status
+		OpenH264UI          openH264Presentation
+		OpenH264SourceLabel string
 	}
 
 	data := sysData{
-		Version:              s.version,
-		Uptime:               uptimeStr,
-		Decoder:              decoderName,
-		GoVersion:            runtime.Version(),
-		CameraCount:          len(statuses),
-		OnlineCount:          onlineCount,
-		Statuses:             statuses,
-		TotalBytes:           totalBytes,
-		TotalStr:             formatBytes(totalBytes),
-		SegCount:             stats.SegmentCount,
-		Storage:              storageEntries,
-		RecompressEnabled:    rc.Enabled,
-		RecompressRunning:    rc.IsRunning,
-		RecompressLastRun:    lastRunStr,
-		RecompressSegments:   rc.SegmentsRecompressed,
-		RecompressClips:      rc.ClipsRecompressed,
-		RecompressBytesSaved: formatBytes(rc.BytesReclaimed),
-		OpenH264:             openH264,
-		OpenH264UI:           describeOpenH264Status(openH264),
-		OpenH264SourceLabel:  formatOpenH264Source(openH264.Source),
+		Version:             s.version,
+		Uptime:              uptimeStr,
+		Decoder:             decoderName,
+		GoVersion:           runtime.Version(),
+		CameraCount:         len(statuses),
+		OnlineCount:         onlineCount,
+		Statuses:            statuses,
+		TotalBytes:          totalBytes,
+		TotalStr:            formatBytes(totalBytes),
+		SegCount:            stats.SegmentCount,
+		Storage:             storageEntries,
+		OpenH264:            openH264,
+		OpenH264UI:          describeOpenH264Status(openH264),
+		OpenH264SourceLabel: formatOpenH264Source(openH264.Source),
 	}
 
 	if s.updateChecker != nil {
@@ -582,26 +564,4 @@ const systemPartialTemplate = `<div class="sys-card">
       <div class="storage-bar"><div class="storage-bar-fill" style="width: {{printf "%.0f" .Percent}}%"></div></div>
     </div>{{end}}
   </div>
-</div>
-{{if .RecompressEnabled}}<div class="sys-card">
-  <div class="sys-card-header">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-    Recompression
-  </div>
-  <div class="sys-card-body">
-    <div class="sys-row"><span class="key">Last run</span><span class="val">{{.RecompressLastRun}}</span></div>
-    <div class="sys-row"><span class="key">Segments</span><span class="val">{{.RecompressSegments}}</span></div>
-    <div class="sys-row"><span class="key">Clips</span><span class="val">{{.RecompressClips}}</span></div>
-    <div class="sys-row"><span class="key">Space saved</span><span class="val">{{.RecompressBytesSaved}}</span></div>
-    <div style="margin-top: 0.75rem">
-      {{if .RecompressRunning}}
-      <button class="btn btn-sm" disabled>Running…</button>
-      {{else}}
-      <button class="btn btn-sm"
-        hx-post="/api/system/recompress/trigger"
-        hx-swap="none"
-        data-recompress-trigger="true">Run now</button>
-      {{end}}
-    </div>
-  </div>
-</div>{{end}}`
+</div>`

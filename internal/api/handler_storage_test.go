@@ -36,6 +36,42 @@ func TestGetStorage_ReturnsBreakdown(t *testing.T) {
 	}
 }
 
+func TestGetStorage_IncludesRecompression(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/storage", nil)
+	w := httptest.NewRecorder()
+	s.GetStorage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, ok := out["recompression"].(map[string]any)
+	if !ok {
+		t.Fatalf("response missing 'recompression' object; got %v", out["recompression"])
+	}
+	for _, key := range []string{
+		"enabled", "is_running", "segments_recompressed",
+		"clips_recompressed", "bytes_reclaimed",
+	} {
+		if _, present := rc[key]; !present {
+			t.Errorf("recompression missing key %q", key)
+		}
+	}
+	// The test recorder has tiered storage disabled and an idle recompressor.
+	if rc["enabled"] != false {
+		t.Errorf("enabled=%v, want false (tiered storage off in test)", rc["enabled"])
+	}
+	if rc["is_running"] != false {
+		t.Errorf("is_running=%v, want false for idle recompressor", rc["is_running"])
+	}
+}
+
 func TestPostStorageDelete_DryRun(t *testing.T) {
 	s, db := newTestServer(t)
 

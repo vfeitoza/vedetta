@@ -429,18 +429,6 @@ document.body.addEventListener('htmx:afterSwap', function(event) {
   bindManagedUI(event.target || document);
 });
 
-document.body.addEventListener('htmx:afterRequest', function(event) {
-  var trigger = event.detail && event.detail.elt;
-  if (trigger && trigger.matches('[data-recompress-trigger]')) {
-    if (event.detail.successful) {
-      trigger.textContent = 'Started';
-      trigger.disabled = true;
-    } else {
-      trigger.textContent = 'Already running';
-    }
-  }
-});
-
 // ─── MSE over WebSocket ───
 
 // Watchdog timer: fires if no MSE data arrives within the timeout.

@@ -31,6 +31,34 @@ async function loadSummary() {
 
   renderSummaryCards(data);
   renderCameraTable(data.cameras || []);
+  renderRecompression(data.recompression);
+}
+
+function renderRecompression(rc) {
+  const panel = $("#recompress-panel");
+  if (!rc || !rc.enabled) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+
+  const lastRun = rc.last_run && !rc.last_run.startsWith("0001")
+    ? String(rc.last_run).replace("T", " ").slice(0, 16)
+    : "never";
+  $("#recompress-stats").innerHTML =
+    statCard("Last run", lastRun)
+    + statCard("Segments", rc.segments_recompressed || 0)
+    + statCard("Clips", rc.clips_recompressed || 0)
+    + statCard("Space saved", fmtBytes(rc.bytes_reclaimed || 0), "green");
+
+  const btn = $("#recompress-run-btn");
+  if (rc.is_running) {
+    btn.disabled = true;
+    btn.textContent = "Running…";
+  } else if (!btn.dataset.busy) {
+    btn.disabled = false;
+    btn.textContent = "Run now";
+  }
 }
 
 function statCard(label, value, tone) {
@@ -210,6 +238,40 @@ $("#run-cleanup-btn")?.addEventListener("click", () => {
       loadAudit();
     },
     { confirmLabel: "Run cleanup" },
+  );
+});
+
+$("#recompress-run-btn")?.addEventListener("click", () => {
+  showConfirmModal(
+    "Run recompression now",
+    "Re-encode every eligible aged segment and event clip to the configured lower resolution now? This runs outside the normal schedule window and may use significant CPU.",
+    async () => {
+      const btn = $("#recompress-run-btn");
+      btn.dataset.busy = "1";
+      btn.disabled = true;
+      btn.textContent = "Running…";
+      let r;
+      try {
+        r = await fetch("/api/system/recompress/trigger", { method: "POST" });
+      } catch {
+        delete btn.dataset.busy;
+        btn.disabled = false;
+        btn.textContent = "Run now";
+        toast("Recompression failed: network error.", "error");
+        return;
+      }
+      delete btn.dataset.busy;
+      if (r.status === 409) { toast("Recompression already running.", "error"); return; }
+      if (!r.ok) {
+        btn.disabled = false;
+        btn.textContent = "Run now";
+        toast("Recompression failed: " + (await r.text()), "error");
+        return;
+      }
+      toast("Recompression started.");
+      loadSummary();
+    },
+    { confirmLabel: "Run now" },
   );
 });
 

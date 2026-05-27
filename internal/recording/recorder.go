@@ -314,15 +314,7 @@ func (r *Recorder) RefreshStats() {
 	stats.DiskAvailable = r.segments.DiskAvailable()
 	stats.DiskLow = stats.DiskAvailable < r.segments.Disk().MinRequired()
 	stats.RecordingPaused = r.segments.AnyPaused()
-	rStats := r.recompressor.Stats()
-	stats.Recompression = RecompressionStats{
-		Enabled:              r.config.TieredStorage.Enabled,
-		IsRunning:            rStats.IsRunning,
-		LastRun:              rStats.LastRun,
-		SegmentsRecompressed: rStats.SegmentsRecompressed,
-		ClipsRecompressed:    rStats.ClipsRecompressed,
-		BytesReclaimed:       rStats.BytesReclaimed,
-	}
+	stats.Recompression = r.recompressionStats()
 
 	stats.Projection = r.computeProjection(&stats)
 
@@ -405,6 +397,24 @@ func (r *Recorder) StorageStats() StorageStats {
 	r.statsMu.RLock()
 	defer r.statsMu.RUnlock()
 	return r.cachedStats
+}
+
+// recompressionStats snapshots the tiered storage recompression state. It is
+// segment-independent, so it is safe to call from StorageBreakdown even when
+// the segment store is absent.
+func (r *Recorder) recompressionStats() RecompressionStats {
+	if r.recompressor == nil {
+		return RecompressionStats{Enabled: r.config.TieredStorage.Enabled}
+	}
+	rStats := r.recompressor.Stats()
+	return RecompressionStats{
+		Enabled:              r.config.TieredStorage.Enabled,
+		IsRunning:            rStats.IsRunning,
+		LastRun:              rStats.LastRun,
+		SegmentsRecompressed: rStats.SegmentsRecompressed,
+		ClipsRecompressed:    rStats.ClipsRecompressed,
+		BytesReclaimed:       rStats.BytesReclaimed,
+	}
 }
 
 // DiskAvailable returns the bytes available on the recording filesystem.
