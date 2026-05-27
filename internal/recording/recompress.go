@@ -14,6 +14,11 @@ import (
 	"github.com/rvben/vedetta/internal/storage"
 )
 
+// segmentCandidateBatch bounds how many largest-priority segment candidates
+// processOne fetches per camera so it can skip HLS-in-use files and still
+// pick the next-largest eligible segment.
+const segmentCandidateBatch = 16
+
 // Recompressor runs scheduled overnight transcoding of old segments and event clips.
 type Recompressor struct {
 	cfg     config.TieredStorageConfig
@@ -22,6 +27,10 @@ type Recompressor struct {
 
 	// transcodeFn performs the actual transcoding. Defaults to media.TranscodeSegment.
 	transcodeFn func(path string, targetW, targetH int) (media.TranscodeResult, error)
+
+	// inUseFn reports whether a segment file is currently HLS-served and must
+	// not be recompressed. Defaults to media.HLSPathInUse.
+	inUseFn func(path string) bool
 
 	// lock is the shared segment-operation mutex from the owning Recorder.
 	// processOne holds it across the transcode+DB-update pair so that
@@ -40,7 +49,7 @@ type Recompressor struct {
 // NewRecompressor creates a Recompressor with the given config and camera list.
 // lock is the shared segmentOpMu from the owning Recorder and must not be nil.
 func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB, lock *sync.Mutex) *Recompressor {
-	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: media.TranscodeSegment}
+	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: media.TranscodeSegment, inUseFn: media.HLSPathInUse}
 }
 
 // RecompressorStats holds runtime counters for the recompression job.
@@ -269,7 +278,7 @@ func (r *Recompressor) processOne() bool {
 		var segs []storage.SegmentRecord
 		var err error
 		if priority == "largest" {
-			segs, err = r.db.GetRecompressionCandidatesBySize(camName, cutoff, 1)
+			segs, err = r.db.GetRecompressionCandidatesBySize(camName, cutoff, segmentCandidateBatch)
 		} else {
 			segs, err = r.db.GetSegmentsForRecompression(camName, cutoff)
 		}
@@ -277,7 +286,7 @@ func (r *Recompressor) processOne() bool {
 			slog.Warn("recompression: segment query failed", "camera", camName, "error", err)
 		} else {
 			for _, s := range segs {
-				if media.HLSPathInUse(s.Path) {
+				if r.inUseFn(s.Path) {
 					continue
 				}
 				consider(recompressTarget{

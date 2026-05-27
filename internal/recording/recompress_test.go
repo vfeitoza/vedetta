@@ -525,6 +525,61 @@ func TestRecompressor_RunNowDrainsSegmentsAndClips(t *testing.T) {
 	}
 }
 
+// TestRecompressor_LargestInUseSkipsToSmallerSegment verifies that when the
+// largest eligible segment is HLS-in-use, processOne picks the next-largest
+// non-in-use segment rather than skipping the camera entirely.
+func TestRecompressor_LargestInUseSkipsToSmallerSegment(t *testing.T) {
+	_, db := newTestRecompressor(t)
+	dir := t.TempDir()
+
+	bigPath := filepath.Join(dir, "big.mp4")
+	smallPath := filepath.Join(dir, "small.mp4")
+	if err := os.WriteFile(bigPath, make([]byte, 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(smallPath, make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both segments are old enough to be eligible (ended 48h ago).
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam1", Path: bigPath,
+		StartTime: time.Now().Add(-49 * time.Hour), EndTime: time.Now().Add(-48 * time.Hour),
+		SizeBytes: 1000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSegment(storage.SegmentRecord{
+		Camera: "cam1", Path: smallPath,
+		StartTime: time.Now().Add(-49 * time.Hour), EndTime: time.Now().Add(-48 * time.Hour),
+		SizeBytes: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.TieredStorageConfig{
+		Enabled: true, AfterDays: 1, Schedule: "00:00-23:59",
+		Interval: time.Second, Priority: "largest", TargetWidth: 640, TargetHeight: 360,
+	}
+	r := NewRecompressor(cfg, []config.CameraConfig{{Name: "cam1"}}, db, &sync.Mutex{})
+
+	// Report bigPath as HLS-in-use so processOne must skip it.
+	r.inUseFn = func(p string) bool { return p == bigPath }
+
+	var transcodedPath string
+	r.transcodeFn = func(path string, w, h int) (media.TranscodeResult, error) {
+		transcodedPath = path
+		return media.TranscodeResult{OriginalSize: 200, NewSize: 10}, nil
+	}
+
+	if !r.processOne() {
+		t.Fatal("processOne returned false, want true (smallPath is eligible and not in-use)")
+	}
+	if transcodedPath != smallPath {
+		t.Fatalf("transcoded %q, want %q (the smaller non-in-use segment)", transcodedPath, smallPath)
+	}
+}
+
 func TestRecompressKind_String(t *testing.T) {
 	if got := kindSegment.String(); got != "segment" {
 		t.Errorf("kindSegment.String() = %q, want \"segment\"", got)
