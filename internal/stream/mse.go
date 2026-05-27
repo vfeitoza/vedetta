@@ -580,6 +580,21 @@ type MSEManager struct {
 // client buffers across all cameras.
 func (m *MSEManager) DroppedFrames() int64 { return m.dropped.Load() }
 
+// ClientCounts returns the number of connected MSE clients per camera name.
+// Consumers are keyed by RTSP URL, so a camera with distinct main and sub
+// streams contributes from two consumers; counts are summed by camera name.
+func (m *MSEManager) ClientCounts() map[string]int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]int, len(m.consumers))
+	for _, c := range m.consumers {
+		c.mu.Lock()
+		out[c.cameraName] += len(c.clients)
+		c.mu.Unlock()
+	}
+	return out
+}
+
 // NewMSEManager creates an MSE manager.
 func NewMSEManager(hub *rtsp.Hub, allowedOrigins, trustedProxies []string) *MSEManager {
 	return &MSEManager{

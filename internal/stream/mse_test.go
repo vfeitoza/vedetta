@@ -64,3 +64,22 @@ func TestOriginAllowed_UntrustedProxyCannotForgeScheme(t *testing.T) {
 		t.Fatal("untrusted client must not be able to spoof X-Forwarded-Proto")
 	}
 }
+
+func TestMSEManagerClientCounts(t *testing.T) {
+	m := NewMSEManager(nil, nil, nil)
+	front := &mseConsumer{cameraName: "front"}
+	front.clients = []*mseClient{{}, {}}
+	frontSub := &mseConsumer{cameraName: "front"}
+	frontSub.clients = []*mseClient{{}}
+	back := &mseConsumer{cameraName: "back"}
+	back.clients = []*mseClient{{}}
+	m.consumers = map[string]*mseConsumer{
+		"rtsp://front/main": front,
+		"rtsp://front/sub":  frontSub,
+		"rtsp://back/main":  back,
+	}
+	got := m.ClientCounts()
+	if got["front"] != 3 || got["back"] != 1 {
+		t.Fatalf("ClientCounts() = %v, want front=3 back=1", got)
+	}
+}
