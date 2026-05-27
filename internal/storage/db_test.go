@@ -1884,7 +1884,7 @@ func (d *DB) QueryRowForTest(query string, args ...any) *sql.Row {
 	return d.db.QueryRow(query, args...)
 }
 
-// --- Task 2: SetEventClip / ClearEventClip ---
+// --- SetEventClip / ClearEventClip ---
 
 func TestSetEventClip_PersistsAndResetsState(t *testing.T) {
 	db := newTestDB(t)
@@ -1917,6 +1917,19 @@ func TestSetEventClip_PersistsAndResetsState(t *testing.T) {
 	}
 	if size != 4242 {
 		t.Errorf("clip_size_bytes = %d, want 4242", size)
+	}
+	var at sql.NullTime
+	var failures int
+	if err := db.QueryRowForTest(
+		"SELECT recompressed_at, recompress_failures FROM events WHERE id = ?", "clip-set",
+	).Scan(&at, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if at.Valid {
+		t.Errorf("recompressed_at = %v, want NULL", at.Time)
+	}
+	if failures != 0 {
+		t.Errorf("recompress_failures = %d, want 0", failures)
 	}
 }
 
@@ -1952,6 +1965,13 @@ func TestClearEventClip_ZeroesPathSizeAndState(t *testing.T) {
 		t.Fatalf("SetEventClip: %v", err)
 	}
 
+	// Drive failure counter to a non-zero value to verify ClearEventClip resets it.
+	for i := 0; i < 2; i++ {
+		if err := db.IncrementClipRecompressFailures("clip-clear"); err != nil {
+			t.Fatalf("IncrementClipRecompressFailures: %v", err)
+		}
+	}
+
 	if err := db.ClearEventClip("clip-clear"); err != nil {
 		t.Fatalf("ClearEventClip: %v", err)
 	}
@@ -1961,15 +1981,21 @@ func TestClearEventClip_ZeroesPathSizeAndState(t *testing.T) {
 		t.Errorf("after clear ClipPath=%q available=%v, want empty/false", got.ClipPath, got.ClipAvailable)
 	}
 	var size int64
-	if err := db.QueryRowForTest("SELECT clip_size_bytes FROM events WHERE id = ?", "clip-clear").Scan(&size); err != nil {
+	var failures int
+	if err := db.QueryRowForTest(
+		"SELECT clip_size_bytes, recompress_failures FROM events WHERE id = ?", "clip-clear",
+	).Scan(&size, &failures); err != nil {
 		t.Fatal(err)
 	}
 	if size != 0 {
 		t.Errorf("clip_size_bytes = %d, want 0", size)
 	}
+	if failures != 0 {
+		t.Errorf("recompress_failures = %d, want 0", failures)
+	}
 }
 
-// --- Task 3: clip recompression candidate queries ---
+// --- clip recompression candidate queries ---
 
 func TestClipCandidates_EligibilityAndOrdering(t *testing.T) {
 	db := newTestDB(t)
@@ -2024,7 +2050,7 @@ func TestClipCandidates_EligibilityAndOrdering(t *testing.T) {
 	}
 }
 
-// --- Task 4: MarkClipRecompressed / IncrementClipRecompressFailures / ResetStuckClipRecompressFailures ---
+// --- clip recompress mark / increment / reset ---
 
 func TestMarkClipRecompressed_SetsFlagTimestampSize(t *testing.T) {
 	db := newTestDB(t)
@@ -2081,7 +2107,7 @@ func TestResetStuckClipRecompressFailures_ClearsCappedClips(t *testing.T) {
 	}
 }
 
-// --- Task 5: GetClipRecompressState revalidation read ---
+// --- GetClipRecompressState ---
 
 func TestGetClipRecompressState(t *testing.T) {
 	db := newTestDB(t)
@@ -2105,7 +2131,7 @@ func TestGetClipRecompressState(t *testing.T) {
 	}
 }
 
-// --- Task 6: BackfillClipSizes ---
+// --- BackfillClipSizes ---
 
 func TestBackfillClipSizes(t *testing.T) {
 	db := newTestDB(t)

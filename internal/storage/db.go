@@ -120,8 +120,8 @@ func (d *DB) UpdateEventClipAvailability(eventID string, available bool) error {
 func (d *DB) SetEventClip(eventID, clipPath string, sizeBytes int64) error {
 	_, err := d.db.Exec(`
 		UPDATE events
-		SET clip_path = ?, clip_available = 1, clip_size_bytes = ?,
-		    recompressed = 0, recompressed_at = NULL, recompress_failures = 0
+		SET clip_path = ?, clip_available = TRUE, clip_size_bytes = ?,
+		    recompressed = FALSE, recompressed_at = NULL, recompress_failures = 0
 		WHERE id = ?`,
 		clipPath, sizeBytes, eventID,
 	)
@@ -135,8 +135,8 @@ func (d *DB) SetEventClip(eventID, clipPath string, sizeBytes int64) error {
 func (d *DB) ClearEventClip(eventID string) error {
 	_, err := d.db.Exec(`
 		UPDATE events
-		SET clip_path = '', clip_available = 0, clip_size_bytes = 0,
-		    recompressed = 0, recompressed_at = NULL, recompress_failures = 0
+		SET clip_path = '', clip_available = FALSE, clip_size_bytes = 0,
+		    recompressed = FALSE, recompressed_at = NULL, recompress_failures = 0
 		WHERE id = ?`,
 		eventID,
 	)
@@ -831,7 +831,7 @@ type ClipRecord struct {
 // recompressed: a present clip file (clip_available), an event that has ended
 // before the cutoff, not yet recompressed, and under the 3-failure cap. The
 // single positional parameter is the cutoff.
-const clipRecompressEligible = `clip_available = 1 AND end_time IS NOT NULL AND end_time < ? AND recompressed = 0 AND recompress_failures < 3`
+const clipRecompressEligible = `clip_available = TRUE AND end_time IS NOT NULL AND end_time < ? AND recompressed = FALSE AND recompress_failures < 3`
 
 // GetClipsForRecompression returns eligible clips for a camera ordered oldest
 // first (for priority=oldest).
@@ -891,7 +891,7 @@ func scanClips(rows *sql.Rows) ([]ClipRecord, error) {
 // codec does not permanently exclude a clip. Returns the number of rows reset.
 func (d *DB) ResetStuckClipRecompressFailures() (int64, error) {
 	res, err := d.db.Exec(
-		"UPDATE events SET recompress_failures = 0 WHERE recompress_failures >= 3 AND recompressed = 0 AND clip_available = 1",
+		"UPDATE events SET recompress_failures = 0 WHERE recompress_failures >= 3 AND recompressed = FALSE AND clip_available = TRUE",
 	)
 	if err != nil {
 		return 0, err
@@ -904,7 +904,7 @@ func (d *DB) ResetStuckClipRecompressFailures() (int64, error) {
 func (d *DB) MarkClipRecompressed(eventID string, newSize int64) error {
 	_, err := d.db.Exec(`
 		UPDATE events
-		SET recompressed = 1, recompressed_at = ?, clip_size_bytes = ?
+		SET recompressed = TRUE, recompressed_at = ?, clip_size_bytes = ?
 		WHERE id = ?`,
 		utc(time.Now()), newSize, eventID,
 	)
@@ -948,7 +948,7 @@ func (d *DB) GetClipRecompressState(eventID string) (ClipRecompressState, bool, 
 	return s, true, nil
 }
 
-// BackfillClipSizes stats up to batch clips that are available but have no
+// BackfillClipSizes examines up to batch clips that are available but have no
 // recorded size (legacy rows at clip_size_bytes = 0) and persists their on-disk
 // size. A clip whose file is missing is reconciled to clip_available = 0 (the
 // same conclusion reconcileEventMediaAvailability reaches), so every examined
@@ -957,7 +957,7 @@ func (d *DB) GetClipRecompressState(eventID string) (ClipRecompressState, bool, 
 func (d *DB) BackfillClipSizes(batch int) (int, error) {
 	rows, err := d.db.Query(`
 		SELECT id, clip_path FROM events
-		WHERE clip_available = 1 AND clip_size_bytes = 0 AND clip_path != ''
+		WHERE clip_available = TRUE AND clip_size_bytes = 0 AND clip_path != ''
 		LIMIT ?`, batch)
 	if err != nil {
 		return 0, err
@@ -981,7 +981,7 @@ func (d *DB) BackfillClipSizes(batch int) (int, error) {
 	for _, p := range todo {
 		fi, statErr := os.Stat(p.path)
 		if statErr != nil {
-			if _, err := d.db.Exec("UPDATE events SET clip_available = 0 WHERE id = ?", p.id); err != nil {
+			if _, err := d.db.Exec("UPDATE events SET clip_available = FALSE WHERE id = ?", p.id); err != nil {
 				return len(todo), err
 			}
 			continue
