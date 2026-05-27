@@ -564,8 +564,9 @@ func isKeyframe(pkt *rtp.Packet) bool {
 
 // webrtcConsumer implements rtsp.Consumer and forwards RTP to WebRTC peers.
 type webrtcConsumer struct {
-	mu    sync.RWMutex
-	peers []*peerState
+	cameraName string
+	mu         sync.RWMutex
+	peers      []*peerState
 }
 
 func (wc *webrtcConsumer) OnVideoRTP(pkt *rtp.Packet) {
@@ -940,7 +941,7 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	}
 
 	// Get or create the consumer for this RTSP URL
-	consumer := sm.getOrCreateConsumer(rtspURL)
+	consumer := sm.getOrCreateConsumer(cameraName, rtspURL)
 	consumer.addPeer(peer)
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -1001,15 +1002,19 @@ func (sm *StreamManager) HandleOffer(cameraName, rtspURL string, offer webrtc.Se
 	return finalAnswer, nil
 }
 
-func (sm *StreamManager) getOrCreateConsumer(rtspURL string) *webrtcConsumer {
+func (sm *StreamManager) getOrCreateConsumer(cameraName, rtspURL string) *webrtcConsumer {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if c, ok := sm.consumers[rtspURL]; ok {
+		// Fill cameraName if the consumer was created without one (belt-and-suspenders).
+		if c.cameraName == "" {
+			c.cameraName = cameraName
+		}
 		return c
 	}
 
-	c := &webrtcConsumer{}
+	c := &webrtcConsumer{cameraName: cameraName}
 	sm.consumers[rtspURL] = c
 
 	// Register with the Hub's source
@@ -1017,6 +1022,19 @@ func (sm *StreamManager) getOrCreateConsumer(rtspURL string) *webrtcConsumer {
 	source.AddConsumer(c)
 
 	return c
+}
+
+// ClientCounts returns the number of connected WebRTC peers per camera name.
+func (sm *StreamManager) ClientCounts() map[string]int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	out := make(map[string]int, len(sm.consumers))
+	for _, c := range sm.consumers {
+		c.mu.RLock()
+		out[c.cameraName] += len(c.peers)
+		c.mu.RUnlock()
+	}
+	return out
 }
 
 // Close shuts down all sessions and peer connections.

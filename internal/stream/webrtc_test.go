@@ -1245,3 +1245,19 @@ func TestWebrtcConsumer_PeerWriteDoesNotBlockMembershipChanges(t *testing.T) {
 	}
 	close(bw.release)
 }
+
+func TestStreamManagerClientCounts(t *testing.T) {
+	sm := NewStreamManager(nil, nil)
+	front := &webrtcConsumer{cameraName: "front"}
+	front.peers = []*peerState{{}, {}}
+	back := &webrtcConsumer{cameraName: "back"}
+	back.peers = []*peerState{{}}
+	sm.consumers = map[string]*webrtcConsumer{
+		"rtsp://front/main": front,
+		"rtsp://back/main":  back,
+	}
+	got := sm.ClientCounts()
+	if got["front"] != 2 || got["back"] != 1 {
+		t.Fatalf("ClientCounts() = %v, want front=2 back=1", got)
+	}
+}
