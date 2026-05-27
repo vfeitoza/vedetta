@@ -106,6 +106,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 2 && os.Args[1] == "auth" && os.Args[2] == "create-token" {
+		runCreateToken(os.Args[3:])
+		return
+	}
+
 	configPath := flag.String("config", "config.yml", "path to configuration file")
 	flag.Parse()
 
