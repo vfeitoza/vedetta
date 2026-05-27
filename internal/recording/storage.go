@@ -436,7 +436,6 @@ func resolveWindow(req DeleteRequest) (from, to time.Time, err error) {
 // satisfies it.
 type clipRefClearer interface {
 	ClearEventClip(eventID string) error
-	UpdateEventClipAvailability(eventID string, available bool) error
 	UpdateEventSnapshotPath(eventID, snapshotPath string) error
 	UpdateEventSnapshotAvailability(eventID string, available bool) error
 }

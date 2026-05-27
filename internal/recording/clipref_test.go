@@ -6,11 +6,10 @@ import (
 )
 
 // stubClipRefClearer records calls and returns the configured errors so we can
-// assert that clearMediaRefs surfaces (rather than discards) DB failures.
+// assert that clearClipRef and clearSnapshotRef surface (rather than discard) DB failures.
 type stubClipRefClearer struct {
 	clearClipCalls int
 	clearClipErr   error
-	clipAvailErr   error
 	snapPathErr    error
 	snapAvailErr   error
 	calls          []string
@@ -19,11 +18,6 @@ type stubClipRefClearer struct {
 func (s *stubClipRefClearer) ClearEventClip(eventID string) error {
 	s.clearClipCalls++
 	return s.clearClipErr
-}
-
-func (s *stubClipRefClearer) UpdateEventClipAvailability(eventID string, available bool) error {
-	s.calls = append(s.calls, "clipAvail")
-	return s.clipAvailErr
 }
 
 func (s *stubClipRefClearer) UpdateEventSnapshotPath(eventID, snapshotPath string) error {
