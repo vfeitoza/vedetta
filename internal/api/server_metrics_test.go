@@ -65,3 +65,17 @@ func TestStatusClass(t *testing.T) {
 		}
 	}
 }
+
+// The runtime collector reaches the package /metrics exposition, so standard
+// go_* dashboards bind against vedetta without extra wiring.
+func TestWritePromIncludesRuntimeMetrics(t *testing.T) {
+	// No ResetForTest: the runtime collector is stateless and always emits.
+	var b strings.Builder
+	metrics.WriteProm(&b)
+	out := b.String()
+	for _, want := range []string{"go_goroutines", "go_memstats_sys_bytes", "go_gc_duration_seconds_count"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("metrics exposition missing %q:\n%s", want, out)
+		}
+	}
+}
