@@ -33,6 +33,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.1](https://github.com/rvben/vedetta/compare/v0.7.0...v0.7.1) - 2026-05-27
+
+### Added
+
+- **logging**: support custom OTLP headers for log export ([9a8a478](https://github.com/rvben/vedetta/commit/9a8a4789dba06df7b5a3088179ff586bef7628a3))
+
 ## [0.7.0](https://github.com/rvben/vedetta/compare/v0.6.2...v0.7.0) - 2026-05-27
 
 ### Added
