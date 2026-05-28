@@ -4567,9 +4567,12 @@ kbd {
 
 /* ─── Live view UX (W2.1) ─── */
 
-/* Snapshot fallback shown behind connecting / offline overlays */
+/* Snapshot fallback shown behind connecting / offline overlays.
+   Uses background-size: contain to match object-fit: contain on the
+   foreground <video>/<img> elements (style.css live-viewport rules);
+   any other policy causes a visible zoom/crop jump at the cutover. */
 .live-snapshot-fallback {
-  background-size: cover;
+  background-size: contain;
   background-position: center;
   background-repeat: no-repeat;
 }
