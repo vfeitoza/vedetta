@@ -36,6 +36,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.4](https://github.com/rvben/vedetta/compare/v0.7.3...v0.7.4) - 2026-05-28
+
+### Added
+
+- **api**: track active HLS viewers per camera ([99560a0](https://github.com/rvben/vedetta/commit/99560a0e9b0dfffc2409941bdd7ff190210744ed))
+- **api**: annotate /metrics with HELP/TYPE, rename event/segment gauges, expose stream client counts ([f738cdd](https://github.com/rvben/vedetta/commit/f738cdd6c4a53a8fe7fe7247fe1c223a24e253e9))
+- **api**: track active MJPEG viewers per camera ([dcb0ef2](https://github.com/rvben/vedetta/commit/dcb0ef22f45882d12bd9102af19d8fd75a2618dd))
+- **stream**: expose per-camera WebRTC peer counts ([26bd5b4](https://github.com/rvben/vedetta/commit/26bd5b46456761ee42699c3a154505f6ff83a3b1))
+- **stream**: expose per-camera MSE client counts ([576619c](https://github.com/rvben/vedetta/commit/576619cdce797c9d5c7ee1bd149f008992bf6b8e))
+- **cli**: add 'auth create-token' to mint scoped API tokens offline ([080c17c](https://github.com/rvben/vedetta/commit/080c17cf25908cb3527bc66204852a1d934cfa8f))
+- **metrics**: expose Go runtime, GC, and process-RSS metrics ([ee0587d](https://github.com/rvben/vedetta/commit/ee0587dda4f11a339ab25ab8c96811de35fc2660))
+- **metrics**: add platform process-RSS reader ([96fcbd6](https://github.com/rvben/vedetta/commit/96fcbd6b8cd11fb6fea85024dcc730a64b06720d))
+- **storage**: surface recompression controls on the storage page ([d7a7180](https://github.com/rvben/vedetta/commit/d7a7180fcc99bb4d11ec98eb025c531147c1adbc))
+
+### Fixed
+
+- **storage**: keep recompression state out of the 30s breakdown cache ([bbcbc3a](https://github.com/rvben/vedetta/commit/bbcbc3ad9d81d3e89e3d572d40ac979bae90a144))
+
 ## [0.7.3](https://github.com/rvben/vedetta/compare/v0.7.2...v0.7.3) - 2026-05-27
 
 ### Added
