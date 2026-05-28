@@ -116,12 +116,21 @@ func TestGetMetricsStreamClients(t *testing.T) {
 	srv.mjpegViewers.add("front")
 	srv.mjpegViewers.add("front")
 
+	// Two distinct HLS clients keep separate RemoteAddr keys; a repeated
+	// hit from the first does not double-count it.
+	srv.hlsViewers.seen("front", "192.0.2.1:5001")
+	srv.hlsViewers.seen("front", "192.0.2.1:5001")
+	srv.hlsViewers.seen("front", "198.51.100.5:33000")
+
 	rec := httptest.NewRecorder()
 	srv.GetMetrics(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `vedetta_stream_clients{camera="front",transport="mjpeg"} 2`) {
 		t.Fatalf("missing mjpeg stream_clients series:\n%s", body)
+	}
+	if !strings.Contains(body, `vedetta_stream_clients{camera="front",transport="hls"} 2`) {
+		t.Fatalf("missing hls stream_clients series:\n%s", body)
 	}
 	assertSingleTypeBeforeSamples(t, body, "vedetta_stream_clients", "gauge")
 }

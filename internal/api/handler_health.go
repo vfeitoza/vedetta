@@ -282,6 +282,11 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 			rows = append(rows, streamClient{cam, "mjpeg", n})
 		}
 	}
+	if s.hlsViewers != nil {
+		for cam, n := range s.hlsViewers.counts() {
+			rows = append(rows, streamClient{cam, "hls", n})
+		}
+	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].camera != rows[j].camera {
 			return rows[i].camera < rows[j].camera

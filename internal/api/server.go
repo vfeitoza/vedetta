@@ -106,6 +106,11 @@ type Server struct {
 	// Per-camera count of active MJPEG streaming connections, used by /metrics.
 	mjpegViewers *mjpegViewers
 
+	// Per-camera HLS viewer tracker. HLS is poll-based, so the count comes
+	// from a TTL window over playlist/segment requests rather than connect/
+	// disconnect events.
+	hlsViewers *hlsViewers
+
 	objectRematchMu      sync.Mutex
 	objectRematchRunning map[int64]bool
 	objectRematchPending map[int64]bool
@@ -138,6 +143,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 		sseClients:           make(map[chan []byte]struct{}),
 		detectionHub:         newDetectionHub(),
 		mjpegViewers:         newMJPEGViewers(),
+		hlsViewers:           newHLSViewers(),
 		objectRematchRunning: make(map[int64]bool),
 		objectRematchPending: make(map[int64]bool),
 	}

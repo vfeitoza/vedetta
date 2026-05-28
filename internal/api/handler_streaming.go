@@ -159,6 +159,10 @@ func (s *Server) GetLiveHLS(w http.ResponseWriter, r *http.Request, name string)
 		return
 	}
 
+	if s.hlsViewers != nil {
+		s.hlsViewers.seen(name, r.RemoteAddr)
+	}
+
 	rtspURL := s.hlsRTSPURL(r, cam)
 
 	// Hold the request through the cold warmup window instead of answering
@@ -194,6 +198,10 @@ func (s *Server) GetLiveHLSInit(w http.ResponseWriter, r *http.Request, name str
 		return
 	}
 
+	if s.hlsViewers != nil {
+		s.hlsViewers.seen(name, r.RemoteAddr)
+	}
+
 	init, version, ok := s.hls.InitSegment(s.hlsRTSPURL(r, cam))
 	if !ok {
 		w.Header().Set("Retry-After", "1")
@@ -224,6 +232,10 @@ func (s *Server) GetLiveHLSSegment(w http.ResponseWriter, r *http.Request, name 
 	if cam == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
 		return
+	}
+
+	if s.hlsViewers != nil {
+		s.hlsViewers.seen(name, r.RemoteAddr)
 	}
 
 	seg, ok := s.hls.Segment(s.hlsRTSPURL(r, cam), uint64(segNum))
