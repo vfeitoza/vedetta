@@ -3059,6 +3059,22 @@ kbd {
 
 .person-thumb { width: 56px; height: 56px; border-radius: 50%; }
 
+.person-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-default);
+  background: var(--surface-2);
+}
+
+.person-thumb-empty-label {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  text-align: center;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
 .person-info { flex: 1; min-width: 0; }
 
 .person-name-input {
@@ -3105,6 +3121,12 @@ kbd {
   background: var(--surface-3);
   border-radius: var(--radius-full);
   color: var(--text-secondary);
+}
+
+.badge-sm.badge-warning {
+  background: rgba(255, 171, 0, 0.15);
+  color: #d97706;
+  cursor: help;
 }
 
 .person-faces {
