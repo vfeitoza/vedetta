@@ -623,14 +623,27 @@
   });
 
   // --- Recording ---
+
+  // Convert a Go duration string (e.g. "10m0s", "1h0m0s") to a compact,
+  // human-readable form by dropping trailing zero sub-units ("10m0s" -> "10m",
+  // "1h0m0s" -> "1h", "5m30s" -> "5m30s"). The result is still valid input
+  // for time.ParseDuration, so the save round-trip is unaffected.
+  function formatGoDuration(s) {
+    if (!s) return s;
+    // Only strip a "0s" or "0m" suffix when it is a complete unit, i.e.
+    // preceded by a letter (h or m), not part of a larger number like "30s".
+    var r = s.replace(/([hm])0s$/, '$1').replace(/h0m$/, 'h');
+    return r || s;
+  }
+
   function loadRecording() {
     fetch('/api/settings/recording').then(function(r){return r.json()}).then(function(data) {
       $('rec-continuous').checked = data.continuous;
       $('rec-retain').value = data.retain_days || '';
       $('rec-event-retain').value = data.event_retain_days || '';
-      $('rec-segment').value = data.segment_length || '';
-      $('rec-precap').value = data.pre_capture || '';
-      $('rec-postcap').value = data.post_capture || '';
+      $('rec-segment').value = formatGoDuration(data.segment_length) || '';
+      $('rec-precap').value = formatGoDuration(data.pre_capture) || '';
+      $('rec-postcap').value = formatGoDuration(data.post_capture) || '';
       $('rec-maxstorage').value = data.max_storage || '';
     });
   }
