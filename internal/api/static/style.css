@@ -4057,7 +4057,7 @@ kbd {
   margin-top: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .settings-layout {
     grid-template-columns: 1fr;
     gap: 1rem;
@@ -4086,6 +4086,9 @@ kbd {
   }
   .settings-panel {
     padding: 1.25rem 1rem;
+  }
+  .settings-content {
+    overflow-x: hidden;
   }
 }
 
