@@ -3003,14 +3003,23 @@ function renderCalendar() {
     cell.dataset.day = d;
 
     var cellDate = new Date(year, month, d);
+    var fullDateLabel = cellDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    cell.setAttribute('aria-label', fullDateLabel);
+    cell.setAttribute('aria-pressed', 'false');
+
     if (cellDate.toDateString() === today.toDateString()) {
       cell.classList.add('today');
+      cell.setAttribute('aria-current', 'date');
     }
 
     cell.onclick = (function(cd, c) {
       return function() {
-        grid.querySelectorAll('.calendar-day.selected').forEach(function(s) { s.classList.remove('selected'); });
+        grid.querySelectorAll('.calendar-day.selected').forEach(function(s) {
+          s.classList.remove('selected');
+          s.setAttribute('aria-pressed', 'false');
+        });
         c.classList.add('selected');
+        c.setAttribute('aria-pressed', 'true');
         loadRecordingsSummary(cd);
       };
     })(cellDate, cell);
@@ -3153,10 +3162,14 @@ function renderRecordingsSummary(data, date) {
       barWrap.appendChild(div);
     });
 
-    // Click on bar to navigate to camera playback
-    barWrap.addEventListener('click', function(e) {
+    barWrap.setAttribute('role', 'button');
+    barWrap.setAttribute('tabindex', '0');
+    barWrap.setAttribute('aria-label', 'Coverage timeline for ' + humanizeName(cam.name) + ' - click to jump to time');
+
+    function barJump(e) {
       var rect = barWrap.getBoundingClientRect();
-      var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      var clientX = e.clientX !== undefined ? e.clientX : rect.left + rect.width / 2;
+      var pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       var totalSec = pct * 86400;
       var h = Math.floor(totalSec / 3600);
       var m = Math.floor((totalSec % 3600) / 60);
@@ -3166,6 +3179,15 @@ function renderRecordingsSummary(data, date) {
       var d = new Date(date);
       d.setHours(h, m, s, 0);
       location.href = '/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(d.toISOString());
+    }
+
+    // Click on bar to navigate to camera playback
+    barWrap.addEventListener('click', barJump);
+    barWrap.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        barJump(e);
+      }
     });
 
     // Hover cursor
@@ -3202,8 +3224,9 @@ function renderRecordingsSummary(data, date) {
     // Expandable segment list
     var toggle = document.createElement('button');
     toggle.className = 'btn btn-sm rec-segments-toggle';
+    toggle.setAttribute('aria-expanded', 'false');
     toggle.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
       cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '');
 
     var segList = document.createElement('div');
@@ -3224,16 +3247,17 @@ function renderRecordingsSummary(data, date) {
         '<span class="rec-seg-dur">' + durStr + '</span>' +
         '<span class="rec-seg-size">' + formatBytesJS(seg.size_bytes) + '</span>' +
         '<span class="rec-seg-actions">' +
-          '<a href="/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(seg.start_time) + '" class="btn btn-sm" title="Play">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>' +
+          '<a href="/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(seg.start_time) + '" class="btn btn-sm" title="Play ' + startLocal + '-' + endLocal + '" aria-label="Play ' + startLocal + '-' + endLocal + '">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>' +
         '</span>';
       segList.appendChild(row);
     });
 
     toggle.onclick = function() {
-      var isHidden = segList.classList.contains('hidden');
+      var nowOpen = segList.classList.contains('hidden');
       segList.classList.toggle('hidden');
       toggle.classList.toggle('active');
+      toggle.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
     };
 
     card.appendChild(toggle);
