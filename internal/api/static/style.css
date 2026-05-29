@@ -1467,6 +1467,11 @@ input, select { font-family: inherit; }
   user-select: none;
   touch-action: none; /* gestures own the pointer; never page-scroll mid-drag */
 }
+/* overflow:hidden clips outline, so use inset box-shadow for the focus ring */
+.timeline-track:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--cyan);
+}
 
 .timeline-minimap {
   position: relative;
@@ -2842,6 +2847,10 @@ kbd {
 .zone-input:focus {
   border-color: var(--cyan);
 }
+.zone-input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
 
 .zone-check-label {
   display: flex;
@@ -2988,6 +2997,10 @@ kbd {
 .person-name-input:focus {
   border-color: var(--cyan);
   background: var(--surface-2);
+}
+.person-name-input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
 }
 
 .person-meta {
@@ -3627,6 +3640,10 @@ kbd {
 .name-popover-input:focus {
   outline: none;
   border-color: #60a5fa;
+}
+.name-popover-input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
 }
 .name-popover-error {
   grid-column: 1 / span 2;
