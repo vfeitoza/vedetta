@@ -832,7 +832,7 @@ input, select { font-family: inherit; }
 
 .event-duration-badge {
   position: absolute;
-  bottom: 0.375rem;
+  top: 0.375rem;
   left: 0.375rem;
   padding: 0.1875rem 0.375rem;
   background: rgba(0, 0, 0, 0.7);
@@ -4612,12 +4612,6 @@ kbd {
 }
 
 /* ─── Events UX (W2.3) ─── */
-
-/* Duration badge sits bottom-left. Move it above the label badge so both
-   are visible without overlap when an event has a known duration. */
-.event-duration-badge {
-  bottom: calc(0.375rem + 1.5rem);
-}
 
 .events-summary {
   margin: 0.25rem 0 0;
