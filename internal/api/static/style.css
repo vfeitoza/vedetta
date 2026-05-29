@@ -1593,6 +1593,7 @@ input, select { font-family: inherit; }
   white-space: nowrap;
 }
 
+/* Forward-looking: neutralize any transition later added to these elements for reduced-motion users. */
 @media (prefers-reduced-motion: reduce) {
   .timeline-window-box,
   .timeline-labels span { transition: none !important; }

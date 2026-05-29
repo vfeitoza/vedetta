@@ -21,7 +21,7 @@ let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
 let playbackOffset = 0; // offset into segment where playback begins
 let playbackHls = null; // Hls instance for recording playback
-let timelineDragging = false; // true during timeline drag (legacy mouse path; pointer gestures use the state machine in initTimeline)
+let timelineDragging = false; // true while a pointer gesture (pan/pinch) is active; suppresses the live and playback playhead writers
 var cachedSegments = []; // raw segment data from API
 var cachedActivity = [];
 var cachedTimelineEvents = [];
@@ -2278,6 +2278,7 @@ function initTimeline() {
       renderMinimap();
       renderMinimapOverlays();
       renderAxisLabels();
+      updatePlayheadToNow();
     }, 200);
   });
 }
@@ -2317,6 +2318,7 @@ function scrubTimeline(e, commit) {
 // resolveSeek, updates the playhead + aria, and either starts playback or
 // returns to live. Coverage is checked against the SNAPPED second.
 function commitSeekToSecond(sec) {
+  if (!TLW || !timelineWin) return;
   var track = el('timeline-track');
   if (!track) return;
   sec = Math.max(0, Math.min(86399, sec)); // keep within the slider's aria range
@@ -2895,6 +2897,7 @@ function updatePlaybackUI() {
 }
 
 function updatePlayheadForPlayback(currentTime) {
+  if (!TLW || !timelineWin) return;
   if (!playbackStartTime || timelineDragging) return;
   var playhead = el('timeline-playhead');
   if (!playhead) return;
