@@ -477,7 +477,12 @@ input, select { font-family: inherit; }
 /* ─── Camera Grid ─── */
 .camera-grid {
   display: grid;
+  /* justify-content: start prevents a lone trailing tile from stretching to
+     fill the full container width. With auto-fill each column tracks its
+     natural minmax minimum; tiles in partial rows stay the same size as
+     tiles in complete rows instead of ballooning to 100% width. */
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  justify-content: start;
   gap: 0.75rem;
 }
 
