@@ -346,8 +346,9 @@
           </header>
           <div id="password-proxy-msg" class="form-banner banner-info" hidden>
             Authentication is managed by your identity provider.
-            <details style="margin-top:0.5rem"><summary style="cursor:pointer">Set local password anyway</summary>
-              <div id="password-proxy-form-wrap" style="margin-top:0.75rem"></div>
+            <details class="settings-disclosure">
+              <summary>Set local password anyway</summary>
+              <div id="password-proxy-form-wrap" class="settings-disclosure-body"></div>
             </details>
           </div>
           <form id="password-form" class="settings-form">
@@ -473,13 +474,12 @@
 
   function updateMQTTBadge(status) {
     var badge = $('mqtt-status-badge');
-    if (!status) { badge.textContent = ''; badge.removeAttribute('style'); return; }
+    badge.classList.remove('badge-connected', 'badge-disconnected', 'badge-connecting');
+    if (!status) { badge.textContent = ''; return; }
     badge.textContent = status;
-    badge.style.padding = '0.15rem 0.55rem';
-    badge.style.borderRadius = 'var(--radius-full)';
-    badge.style.fontSize = 'var(--text-xs)';
-    badge.style.background = status === 'connected' ? 'var(--green-dim)' : status === 'disconnected' ? 'var(--red-dim)' : 'var(--surface-2)';
-    badge.style.color = status === 'connected' ? 'var(--green)' : status === 'disconnected' ? 'var(--red)' : 'var(--text-secondary)';
+    if (status === 'connected') badge.classList.add('badge-connected');
+    else if (status === 'disconnected') badge.classList.add('badge-disconnected');
+    else badge.classList.add('badge-connecting');
   }
 
   function setMQTTStatus(msg, type) {

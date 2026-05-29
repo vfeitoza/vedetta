@@ -4014,6 +4014,53 @@ kbd {
   color: var(--text-secondary);
 }
 
+/* MQTT connection status badge (toggled via JS classes) */
+.badge-connected,
+.badge-disconnected,
+.badge-connecting {
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+}
+.badge-connected   { background: var(--green-dim); color: var(--green); }
+.badge-disconnected { background: var(--red-dim);   color: var(--red); }
+.badge-connecting  { background: var(--surface-2);  color: var(--text-secondary); }
+
+/* Account proxy-auth disclosure widget */
+.settings-disclosure {
+  margin-top: 0.5rem;
+}
+.settings-disclosure > summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--cyan);
+  list-style: none;
+  user-select: none;
+}
+.settings-disclosure > summary::-webkit-details-marker { display: none; }
+.settings-disclosure > summary::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast);
+  flex-shrink: 0;
+}
+.settings-disclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+.settings-disclosure > summary:hover { color: var(--text); }
+.settings-disclosure-body {
+  margin-top: 0.75rem;
+}
+
 .form-banner {
   margin: 0;
   padding: 0.75rem 0.9rem;
