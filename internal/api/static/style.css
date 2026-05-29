@@ -194,6 +194,29 @@
 .conn-dot.warn { background: var(--amber, #ffa000); }
 .conn-dot.error { background: var(--red); animation: pulse-dot 1s infinite; }
 
+/* ─── Accessibility Utilities ─── */
+
+/* Skip-to-content link: visually hidden until focused, then visible top-left.
+   Other pages can adopt this class by adding the same anchor pattern. */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  z-index: 10000;
+  padding: 0.5rem 1rem;
+  background: var(--cyan);
+  color: var(--text-inverse);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border-radius: 0 0 var(--radius-sm) 0;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: top 0.1s;
+}
+.skip-link:focus {
+  top: 0;
+}
+
 /* ─── Reset ─── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
