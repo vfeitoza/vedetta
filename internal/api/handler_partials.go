@@ -54,14 +54,14 @@ func (s *Server) handleCameraGridPartial(w http.ResponseWriter, _ *http.Request)
 		})
 	}
 
-	tmpl := template.Must(template.New("grid").Parse(`{{range .}}<div class="cam-card{{if .Stopped}} cam-stopped{{end}}" data-camera-name="{{.Name}}" data-action-click="location.href='/camera.html?name={{.Name}}'" role="listitem">
+	tmpl := template.Must(template.New("grid").Parse(`{{range .}}<div class="cam-card{{if .Stopped}} cam-stopped{{end}}" data-camera-name="{{.Name}}" data-action-click="location.href='/camera.html?name={{.Name}}'" role="listitem" aria-label="{{.DisplayName}} camera">
   <div class="cam-preview">
-    <img src="/api/cameras/{{.Name}}/snapshot" alt="{{.Name}}" loading="lazy">
+    <img src="/api/cameras/{{.Name}}/snapshot" alt="{{.DisplayName}} camera" loading="lazy">
     <div class="cam-live-badge">
       {{if .Stopped}}<span class="cam-live-dot stopped"></span>STOPPED{{else}}<span class="cam-live-dot {{if .Online}}{{else}}offline{{end}}"></span>
       {{if .Online}}LIVE{{else}}OFFLINE{{end}}{{end}}
     </div>
-    <button class="cam-toggle-btn" data-action-click="event.stopPropagation(); toggleCamera('{{.Name}}', {{.Stopped}})" title="{{if .Stopped}}Start camera{{else}}Stop camera{{end}}">
+    <button class="cam-toggle-btn" data-action-click="event.stopPropagation(); toggleCamera('{{.Name}}', {{.Stopped}})" title="{{if .Stopped}}Start camera{{else}}Stop camera{{end}}" aria-label="{{if .Stopped}}Start{{else}}Stop{{end}} {{.DisplayName}}">
       {{if .Stopped}}<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>{{else}}<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>{{end}}
     </button>
   </div>
