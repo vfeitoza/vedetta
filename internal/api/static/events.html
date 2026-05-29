@@ -62,14 +62,14 @@
       </div>
       <div class="events-filter-row">
         <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event labels">
-          <button class="chip active" data-filter="label" data-value="" data-action-click="toggleChip(this, 'label')">All</button>
-          <button class="chip" data-filter="label" data-value="person" data-action-click="toggleChip(this, 'label')"><span class="chip-dot person"></span>Person</button>
-          <button class="chip" data-filter="label" data-value="car" data-action-click="toggleChip(this, 'label')"><span class="chip-dot car"></span>Car</button>
-          <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')"><span class="chip-dot dog"></span>Dog</button>
-          <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')"><span class="chip-dot cat"></span>Cat</button>
+          <button class="chip active" data-filter="label" data-value="" data-action-click="toggleChip(this, 'label')" aria-pressed="true">All</button>
+          <button class="chip" data-filter="label" data-value="person" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot person"></span>Person</button>
+          <button class="chip" data-filter="label" data-value="car" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot car"></span>Car</button>
+          <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot dog"></span>Dog</button>
+          <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot cat"></span>Cat</button>
         </div>
         <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Cameras">
-          <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')">All Cameras</button>
+          <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')" aria-pressed="true">All Cameras</button>
         </div>
         <div class="chip-bar" id="object-chips" role="toolbar" aria-label="Tracked objects" style="display:none"></div>
         <button class="btn btn-sm btn-ghost events-clear-filters" id="events-clear-filters" data-action-click="clearAllEventFilters()" hidden>
@@ -155,13 +155,19 @@
 
     function clearAllEventFilters() {
       document.querySelectorAll('.chip[data-filter="label"]').forEach(function(c) {
-        c.classList.toggle('active', !c.dataset.value);
+        var active = !c.dataset.value;
+        c.classList.toggle('active', active);
+        c.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
       document.querySelectorAll('.chip[data-filter="camera"]').forEach(function(c) {
-        c.classList.toggle('active', !c.dataset.value);
+        var active = !c.dataset.value;
+        c.classList.toggle('active', active);
+        c.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
       document.querySelectorAll('.chip[data-filter="object"]').forEach(function(c) {
-        c.classList.toggle('active', !c.dataset.value);
+        var active = !c.dataset.value;
+        c.classList.toggle('active', active);
+        c.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
       var search = document.getElementById('event-search');
       if (search) search.value = '';
@@ -234,7 +240,8 @@
         btn.className = 'chip';
         btn.dataset.filter = 'camera';
         btn.dataset.value = name;
-        btn.textContent = name.replace(/_/g, ' ');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.textContent = name.replace(/[_-]/g, ' ').replace(/\b\w/g, function(ch) { return ch.toUpperCase(); });
         if (byCamera[name]) {
           var count = document.createElement('span');
           count.className = 'count';
@@ -246,22 +253,35 @@
         bar.appendChild(btn);
       });
 
-      // Object chips (only render section if any tracked objects exist)
+      // Object chips (only render section if any tracked objects exist).
+      // Deduplicate by name (case-insensitive) since the API returns one entry
+      // per (object, camera) and the gallery filter accepts the name string.
       if (objects && objects.length > 0) {
+        var seenNames = {};
+        var uniqueObjects = [];
+        objects.forEach(function(obj) {
+          var key = obj.name.toLowerCase();
+          if (!seenNames[key]) {
+            seenNames[key] = true;
+            uniqueObjects.push(obj);
+          }
+        });
         var objBar = document.getElementById('object-chips');
         objBar.style.display = '';
         var allObjBtn = document.createElement('button');
         allObjBtn.className = 'chip active';
         allObjBtn.dataset.filter = 'object';
         allObjBtn.dataset.value = '';
+        allObjBtn.setAttribute('aria-pressed', 'true');
         allObjBtn.textContent = 'Any tracked';
         allObjBtn.onclick = function() { toggleChip(this, 'object'); };
         objBar.appendChild(allObjBtn);
-        objects.forEach(function(obj) {
+        uniqueObjects.forEach(function(obj) {
           var btn = document.createElement('button');
           btn.className = 'chip';
           btn.dataset.filter = 'object';
           btn.dataset.value = obj.name;
+          btn.setAttribute('aria-pressed', 'false');
           btn.textContent = obj.name;
           btn.onclick = function() { toggleChip(this, 'object'); };
           objBar.appendChild(btn);

@@ -2916,9 +2916,13 @@ function updatePlayheadForPlayback(currentTime) {
 // ─── Filter Chips ───
 function toggleChip(chipEl, filterType) {
   // Deactivate siblings of same filter type
-  const siblings = chipEl.parentElement.querySelectorAll('.chip[data-filter="' + filterType + '"]');
-  siblings.forEach(s => s.classList.remove('active'));
+  var siblings = chipEl.parentElement.querySelectorAll('.chip[data-filter="' + filterType + '"]');
+  siblings.forEach(function(s) {
+    s.classList.remove('active');
+    s.setAttribute('aria-pressed', 'false');
+  });
   chipEl.classList.add('active');
+  chipEl.setAttribute('aria-pressed', 'true');
 
   // Reload events with current filters
   reloadEvents();
