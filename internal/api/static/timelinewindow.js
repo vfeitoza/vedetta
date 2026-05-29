@@ -13,6 +13,7 @@ TimelineWindow.DEFAULT_NARROW_SPAN = 10800; // 3 h: mobile default window
 TimelineWindow.LIVE_MARGIN = 300; // 5 min empty lead kept right of the playhead
 TimelineWindow.MIN_EVENT_SEC = 1; // floor width for a zero-length event
 TimelineWindow.WIDE_MIN_PX = 640; // track width at/above which we default full-day
+TimelineWindow.SEGMENT_SNAP_RADIUS = 300; // 5 min: seek snaps to a segment edge within this radius
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -90,12 +91,13 @@ TimelineWindow.shouldResetView = function (trigger) {
     || trigger === 'return-live' || trigger === 'viewport-cross';
 };
 
-// Includes 600 (10 min): it is only ever selected for spans in (1500, 3000]s
-// (i.e. the deepest zoom, ~25-50 min), where it yields ~3 ticks instead of the
-// 2 that jumping straight to 900 would give. It never affects the 3h or full-day
+// Includes 600 (10 min): it is only ever selected for spans in [MIN_SPAN, 3000]s
+// (~30-50 min, deepest zoom), where it yields ~3 ticks instead of the 2 that
+// jumping straight to 900 would give. It never affects the 3h or full-day
 // windows (those select 3600 / 21600).
 TimelineWindow.NICE_INTERVALS = [300, 600, 900, 1800, 3600, 10800, 21600];
 
+// targetCount is a ceiling: returns the coarsest interval producing <= targetCount ticks.
 TimelineWindow.niceTickInterval = function (span, targetCount) {
   var target = targetCount || 5;
   var list = TimelineWindow.NICE_INTERVALS;
@@ -164,13 +166,13 @@ TimelineWindow.nearestSegmentEdge = function (mergedBlocks, sec) {
 // One shared seek-resolution path for tap, touch, and keyboard seeks. Snap to
 // the nearest event start within tolerance; if the (snapped) second sits on a
 // recording segment, play there; else snap to the nearest segment edge within
-// 300s and play; else signal "go live". Returns { sec, play }.
+// SEGMENT_SNAP_RADIUS and play; else signal "go live". Returns { sec, play }.
 TimelineWindow.resolveSeek = function (eventIntervals, mergedBlocks, sec, tolerance) {
   var snap = TimelineWindow.snapToEvent(eventIntervals, sec, tolerance);
   if (snap !== null) sec = snap;
   if (TimelineWindow.isCovered(mergedBlocks, sec, sec + 1)) return { sec: sec, play: true };
   var nearest = TimelineWindow.nearestSegmentEdge(mergedBlocks, sec);
-  if (nearest !== null && Math.abs(sec - nearest) < 300) return { sec: nearest, play: true };
+  if (nearest !== null && Math.abs(sec - nearest) < TimelineWindow.SEGMENT_SNAP_RADIUS) return { sec: nearest, play: true };
   return { sec: sec, play: false };
 };
 
@@ -178,6 +180,7 @@ TimelineWindow.resolveSeek = function (eventIntervals, mergedBlocks, sec, tolera
 // a `widthPx`-wide track. The renderer intersects this against coverage so a
 // sub-pixel recording span is still drawn at high zoom.
 TimelineWindow.columnTimeInterval = function (win, col, widthPx) {
+  if (widthPx <= 0) return [win.start, win.end];
   return [TimelineWindow.pctToSec(win, col / widthPx), TimelineWindow.pctToSec(win, (col + 1) / widthPx)];
 };
 

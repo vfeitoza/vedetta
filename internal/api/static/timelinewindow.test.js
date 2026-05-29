@@ -11,6 +11,7 @@ test('constants have the spec values', () => {
   assert.equal(TLW.LIVE_MARGIN, 300);
   assert.equal(TLW.MIN_EVENT_SEC, 1);
   assert.equal(TLW.WIDE_MIN_PX, 640);
+  assert.equal(TLW.SEGMENT_SNAP_RADIUS, 300);
 });
 
 test('clampSpan bounds span to [MIN_SPAN, day]', () => {
@@ -43,6 +44,10 @@ test('pctToSec <-> secToPctRaw round-trip', () => {
     const sec = TLW.pctToSec(w, pct);
     assert.ok(Math.abs(TLW.secToPctRaw(w, sec) - pct) < 1e-9);
   }
+});
+
+test('secToPctRaw on a zero-span window returns NaN (callers use setWindow)', () => {
+  assert.ok(Number.isNaN(TLW.secToPctRaw(TLW.makeWindow(100, 100), 100)));
 });
 
 test('setWindow clamps span and keeps window inside the day', () => {
@@ -94,7 +99,7 @@ test('zoomAt clamps span and preserves span at edges (no squash)', () => {
   assert.equal(wEdge.end - wEdge.start, 21600);
 });
 
-test('followLiveWindow pins end at now+LIVE_MARGIN, preserves span', () => {
+test('followLiveWindow normal case: end = now+LIVE_MARGIN, span preserved', () => {
   const w = TLW.followLiveWindow(50400, 10800); // now 14:00
   assert.equal(w.end, 50700); // 14:00 + 5min
   assert.equal(w.end - w.start, 10800);
@@ -162,7 +167,7 @@ test('niceTickInterval picks smallest interval with span/interval <= target (def
   assert.equal(TLW.niceTickInterval(1800), 600);       // default target is 5
 });
 
-test('niceTicks returns multiples strictly inside the window', () => {
+test('niceTicks returns tick multiples, boundary-inclusive', () => {
   const ticks = TLW.niceTicks(50400, 61200, 5); // 14:00-17:00, 1h interval
   assert.deepEqual(ticks, [50400, 54000, 57600, 61200]);
   // a window not starting on a tick boundary: full array asserted
@@ -238,4 +243,8 @@ test('columnTimeInterval detects a sub-pixel coverage span (high zoom)', () => {
   assert.ok(Math.abs(iv[1] - 101) < 1e-9);
   // a 0.5s recording block inside that column is still detected as covered
   assert.equal(TLW.isCovered([{ start: 100.2, end: 100.7 }], iv[0], iv[1]), true);
+});
+
+test('columnTimeInterval on a zero-width track returns the full window span', () => {
+  assert.deepEqual(TLW.columnTimeInterval(TLW.makeWindow(0, 3600), 0, 0), [0, 3600]);
 });
