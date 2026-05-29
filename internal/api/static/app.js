@@ -2207,6 +2207,28 @@ function initTimeline() {
     if (e.pointerType === 'mouse') hideTrackHover();
   });
 
+  track.addEventListener('keydown', function(e) {
+    var span = timelineWin.end - timelineWin.start;
+    var interval = TLW.niceTickInterval(span, 5);
+    var center = Math.floor((timelineWin.start + timelineWin.end) / 2);
+    var cur = parseInt(track.getAttribute('aria-valuenow'), 10);
+    if (isNaN(cur)) cur = center;
+    var handled = true;
+    if (e.key === 'ArrowLeft' && !e.shiftKey) { commitSeekToSecond(Math.max(0, cur - interval)); }
+    else if (e.key === 'ArrowRight' && !e.shiftKey) { commitSeekToSecond(Math.min(86399, cur + interval)); }
+    else if (e.key === 'ArrowLeft' && e.shiftKey) { timelineWin = TLW.panBy(timelineWin, -interval); markUserAdjusted(); setSeekAria(cur); scheduleTimelineRender(); }
+    else if (e.key === 'ArrowRight' && e.shiftKey) { timelineWin = TLW.panBy(timelineWin, interval); markUserAdjusted(); setSeekAria(cur); scheduleTimelineRender(); }
+    else if (e.key === 'Home') { commitSeekToSecond(Math.floor(timelineWin.start)); }
+    else if (e.key === 'End') { commitSeekToSecond(Math.floor(timelineWin.end)); }
+    else if (e.key === '+' || e.key === '=' || e.key === 'ArrowUp') { timelineWin = TLW.zoomAt(timelineWin, 0.5, 1 / 1.5); markUserAdjusted(); setSeekAria(cur); scheduleTimelineRender(); }
+    else if (e.key === '-' || e.key === '_' || e.key === 'ArrowDown') { timelineWin = TLW.zoomAt(timelineWin, 0.5, 1.5); markUserAdjusted(); setSeekAria(cur); scheduleTimelineRender(); }
+    else { handled = false; }
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation(); // do not let Arrow keys reach the global shortcut handler
+    }
+  });
+
   var resizeTimer;
   window.addEventListener('resize', function() {
     clearTimeout(resizeTimer);
