@@ -4289,7 +4289,20 @@ kbd {
 .object-thumb:focus-within .object-thumb-edit { opacity: 1; }
 .object-thumb-edit:hover { background: var(--accent); }
 @media (hover: none) {
+  /* Thumbnail edit pencil (was opacity:0, shown on hover only) */
   .object-thumb-edit { opacity: 0.85; }
+
+  /* Camera start/stop button (was opacity:0, shown on cam-card:hover) */
+  .cam-toggle-btn { opacity: 1; }
+
+  /* Object reference image delete button (was display:none, shown on .object-ref:hover) */
+  .object-ref-delete { display: block; }
+
+  /* Object sighting dismiss button (was display:none, shown on .object-sighting:hover) */
+  .object-sighting-dismiss { display: block; }
+
+  /* Unmatched face overlay (was opacity:0, shown on .face-thumb--unmatched:hover) */
+  .face-thumb-action { opacity: 0.85; }
 }
 
 /* Thumbnail picker modal */
