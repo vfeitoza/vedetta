@@ -2229,6 +2229,37 @@ function initTimeline() {
     }
   });
 
+  // ─── Minimap interaction (pan-only) ───
+  var mini = el('timeline-minimap');
+  if (mini) {
+    var miniDragging = false;
+    function miniPctToSec(clientX) {
+      var rect = mini.getBoundingClientRect();
+      var pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      return pct * TLW.SECONDS_PER_DAY;
+    }
+    function miniCenterOn(sec) {
+      var span = timelineWin.end - timelineWin.start;
+      timelineWin = TLW.setWindow(sec - span / 2, span);
+      markUserAdjusted();
+      scheduleTimelineRender();
+    }
+    mini.addEventListener('pointerdown', function(e) {
+      mini.setPointerCapture(e.pointerId);
+      miniDragging = true;
+      miniCenterOn(miniPctToSec(e.clientX)); // tap or drag-start recenters
+    });
+    mini.addEventListener('pointermove', function(e) {
+      if (miniDragging) miniCenterOn(miniPctToSec(e.clientX));
+    });
+    function miniEnd(e) {
+      if (mini.hasPointerCapture && mini.hasPointerCapture(e.pointerId)) mini.releasePointerCapture(e.pointerId);
+      miniDragging = false;
+    }
+    mini.addEventListener('pointerup', miniEnd);
+    mini.addEventListener('pointercancel', miniEnd);
+  }
+
   var resizeTimer;
   window.addEventListener('resize', function() {
     clearTimeout(resizeTimer);
