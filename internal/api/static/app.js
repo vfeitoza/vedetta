@@ -2658,14 +2658,14 @@ function setView(mode) {
   if (mode === 'birdseye') {
     cameraGrid.style.display = 'none';
     birdseyeGrid.style.display = '';
-    if (btnGrid) btnGrid.classList.remove('active');
-    if (btnBirdseye) btnBirdseye.classList.add('active');
+    if (btnGrid) { btnGrid.classList.remove('active'); btnGrid.setAttribute('aria-pressed', 'false'); }
+    if (btnBirdseye) { btnBirdseye.classList.add('active'); btnBirdseye.setAttribute('aria-pressed', 'true'); }
     startBirdseye();
   } else {
     cameraGrid.style.display = '';
     birdseyeGrid.style.display = 'none';
-    if (btnGrid) btnGrid.classList.add('active');
-    if (btnBirdseye) btnBirdseye.classList.remove('active');
+    if (btnGrid) { btnGrid.classList.add('active'); btnGrid.setAttribute('aria-pressed', 'true'); }
+    if (btnBirdseye) { btnBirdseye.classList.remove('active'); btnBirdseye.setAttribute('aria-pressed', 'false'); }
     stopBirdseye();
   }
 
