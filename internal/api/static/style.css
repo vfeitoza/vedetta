@@ -1586,7 +1586,7 @@ input, select { font-family: inherit; }
   background: var(--surface-2);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  touch-action: none;
+  touch-action: pan-y; /* horizontal drags pan the window; browser handles vertical page scroll */
   cursor: pointer;
 }
 
