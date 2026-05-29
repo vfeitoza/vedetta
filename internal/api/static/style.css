@@ -156,6 +156,8 @@
 [data-theme="light"] .event-label-badge.dog { color: var(--label-dog); }
 [data-theme="light"] .event-label-badge.cat { color: var(--label-cat); }
 [data-theme="light"] .event-score-badge { color: var(--green); }
+[data-theme="light"] .event-score-badge.mid { color: var(--amber); }
+[data-theme="light"] .event-score-badge.low { color: var(--red); }
 [data-theme="light"] .event-duration-badge { background: rgba(255, 255, 255, 0.85); color: var(--amber); }
 
 [data-theme="light"] .playback-badge { background: rgba(245, 127, 23, 0.15); color: var(--amber); }
@@ -829,6 +831,9 @@ input, select { font-family: inherit; }
   font-weight: 600;
   color: var(--green);
 }
+
+.event-score-badge.mid { color: var(--amber); }
+.event-score-badge.low { color: var(--red); }
 
 .event-duration-badge {
   position: absolute;
