@@ -21,12 +21,21 @@ let playbackMode = false; // true when playing back a recording
 let playbackStartTime = null; // Date when playback segment starts
 let playbackOffset = 0; // offset into segment where playback begins
 let playbackHls = null; // Hls instance for recording playback
-let timelineDragging = false; // true during timeline drag
+let timelineDragging = false; // true during timeline drag (legacy mouse path; pointer gestures use the state machine in initTimeline)
 var cachedSegments = []; // raw segment data from API
 var cachedActivity = [];
 var cachedTimelineEvents = [];
-var mergedBlocks = []; // merged blocks {start: sec, end: sec} for hit-testing
-var eventBarSnaps = []; // per-bar: nearest event start in seconds-of-day, or -1
+var mergedBlocks = []; // merged blocks {start: sec, end: sec} for hit-testing (set by prepareTimelineModel)
+// app.js is shared by every page, but only camera.html loads timelinewindow.js.
+// Guard the alias so the global initializer below does not throw a
+// ReferenceError on pages without the module; timeline code only ever runs on
+// the camera page (every entry point bails when #timeline-track is absent).
+var TLW = (typeof TimelineWindow !== 'undefined') ? TimelineWindow : null;
+var timelineWin = TLW ? TLW.makeWindow(0, TLW.SECONDS_PER_DAY) : null; // visible window in seconds-of-day
+var timelineModel = null; // { scores, hasCoverage, mergedBlocks, eventIntervals } from prepareTimelineModel
+var followLive = false; // true: window auto-pans to keep "now" in view (today only)
+var userAdjustedView = false; // true once the user pans/zooms/seeks this session
+var lastWideResult = null; // previous isWideTimeline() result, for resize viewport-cross detection
 let timelineDate = null;
 let calendarDate = new Date();
 
@@ -2002,7 +2011,7 @@ function initTimeline() {
       return;
     }
 
-    var totalSec = pct * 86400;
+    var totalSec = pctToSec(pct);
     var h = Math.floor(totalSec / 3600);
     var m = Math.floor((totalSec % 3600) / 60);
     var s = Math.floor(totalSec % 60);
@@ -2047,16 +2056,16 @@ function initTimeline() {
     var containerH = timelineContainer.offsetHeight;
     preview.style.bottom = (containerH - track.offsetTop + 4) + 'px';
     preview.style.top = '';
-    var totalSec = pct * 86400;
+    var totalSec = pctToSec(pct);
     var h = Math.floor(totalSec / 3600);
     var m = Math.floor((totalSec % 3600) / 60);
     cursorTime.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
     // Change cursor when over a recorded segment
     var overEvent = false;
-    if (eventBarSnaps.length > 0) {
-      var barStep = 3;
-      var bIdx = Math.floor(pct * track.offsetWidth / barStep);
-      if (bIdx >= 0 && bIdx < eventBarSnaps.length && eventBarSnaps[bIdx] >= 0) overEvent = true;
+    if (timelineModel && timelineModel.eventIntervals.length > 0) {
+      var hoverSec = pctToSec(pct);
+      var hoverTol = TLW.snapTolerance(timelineWin.end - timelineWin.start, track.offsetWidth);
+      overEvent = TLW.snapToEvent(timelineModel.eventIntervals, hoverSec, hoverTol) !== null;
     }
     track.style.cursor = overEvent ? 'pointer' : isOverSegment(pct) ? 'pointer' : 'default';
 
@@ -2114,19 +2123,19 @@ function initTimeline() {
   window.addEventListener('resize', function() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function() {
-      renderWaveform(cachedActivity, cachedTimelineEvents, cachedSegments);
+      renderWaveform();
     }, 200);
   });
 }
 
 var lastScrubEvent = null;
 
-// Convert a 0-1 fraction to seconds-of-day
+// Convert a 0-1 fraction of the visible track to seconds-of-day (window-relative).
 function pctToSec(pct) {
-  return pct * 86400;
+  return TLW.pctToSec(timelineWin, pct);
 }
 
-// Check if a 0-1 fraction falls within any merged block
+// Check if a 0-1 fraction falls within any merged recording block.
 function isOverSegment(pct) {
   var sec = pctToSec(pct);
   return mergedBlocks.some(function(block) {
@@ -2134,77 +2143,88 @@ function isOverSegment(pct) {
   });
 }
 
-// Find nearest merged block edge to a given seconds-of-day value
-function snapToNearestSegment(sec) {
-  var best = null;
-  var bestDist = Infinity;
-  mergedBlocks.forEach(function(block) {
-    if (Math.abs(sec - block.start) < bestDist) {
-      bestDist = Math.abs(sec - block.start);
-      best = block.start;
-    }
-    if (Math.abs(sec - block.end) < bestDist) {
-      bestDist = Math.abs(sec - block.end);
-      best = block.end;
-    }
-  });
-  return best;
-}
-
 function scrubTimeline(e, commit) {
   if (!e) return;
   lastScrubEvent = e;
-
-  const track = el('timeline-track');
-  const playhead = el('timeline-playhead');
+  var track = el('timeline-track');
+  var playhead = el('timeline-playhead');
   if (!track || !playhead) return;
 
-  const rect = track.getBoundingClientRect();
-  let pct = (e.clientX - rect.left) / rect.width;
-  pct = Math.max(0, Math.min(1, pct));
-
+  var rect = track.getBoundingClientRect();
+  var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   playhead.style.left = (pct * 100) + '%';
   playhead.style.display = '';
 
-  // Only start playback on commit (mouseup/touchend)
-  if (!commit) return;
+  if (!commit) return; // live drag preview only; commit on pointerup/tap
+  commitSeekToSecond(pctToSec(pct));
+}
 
-  var sec = pctToSec(pct);
-
-  // Snap to event start if clicking on an event bar
-  if (eventBarSnaps.length > 0) {
-    var barStep = 3; // barW(2) + gap(1)
-    var barIdx = Math.floor(pct * track.offsetWidth / barStep);
-    if (barIdx >= 0 && barIdx < eventBarSnaps.length && eventBarSnaps[barIdx] >= 0) {
-      sec = eventBarSnaps[barIdx];
-    }
-  }
-
-  // Check if directly on a segment
-  if (isOverSegment(pct)) {
-    var hours = Math.floor(sec / 3600);
-    var mins = Math.floor((sec % 3600) / 60);
-    var secs = Math.floor(sec % 60);
-    var d = new Date(timelineDate);
-    d.setHours(hours, mins, secs, 0);
-    startPlayback(d);
+// Shared seek-commit path for tap, touch, and keyboard. Snaps via the pure
+// resolveSeek, updates the playhead + aria, and either starts playback or
+// returns to live. Coverage is checked against the SNAPPED second.
+function commitSeekToSecond(sec) {
+  var track = el('timeline-track');
+  if (!track) return;
+  sec = Math.max(0, Math.min(86399, sec)); // keep within the slider's aria range
+  var tol = TLW.snapTolerance(timelineWin.end - timelineWin.start, track.offsetWidth);
+  var r = TLW.resolveSeek(timelineModel ? timelineModel.eventIntervals : [], mergedBlocks, sec, tol);
+  if (!r.play) {
+    // Seek landed far from any recording. If we were playing back, exit playback
+    // fully (returnToLive restores follow + window). Otherwise we are already
+    // live: just move the playhead to now (parity with the original behavior).
+    // We deliberately do NOT force-resume follow here — a stray empty-space tap
+    // should not yank a user who has panned into the past back to live; the LIVE
+    // button (or zooming back) is the explicit "resume follow" affordance.
+    if (playbackMode) { returnToLive(); return; }
+    setSeekAria(r.sec);
+    updatePlayheadToNow();
     return;
   }
 
-  // Not on a segment — snap to nearest edge if close (within 5 min)
-  var nearest = snapToNearestSegment(sec);
-  if (nearest !== null && Math.abs(sec - nearest) < 300) {
-    var hours = Math.floor(nearest / 3600);
-    var mins = Math.floor((nearest % 3600) / 60);
-    var secs = Math.floor(nearest % 60);
-    var d = new Date(timelineDate);
-    d.setHours(hours, mins, secs, 0);
-    startPlayback(d);
-    return;
+  // Seeking into a recording means we are no longer following live.
+  markUserAdjusted();
+  setSeekAria(r.sec);
+  var playhead = el('timeline-playhead');
+  if (playhead && TLW.isSecInView(timelineWin, r.sec)) {
+    playhead.style.left = (TLW.secToPctRaw(timelineWin, r.sec) * 100) + '%';
+    playhead.style.display = '';
   }
+  setMinimapPlayhead(r.sec, true);
+  var hh = Math.floor(r.sec / 3600), mm = Math.floor((r.sec % 3600) / 60), ss = Math.floor(r.sec % 60);
+  var d = new Date(timelineDate);
+  d.setHours(hh, mm, ss, 0);
+  startPlayback(d);
+}
 
-  // Too far from any segment — return to live
-  updatePlayheadToNow();
+// Any deliberate pan/zoom/seek opts out of viewport auto-defaulting and follow.
+function markUserAdjusted() {
+  userAdjustedView = true;
+  followLive = false;
+}
+
+// Update the slider's aria value/text for the current seek second.
+function setSeekAria(sec) {
+  var track = el('timeline-track');
+  if (!track) return;
+  var hh = String(Math.floor(sec / 3600) % 24).padStart(2, '0');
+  var mm = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+  var ss = String(Math.floor(sec % 60)).padStart(2, '0');
+  track.setAttribute('aria-valuenow', String(Math.floor(sec)));
+  track.setAttribute('aria-valuetext', followLive ? 'Live' : (hh + ':' + mm + ':' + ss));
+}
+
+// Position (or hide) the minimap playhead overlay in full-day coordinates.
+// el() returns null until the minimap markup lands in Task 8, so this is a
+// harmless no-op until then.
+function setMinimapPlayhead(sec, show) {
+  var pl = el('timeline-minimap-playhead');
+  if (!pl) return;
+  if (show) {
+    pl.style.left = (sec / TLW.SECONDS_PER_DAY * 100) + '%';
+    pl.style.display = '';
+  } else {
+    pl.style.display = 'none';
+  }
 }
 
 function timelineNav(delta) {
@@ -2280,16 +2300,87 @@ function fetchTimelineData() {
       cachedSegments = data.segments || [];
       cachedActivity = data.activity || [];
       cachedTimelineEvents = data.events || [];
-      renderWaveform(cachedActivity, cachedTimelineEvents, cachedSegments);
+      prepareTimelineModel(cachedActivity, cachedTimelineEvents, cachedSegments);
+      renderWaveform();
     })
     .catch(function(err) {
       console.error('Timeline fetch error:', err);
     });
 }
 
-function renderWaveform(activity, events, segments) {
+// Build the per-day timeline model (coverage, motion scores, merged blocks,
+// event intervals) WITHOUT drawing. Runs before defaultWindow() so latest
+// activity is known, and before every render. Local-timezone handling matches
+// the original: minute indices come from getHours()/getMinutes() of each Date.
+function prepareTimelineModel(activity, events, segments) {
+  var hasCoverage = new Uint8Array(1440);
+  var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
+  var nowMin = isToday ? new Date().getHours() * 60 + new Date().getMinutes() : 1440;
+
+  var blocks = [];
+  if (segments) {
+    // The merge loop and latestActivitySec default both assume ascending order.
+    segments = segments.slice().sort(function(a, b) {
+      return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+    });
+    segments.forEach(function(seg) {
+      var start = new Date(seg.start_time);
+      var end = new Date(seg.end_time);
+      var startMin = start.getHours() * 60 + start.getMinutes();
+      var endMin = end.getHours() * 60 + end.getMinutes();
+      if (endMin > nowMin) endMin = nowMin;
+      for (var m = startMin; m <= endMin && m < 1440; m++) hasCoverage[m] = 1;
+
+      var startSec = start.getHours() * 3600 + start.getMinutes() * 60 + start.getSeconds();
+      var endSec = end.getHours() * 3600 + end.getMinutes() * 60 + end.getSeconds();
+      if (endSec <= startSec) return;
+      if (blocks.length > 0 && startSec - blocks[blocks.length - 1].end <= 60) {
+        if (endSec > blocks[blocks.length - 1].end) blocks[blocks.length - 1].end = endSec;
+      } else {
+        blocks.push({ start: startSec, end: endSec });
+      }
+    });
+  }
+
+  var scores = new Float64Array(1440);
+  if (activity) {
+    activity.forEach(function(a) {
+      var d = new Date(a.t);
+      var minute = d.getHours() * 60 + d.getMinutes();
+      if (minute >= 0 && minute < 1440) scores[minute] = a.s;
+    });
+  }
+
+  var rawEvents = [];
+  if (events) {
+    events.forEach(function(evt) {
+      var startTs = new Date(evt.timestamp);
+      var startSec = startTs.getHours() * 3600 + startTs.getMinutes() * 60 + startTs.getSeconds();
+      var endSec = null;
+      if (evt.end_time) {
+        var endTs = new Date(evt.end_time);
+        endSec = endTs.getHours() * 3600 + endTs.getMinutes() * 60 + endTs.getSeconds();
+      }
+      rawEvents.push({ startSec: startSec, endSec: endSec });
+    });
+  }
+
+  mergedBlocks = blocks; // keep the global in sync for hit-testing helpers
+  timelineModel = {
+    scores: scores,
+    hasCoverage: hasCoverage,
+    mergedBlocks: blocks,
+    eventIntervals: TLW.buildEventIntervals(rawEvents),
+  };
+  return timelineModel;
+}
+
+// Draw the visible window onto the main track canvas. Coverage comes from exact
+// mergedBlocks seconds; the motion waveform is sampled per integer pixel column
+// as a time interval (never a single point), so it is correct at any zoom.
+function renderWaveform() {
   var canvas = el('timeline-canvas');
-  if (!canvas) return;
+  if (!canvas || !timelineModel) return;
   var track = el('timeline-track');
 
   var dpr = window.devicePixelRatio || 1;
@@ -2301,131 +2392,61 @@ function renderWaveform(activity, events, segments) {
   canvas.style.height = h + 'px';
 
   var ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  // Mark minutes that have recording coverage
-  var hasCoverage = new Uint8Array(1440);
-  var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
-  var nowMin = isToday ? new Date().getHours() * 60 + new Date().getMinutes() : 1440;
-  if (segments) {
-    segments.forEach(function(seg) {
-      var start = new Date(seg.start_time);
-      var end = new Date(seg.end_time);
-      var startMin = start.getHours() * 60 + start.getMinutes();
-      var endMin = end.getHours() * 60 + end.getMinutes();
-      if (endMin > nowMin) endMin = nowMin;
-      for (var m = startMin; m <= endMin && m < 1440; m++) {
-        hasCoverage[m] = 1;
-      }
-    });
-  }
-
-  // Fill in motion scores from activity data
-  var scores = new Float64Array(1440);
-  if (activity) {
-    activity.forEach(function(a) {
-      var d = new Date(a.t);
-      var minute = d.getHours() * 60 + d.getMinutes();
-      if (minute >= 0 && minute < 1440) {
-        scores[minute] = a.s;
-      }
-    });
-  }
-
-  // Populate mergedBlocks from segments for scrubbing hit-testing
-  mergedBlocks = [];
-  if (segments) {
-    segments.forEach(function(seg) {
-      var start = new Date(seg.start_time);
-      var end = new Date(seg.end_time);
-      var startSec = start.getHours() * 3600 + start.getMinutes() * 60 + start.getSeconds();
-      var endSec = end.getHours() * 3600 + end.getMinutes() * 60 + end.getSeconds();
-      if (endSec <= startSec) return;
-      if (mergedBlocks.length > 0 && startSec - mergedBlocks[mergedBlocks.length - 1].end <= 60) {
-        if (endSec > mergedBlocks[mergedBlocks.length - 1].end) {
-          mergedBlocks[mergedBlocks.length - 1].end = endSec;
-        }
-      } else {
-        mergedBlocks.push({ start: startSec, end: endSec });
-      }
-    });
-  }
-
-  // Build event minute set and per-minute snap targets (exact event start in seconds-of-day)
-  var eventMinutes = new Set();
-  var eventSnapSec = {}; // minute -> earliest event start second in that minute
-  if (events) {
-    events.forEach(function(evt) {
-      var startTs = new Date(evt.timestamp);
-      var startSec = startTs.getHours() * 3600 + startTs.getMinutes() * 60 + startTs.getSeconds();
-      var startMin = startTs.getHours() * 60 + startTs.getMinutes();
-      var endMin = startMin;
-      if (evt.end_time) {
-        var endTs = new Date(evt.end_time);
-        endMin = endTs.getHours() * 60 + endTs.getMinutes();
-      }
-      for (var m = startMin; m <= endMin && m < 1440; m++) {
-        eventMinutes.add(m);
-      }
-      // Store the earliest event start second for its minute
-      if (!(startMin in eventSnapSec) || startSec < eventSnapSec[startMin]) {
-        eventSnapSec[startMin] = startSec;
-      }
-    });
-  }
-
+  var win = timelineWin;
   var style = getComputedStyle(document.documentElement);
   var normalColor = style.getPropertyValue('--cyan-dim').trim() || '#00b8d4';
   var eventColor = style.getPropertyValue('--event-bar').trim() || '#ffab00';
-
-  var barW = 2;
-  var gap = 1;
-  var step = barW + gap;
-  var numBars = Math.floor(w / step);
-  var minutesPerBar = 1440 / numBars;
 
   var midY = h / 2;
   var maxHalf = h / 2;
   var minBarHeight = maxHalf * 0.15;
   var baselineHeight = maxHalf * 0.08;
 
-  // Build per-bar event snap targets
-  eventBarSnaps = new Array(numBars);
-  for (var b = 0; b < numBars; b++) eventBarSnaps[b] = -1;
+  var scores = timelineModel.scores;
+  var blocks = timelineModel.mergedBlocks;
+  var events = timelineModel.eventIntervals;
 
-  for (var b = 0; b < numBars; b++) {
-    var mStart = Math.floor(b * minutesPerBar);
-    var mEnd = Math.floor((b + 1) * minutesPerBar);
-    if (mEnd > 1440) mEnd = 1440;
+  // 1) Solid coverage band from exact merged-block seconds, clipped to window.
+  ctx.fillStyle = normalColor;
+  ctx.globalAlpha = 0.25;
+  blocks.forEach(function(b) {
+    var s = Math.max(b.start, win.start);
+    var e = Math.min(b.end, win.end);
+    if (e <= s) return;
+    var x1 = TLW.secToPctRaw(win, s) * w;
+    var x2 = TLW.secToPctRaw(win, e) * w;
+    ctx.fillRect(x1, midY - baselineHeight, Math.max(1, x2 - x1), baselineHeight * 2);
+  });
+  ctx.globalAlpha = 1;
 
+  // 2) Motion waveform, one bar per integer pixel column treated as a time
+  //    interval. A column draws only where it intersects coverage; height is the
+  //    max motion score over every minute the column spans; color flips to the
+  //    event color when the column interval intersects an event interval.
+  for (var c = 0; c < w; c++) {
+    var colIv = TLW.columnTimeInterval(win, c, w);
+    var colStart = colIv[0];
+    var colEnd = colIv[1];
+    if (!TLW.isCovered(blocks, colStart, colEnd)) continue;
+
+    var mStart = Math.floor(colStart / 60);
+    var mEnd = Math.ceil(colEnd / 60);
     var maxScore = 0;
-    var covered = false;
-    var hasEvent = false;
-    var earliestSnap = -1;
     for (var m = mStart; m < mEnd; m++) {
-      if (hasCoverage[m]) covered = true;
-      if (scores[m] > maxScore) maxScore = scores[m];
-      if (eventMinutes.has(m)) hasEvent = true;
-      if (m in eventSnapSec && (earliestSnap === -1 || eventSnapSec[m] < earliestSnap)) {
-        earliestSnap = eventSnapSec[m];
-      }
+      if (m >= 0 && m < 1440 && scores[m] > maxScore) maxScore = scores[m];
     }
 
-    if (!covered) continue;
-
-    if (hasEvent) eventBarSnaps[b] = earliestSnap;
-
-    var barH;
-    if (maxScore > 0) {
-      barH = maxScore * maxHalf;
-      if (barH < minBarHeight) barH = minBarHeight;
-    } else {
-      barH = baselineHeight;
+    var hasEvent = false;
+    for (var i = 0; i < events.length; i++) {
+      if (TLW.intervalsIntersect(colStart, colEnd, events[i].startSec, events[i].endSec)) { hasEvent = true; break; }
     }
 
+    var barH = maxScore > 0 ? Math.max(maxScore * maxHalf, minBarHeight) : baselineHeight;
     ctx.fillStyle = hasEvent ? eventColor : normalColor;
-    ctx.fillRect(b * step, midY - barH, barW, barH * 2);
+    ctx.fillRect(c, midY - barH, 1, barH * 2);
   }
 }
 
