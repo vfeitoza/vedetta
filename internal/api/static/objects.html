@@ -80,7 +80,7 @@
 
   <!-- Confirm Modal -->
   <div class="shortcut-backdrop" id="confirm-backdrop"></div>
-  <div class="shortcut-modal" id="confirm-modal" role="dialog" aria-modal="true" aria-label="Confirm">
+  <div class="shortcut-modal" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <div class="shortcut-modal-header">
       <h2 id="confirm-title">Confirm</h2>
       <button class="btn btn-icon btn-ghost" data-action-click="closeConfirmModal()" aria-label="Close">
@@ -219,6 +219,13 @@
         return;
       }
 
+      // Build a set of names that appear more than once so duplicates can be disambiguated.
+      var nameCounts = {};
+      objectsData.forEach(function(o) {
+        var n = (o.name || '').toLowerCase();
+        nameCounts[n] = (nameCounts[n] || 0) + 1;
+      });
+
       var html = '';
       objectsData.forEach(function(obj) {
         var threshold = (obj.match_threshold != null ? obj.match_threshold : 0.65);
@@ -245,6 +252,7 @@
           +         '<span id="ref-count-' + obj.id + '">— refs</span>'
           +         '<span>·</span>'
           +         '<span id="sight-count-' + obj.id + '">— sightings</span>'
+          +         (nameCounts[(obj.name || '').toLowerCase()] > 1 ? '<span>·</span><span class="muted" title="Added date helps distinguish objects with the same name">added ' + escapeHtml(formatDateShort(obj.created_at)) + '</span>' : '')
           +       '</div>'
           +     '</div>'
           +     '<button class="btn btn-icon btn-ghost" style="color:var(--danger);flex-shrink:0" '
