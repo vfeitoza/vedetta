@@ -371,6 +371,7 @@ input, select { font-family: inherit; }
 .page-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
