@@ -159,15 +159,15 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		`{{range .}}` +
 			`<a class="event-card" href="/event.html?id={{.ID}}" role="listitem">` +
 			`<div class="event-thumb">` +
-			`{{if .SnapshotAvailable}}<img src="/api/events/{{.ID}}/snapshot" alt="{{.Label}}" loading="lazy">` +
-			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}}" loading="lazy">{{end}}` +
+			`{{if .SnapshotAvailable}}<img src="/api/events/{{.ID}}/snapshot" alt="{{.Label}} detected by {{displayName .CameraName}}" loading="lazy">` +
+			`{{else}}<img src="/api/cameras/{{.CameraName}}/snapshot" alt="{{.Label}} detected by {{displayName .CameraName}}" loading="lazy">{{end}}` +
 			`<span class="event-label-badge {{.Label}}" title="Detected: {{.Label}}">{{.Label}}</span>` +
-			`<span class="event-score-badge" title="Detection confidence: {{scorePercent .Score}}">{{scorePercent .Score}}</span>` +
+			`<span class="event-score-badge{{if lt .Score 0.5}} low{{else if lt .Score 0.7}} mid{{end}}" title="Detection confidence: {{scorePercent .Score}}">{{scorePercent .Score}}</span>` +
 			`{{with eventDuration .}}<span class="event-duration-badge" title="Event duration: {{.}}">{{.}}</span>{{end}}` +
 			`{{if .SubLabel}}<span class="event-object-badge" title="Identified: {{.SubLabel}}">{{.SubLabel}}</span>{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
-			`<span class="event-camera-name">{{.CameraName}}</span>` +
+			`<span class="event-camera-name">{{displayName .CameraName}}</span>` +
 			`<span class="event-time">{{timeAgo .Timestamp}}</span>` +
 			`</div>` +
 			`</a>{{end}}`))
