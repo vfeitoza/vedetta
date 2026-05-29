@@ -392,6 +392,15 @@ bindDelegatedDataAction('change', 'data-action-change');
 bindDelegatedDataAction('input', 'data-action-input');
 bindDelegatedDataAction('focus', 'data-action-focus');
 
+// Activate role="button" divs with Enter or Space, mirroring native button behavior.
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  var el = e.target && e.target.closest ? e.target.closest('[role="button"]') : null;
+  if (!el || el.tagName === 'BUTTON' || el.tagName === 'A') return;
+  e.preventDefault();
+  el.click();
+});
+
 function bindManagedUI(root) {
   root = root || document;
 

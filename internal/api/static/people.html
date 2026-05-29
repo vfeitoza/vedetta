@@ -281,7 +281,7 @@
         var ignoreClass = p.ignore ? ' person-card--ignored' : '';
         html += '<div class="person-card' + ignoreClass + '" data-person-id="' + p.id + '" data-person-name="' + escapeAttr(p.name || '') + '">'
           + '<div class="person-card-header">'
-          + '<div class="person-thumb-wrap" data-action-click="togglePersonFaces(' + p.id + ')">'
+          + '<div class="person-thumb-wrap" role="button" tabindex="0" aria-expanded="false" aria-controls="person-faces-' + p.id + '" data-action-click="togglePersonFaces(' + p.id + ')" aria-label="Show faces for ' + escapeAttr(p.name || 'unnamed person') + '">'
           + '<div class="face-thumb person-thumb" id="person-thumb-' + p.id + '"></div>'
           + '</div>'
           + '<div class="person-info">'
@@ -325,11 +325,14 @@
     function togglePersonFaces(personId) {
       var el = document.getElementById('person-faces-' + personId);
       if (!el) return;
+      var trigger = el.closest('.person-card') && el.closest('.person-card').querySelector('[aria-controls="person-faces-' + personId + '"]');
       if (!el.classList.contains('hidden')) {
         el.classList.add('hidden');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
         return;
       }
       el.classList.remove('hidden');
+      if (trigger) trigger.setAttribute('aria-expanded', 'true');
       el.innerHTML = '<div class="loading-state" style="padding:0.5rem">Loading...</div>';
 
       Promise.all([
@@ -345,8 +348,9 @@
           html += '<div class="person-faces-heading">Faces (' + faces.length + ')</div>';
           html += '<div class="face-grid">';
           faces.forEach(function(f) {
-            html += '<div class="face-thumb-wrap-link" data-action-click="showFaceSnapshot(' + f.id + ',' + jsStringArg(f.event_id || '') + ',' + jsStringArg(f.camera || '') + ')">'
-              + '<div class="face-thumb" style="background-image:url(/api/faces/' + f.id + '/crop)" title="' + escapeAttr(f.camera || '') + ' - ' + escapeAttr(new Date(f.timestamp).toLocaleString()) + '"></div>'
+            var faceTs = new Date(f.timestamp).toLocaleString();
+            html += '<div class="face-thumb-wrap-link" role="button" tabindex="0" data-action-click="showFaceSnapshot(' + f.id + ',' + jsStringArg(f.event_id || '') + ',' + jsStringArg(f.camera || '') + ')" aria-label="View snapshot for face from ' + escapeAttr(f.camera || 'unknown') + ', ' + escapeAttr(faceTs) + '">'
+              + '<div class="face-thumb" style="background-image:url(/api/faces/' + f.id + '/crop)" title="' + escapeAttr(f.camera || '') + ' - ' + escapeAttr(faceTs) + '"></div>'
               + '</div>';
           });
           html += '</div>';
@@ -497,7 +501,8 @@
         if (empty) empty.setAttribute('hidden', '');
         var html = '';
         _unmatchedFaces.forEach(function(f, i) {
-          html += '<div class="unid-card" data-action-click="openFaceModal(' + i + ')" title="' + escapeAttr(f.camera || '') + ' — ' + escapeAttr(new Date(f.timestamp).toLocaleString()) + '">'
+          var faceTime = new Date(f.timestamp).toLocaleString();
+          html += '<div class="unid-card" role="button" tabindex="0" data-action-click="openFaceModal(' + i + ')" aria-label="Identify face from ' + escapeAttr(f.camera || 'unknown camera') + ', ' + escapeAttr(faceTime) + '" title="' + escapeAttr((f.camera || '') + ' — ' + faceTime) + '">'
             + '<div class="face-thumb-tile" style="background-image:url(/api/faces/' + f.id + '/crop)"></div>'
             + '</div>';
         });
@@ -549,9 +554,9 @@
         var html = '';
         unidentified.forEach(function(ev) {
           var time = new Date(ev.timestamp).toLocaleString();
-          html += '<div class="unid-card" data-event-id="' + escapeAttr(ev.id) + '" data-action-click="selectUnidentified(this, ' + jsStringArg(ev.id) + ')" title="' + escapeAttr(ev.camera) + ' — ' + escapeAttr(time) + '">'
+          html += '<div class="unid-card" role="button" tabindex="0" data-event-id="' + escapeAttr(ev.id) + '" data-action-click="selectUnidentified(this, ' + jsStringArg(ev.id) + ')" aria-label="Identify person from ' + escapeAttr(ev.camera) + ', ' + escapeAttr(time) + '" title="' + escapeAttr(ev.camera) + ' — ' + escapeAttr(time) + '">'
             + '<div class="face-thumb-tile" style="background-image:url(/api/events/' + encodeURIComponent(ev.id) + '/detection-crop)"></div>'
-            + '<button class="unid-dismiss" data-action-click="event.stopPropagation();dismissAppearance(' + jsStringArg(ev.id) + ',this.parentElement)" title="Ignore">&times;</button>'
+            + '<button class="unid-dismiss" data-action-click="event.stopPropagation();dismissAppearance(' + jsStringArg(ev.id) + ',this.parentElement)" aria-label="Ignore this appearance" title="Ignore">&times;</button>'
             + '</div>';
         });
         grid.innerHTML = html;

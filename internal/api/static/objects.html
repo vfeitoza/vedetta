@@ -353,9 +353,12 @@
         refs.forEach(function(ref) {
           var eventURL = ref.event_id ? '/event.html?id=' + encodeURIComponent(ref.event_id) : '';
           var clickAction = eventURL ? ('data-action-click="window.open(' + jsStringArg(eventURL) + ', \'_blank\')"') : '';
+          var label = ref.event_id ? 'View source event for reference image' : 'Reference image';
           html += '<div class="object-ref" '
             + 'style="background-image:url(/api/objects/' + objectId + '/crop?ref=' + ref.id + ')" '
             + clickAction
+            + (eventURL ? ' role="button" tabindex="0"' : '')
+            + ' aria-label="' + label + '"'
             + ' title="' + (ref.event_id ? 'View source event' : 'Reference image') + '">'
             + '<button class="object-ref-delete" '
             + 'data-action-click="event.stopPropagation();deleteReference(' + ref.id + ',' + objectId + ')" '
