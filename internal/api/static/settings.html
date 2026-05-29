@@ -144,13 +144,16 @@
           </header>
           <form id="detect-form" class="settings-form">
             <div class="form-field">
-              <span class="form-field-label">Score threshold <span class="form-meta" id="detect-threshold-val">0.50</span></span>
-              <input type="range" id="detect-threshold" min="0.05" max="1.0" step="0.05" value="0.5">
+              <label for="detect-threshold" class="form-field-label">Score threshold <span class="form-meta" id="detect-threshold-val">0.50</span></label>
+              <input type="range" id="detect-threshold" min="0.05" max="1.0" step="0.05" value="0.5"
+                aria-valuemin="0.05" aria-valuemax="1.0" aria-valuenow="0.5">
               <p class="form-help">Minimum confidence required for an object to be detected. Higher values reduce false positives.</p>
             </div>
             <div class="form-field">
-              <span class="form-field-label">Object classes</span>
-              <div id="detect-labels" class="checkbox-grid"></div>
+              <div role="group" aria-labelledby="detect-labels-heading">
+                <span id="detect-labels-heading" class="form-field-label">Object classes</span>
+                <div id="detect-labels" class="checkbox-grid"></div>
+              </div>
               <p class="form-help">Only the selected classes will fire events and notifications.</p>
             </div>
             <div class="form-actions">
@@ -680,7 +683,9 @@
   function loadDetect() {
     fetch('/api/settings/detect').then(function(r){return r.json()}).then(function(data) {
       $('detect-threshold').value = data.score_threshold;
-      $('detect-threshold-val').textContent = Number(data.score_threshold).toFixed(2);
+      var threshVal = Number(data.score_threshold).toFixed(2);
+      $('detect-threshold-val').textContent = threshVal;
+      $('detect-threshold').setAttribute('aria-valuenow', threshVal);
       renderLabels(data.labels || []);
     });
   }
@@ -696,7 +701,9 @@
   }
 
   $('detect-threshold').addEventListener('input', function() {
-    $('detect-threshold-val').textContent = Number(this.value).toFixed(2);
+    var v = Number(this.value).toFixed(2);
+    $('detect-threshold-val').textContent = v;
+    this.setAttribute('aria-valuenow', v);
   });
 
   $('detect-form').addEventListener('submit', function(e) {
