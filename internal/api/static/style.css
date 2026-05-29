@@ -399,6 +399,7 @@ input, select { font-family: inherit; }
 /* ─── Stats Row ─── */
 .stats-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 1px;
   background: var(--border-subtle);
   border-radius: var(--radius-md);
@@ -430,6 +431,20 @@ input, select { font-family: inherit; }
   font-size: var(--text-lg);
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+.stat-sub {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-top: 0.125rem;
+}
+
+/* Full-width bar that sits below the stats-row cards */
+.storage-bar-wrap {
+  flex-basis: 100%;
+  background: var(--surface-1);
+  padding: 0 0 0.5rem;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
 .stat-value.green { color: var(--green); }

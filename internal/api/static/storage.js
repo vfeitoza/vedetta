@@ -61,26 +61,44 @@ function renderRecompression(rc) {
   }
 }
 
-function statCard(label, value, tone) {
+function statCard(label, value, tone, sub) {
   return `<div class="stat-card">
     <div class="stat-label">${esc(label)}</div>
-    <div class="stat-value${tone ? " " + tone : ""}">${esc(value)}</div>
+    <div class="stat-value${tone ? " " + tone : ""}">${esc(String(value))}</div>
+    ${sub ? `<div class="stat-sub">${esc(sub)}</div>` : ""}
   </div>`;
+}
+
+function diskFillClass(pct) {
+  if (pct >= 90) return "danger";
+  if (pct >= 70) return "warning";
+  return "";
 }
 
 function renderSummaryCards({ recording, snapshots }) {
   const sameFS = snapshots.same_filesystem_as_recording;
+  const used = recording.used_bytes || 0;
+  const free = recording.disk_available || 0;
+  const total = used + free;
+  const pct = total > 0 ? Math.round(used / total * 100) : 0;
 
-  let cards = statCard("Recordings", fmtBytes(recording.used_bytes), "cyan")
-    + statCard("Free on disk", fmtBytes(recording.disk_available), "green");
+  let cards = statCard("Recordings", fmtBytes(used), "cyan")
+    + statCard("Free on disk", fmtBytes(free), "green")
+    + statCard("Total capacity", fmtBytes(total), "", pct + "% used");
   if (!sameFS) {
     cards += statCard("Snapshots", fmtBytes(snapshots.used_bytes))
       + statCard("Snapshots free", fmtBytes(snapshots.disk_available));
   }
+
+  const fillClass = diskFillClass(pct);
+  cards += `<div class="storage-bar-wrap">` +
+    `<div class="storage-bar"><div class="storage-bar-fill${fillClass ? " " + fillClass : ""}" style="width:${pct}%"></div></div>` +
+    `</div>`;
+
   $("#summary").innerHTML = cards;
 
   $("#storage-subtitle").textContent =
-    `${fmtBytes(recording.used_bytes)} used · ${fmtBytes(recording.disk_available)} free`;
+    `${fmtBytes(used)} used · ${fmtBytes(free)} free · ${pct}% of ${fmtBytes(total)}`;
 
   let roots = `Recordings: ${recording.root}`;
   if (!sameFS) roots += `  ·  Snapshots: ${snapshots.root}`;
