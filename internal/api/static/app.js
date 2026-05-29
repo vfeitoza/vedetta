@@ -2323,6 +2323,30 @@ function initTimelineHint() {
   document.addEventListener('wheel', dismissHint, { once: true, passive: true });
 }
 
+// Zoom in on the timeline window (center-anchored, same factor as keyboard +).
+function timelineZoomIn() {
+  if (!TLW || !timelineWin) return;
+  var track = el('timeline-track');
+  var cur = track ? parseInt(track.getAttribute('aria-valuenow'), 10) : NaN;
+  if (isNaN(cur)) cur = Math.floor((timelineWin.start + timelineWin.end) / 2);
+  timelineWin = TLW.zoomAt(timelineWin, 0.5, 1 / 1.5);
+  markUserAdjusted();
+  setSeekAria(cur);
+  scheduleTimelineRender();
+}
+
+// Zoom out on the timeline window (center-anchored, same factor as keyboard -).
+function timelineZoomOut() {
+  if (!TLW || !timelineWin) return;
+  var track = el('timeline-track');
+  var cur = track ? parseInt(track.getAttribute('aria-valuenow'), 10) : NaN;
+  if (isNaN(cur)) cur = Math.floor((timelineWin.start + timelineWin.end) / 2);
+  timelineWin = TLW.zoomAt(timelineWin, 0.5, 1.5);
+  markUserAdjusted();
+  setSeekAria(cur);
+  scheduleTimelineRender();
+}
+
 var lastScrubEvent = null;
 
 // Convert a 0-1 fraction of the visible track to seconds-of-day (window-relative).
