@@ -149,13 +149,44 @@ function renderPerDayBars(days) {
   const w = 9, h = 36;
   const bars = days.map((d, i) => {
     const bh = Math.max(d.bytes > 0 ? 2 : 0, (h - 2) * (d.bytes / max));
-    return `<rect x="${i * w}" y="${h - bh}" width="${w - 2}" height="${bh}" rx="1">` +
-      `<title>${esc(d.date || ("day " + (i + 1)))}: ${fmtBytes(d.bytes)}</title></rect>`;
+    const label = d.date || ("day " + (i + 1));
+    return `<rect x="${i * w}" y="${h - bh}" width="${w - 2}" height="${bh}" rx="1"` +
+      ` data-date="${esc(label)}" data-bytes="${d.bytes}">` +
+      `<title>${esc(label)}: ${fmtBytes(d.bytes)}</title></rect>`;
   }).join("");
-  return `<svg class="storage-spark" width="${days.length * w}" height="${h}" ` +
+  return `<div class="storage-spark-wrap">` +
+    `<svg class="storage-spark" width="${days.length * w}" height="${h}" ` +
     `viewBox="0 0 ${days.length * w} ${h}" preserveAspectRatio="none" ` +
-    `role="img" aria-label="Daily recording volume, last ${days.length} days">${bars}</svg>`;
+    `role="img" aria-label="Daily recording volume, last ${days.length} days">${bars}</svg>` +
+    `<div class="spark-tooltip" hidden></div>` +
+    `</div>`;
 }
+
+document.addEventListener("pointermove", function(e) {
+  var wrap = e.target.closest(".storage-spark-wrap");
+  if (!wrap) return;
+  var tip = wrap.querySelector(".spark-tooltip");
+  if (!tip) return;
+  var rect = e.target.closest("rect[data-date]");
+  if (rect) {
+    tip.textContent = rect.dataset.date + ": " + fmtBytes(Number(rect.dataset.bytes));
+    tip.hidden = false;
+    var wrapRect = wrap.getBoundingClientRect();
+    var x = e.clientX - wrapRect.left + 8;
+    var y = e.clientY - wrapRect.top - 32;
+    tip.style.left = Math.min(x, wrapRect.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = Math.max(0, y) + "px";
+  } else {
+    tip.hidden = true;
+  }
+});
+
+document.addEventListener("pointerleave", function(e) {
+  var wrap = e.target.closest(".storage-spark-wrap");
+  if (!wrap) return;
+  var tip = wrap.querySelector(".spark-tooltip");
+  if (tip) tip.hidden = true;
+}, true);
 
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-action]");

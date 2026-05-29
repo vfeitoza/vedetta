@@ -4974,6 +4974,25 @@ kbd {
 .storage-spark:hover rect { opacity: 0.3; }
 .storage-spark rect:hover { opacity: 0.9; }
 
+.storage-spark-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.spark-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.5rem;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
 .storage-spark-empty,
 .storage-audit-empty {
   font-size: var(--text-xs);
