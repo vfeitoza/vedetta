@@ -44,3 +44,70 @@ test('pctToSec <-> secToPctRaw round-trip', () => {
     assert.ok(Math.abs(TLW.secToPctRaw(w, sec) - pct) < 1e-9);
   }
 });
+
+test('setWindow clamps span and keeps window inside the day', () => {
+  // start before 0 -> pinned to 0
+  let w = TLW.setWindow(-1000, 10800);
+  assert.equal(w.start, 0);
+  assert.equal(w.end, 10800);
+  // start past the end -> pinned so end == day, span preserved
+  w = TLW.setWindow(90000, 10800);
+  assert.equal(w.end, 86400);
+  assert.equal(w.end - w.start, 10800);
+  // span clamped up to MIN_SPAN
+  w = TLW.setWindow(0, 10);
+  assert.equal(w.end - w.start, 1800);
+});
+
+test('panBy shifts the window, preserves span, stays in day', () => {
+  const w0 = TLW.makeWindow(50400, 61200); // span 10800
+  const w1 = TLW.panBy(w0, 3600);
+  assert.equal(w1.start, 54000);
+  assert.equal(w1.end - w1.start, 10800);
+  // pan past midnight clamps, span preserved
+  const w2 = TLW.panBy(w0, 999999);
+  assert.equal(w2.end, 86400);
+  assert.equal(w2.end - w2.start, 10800);
+});
+
+test('zoomAt keeps the anchored time invariant in the interior', () => {
+  const w0 = TLW.makeWindow(0, 86400); // full day
+  const anchorPct = 0.5; // 43200s
+  const w1 = TLW.zoomAt(w0, anchorPct, 0.25); // zoom in 4x -> span 21600
+  assert.equal(w1.end - w1.start, 21600);
+  // 43200 still sits at pct 0.5
+  assert.ok(Math.abs(TLW.secToPctRaw(w1, 43200) - 0.5) < 1e-9);
+});
+
+test('zoomAt clamps span and preserves span at edges (no squash)', () => {
+  const w0 = TLW.makeWindow(0, 3600); // span 3600
+  // zoom OUT hugely -> clamps to full day
+  const wOut = TLW.zoomAt(w0, 0.5, 1000);
+  assert.equal(wOut.start, 0);
+  assert.equal(wOut.end, 86400);
+  // zoom IN below MIN_SPAN -> clamps to MIN_SPAN
+  const wIn = TLW.zoomAt(w0, 0.5, 0.0001);
+  assert.equal(wIn.end - wIn.start, 1800);
+  // anchor near the left edge: span still preserved after edge clamp
+  const wEdge = TLW.zoomAt(TLW.makeWindow(0, 86400), 0.0, 0.25);
+  assert.equal(wEdge.start, 0);
+  assert.equal(wEdge.end - wEdge.start, 21600);
+});
+
+test('followLiveWindow pins end at now+LIVE_MARGIN, preserves span', () => {
+  const w = TLW.followLiveWindow(50400, 10800); // now 14:00
+  assert.equal(w.end, 50700); // 14:00 + 5min
+  assert.equal(w.end - w.start, 10800);
+});
+
+test('followLiveWindow clamps at midnight', () => {
+  const w = TLW.followLiveWindow(86300, 10800); // ~23:58:20 + margin > day
+  assert.equal(w.end, 86400);
+  assert.equal(w.end - w.start, 10800);
+});
+
+test('followLiveWindow early in the day pins start to 0', () => {
+  const w = TLW.followLiveWindow(600, 10800); // 00:10
+  assert.equal(w.start, 0);
+  assert.equal(w.end, 10800);
+});

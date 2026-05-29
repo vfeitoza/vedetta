@@ -36,6 +36,33 @@ TimelineWindow.pctToSec = function (win, pct) {
   return win.start + pct * (win.end - win.start);
 };
 
+TimelineWindow.setWindow = function (start, span) {
+  span = TimelineWindow.clampSpan(span);
+  start = clamp(start, 0, TimelineWindow.SECONDS_PER_DAY - span);
+  return TimelineWindow.makeWindow(start, start + span);
+};
+
+TimelineWindow.panBy = function (win, deltaSec) {
+  return TimelineWindow.setWindow(win.start + deltaSec, win.end - win.start);
+};
+
+TimelineWindow.zoomAt = function (win, anchorPct, factor) {
+  var span = win.end - win.start;
+  var anchorSec = win.start + anchorPct * span;
+  var newSpan = TimelineWindow.clampSpan(span * factor);
+  // Keep anchorSec under anchorPct; setWindow shifts (not squashes) at edges so
+  // the span is always preserved even when the anchor is clamped against 0/day.
+  return TimelineWindow.setWindow(anchorSec - anchorPct * newSpan, newSpan);
+};
+
+TimelineWindow.followLiveWindow = function (nowSec, span) {
+  span = TimelineWindow.clampSpan(span);
+  var end = Math.min(TimelineWindow.SECONDS_PER_DAY, nowSec + TimelineWindow.LIVE_MARGIN);
+  var start = Math.max(0, end - span);
+  end = Math.min(TimelineWindow.SECONDS_PER_DAY, start + span);
+  return TimelineWindow.makeWindow(start, end);
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = TimelineWindow;
 }
