@@ -229,7 +229,7 @@
           + '<article class="object-card" id="object-' + obj.id + '" data-name="' + escapeAttr(obj.name) + '" data-label="' + escapeAttr(obj.label) + '">'
           +   '<header class="object-card-header">'
           +     '<div class="object-thumb" id="thumb-' + obj.id + '" style="background:' + initialsColor(obj.name) + '">'
-          +       '<img alt="" src="/api/objects/' + obj.id + '/crop" data-initials="' + escapeAttr(initials(obj.name)) + '">'
+          +       '<img alt="" loading="lazy" src="/api/objects/' + obj.id + '/crop" data-initials="' + escapeAttr(initials(obj.name)) + '">'
           +       '<button class="object-thumb-edit" data-action-click="openThumbnailPicker(' + obj.id + ', ' + jsStringArg(obj.name) + ')" '
           +         'aria-label="Change thumbnail" title="Change thumbnail">'
           +         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>'
@@ -355,7 +355,7 @@
           var clickAction = eventURL ? ('data-action-click="window.open(' + jsStringArg(eventURL) + ', \'_blank\')"') : '';
           var label = ref.event_id ? 'View source event for reference image' : 'Reference image';
           html += '<div class="object-ref" '
-            + 'style="background-image:url(/api/objects/' + objectId + '/crop?ref=' + ref.id + ')" '
+            + 'data-bg="/api/objects/' + objectId + '/crop?ref=' + ref.id + '" '
             + clickAction
             + (eventURL ? ' role="button" tabindex="0"' : '')
             + ' aria-label="' + label + '"'
@@ -366,6 +366,7 @@
             + '</div>';
         });
         container.innerHTML = html;
+        lazyLoadBg(container);
       });
     }
 
@@ -393,13 +394,14 @@
           var simClass = s.similarity >= 0.8 ? 'high' : s.similarity >= 0.65 ? 'mid' : 'low';
           html += '<a class="object-sighting" href="/event.html?id=' + encodeURIComponent(s.event_id) + '" '
             + 'title="' + escapeAttr(s.camera + ' · ' + time + ' · ' + simPct + '% match') + '">'
-            + '<div class="object-sighting-thumb" style="background-image:url(/api/events/' + encodeURIComponent(s.event_id) + '/snapshot)"></div>'
+            + '<div class="object-sighting-thumb" data-bg="/api/events/' + encodeURIComponent(s.event_id) + '/snapshot"></div>'
             + '<span class="object-sighting-sim ' + simClass + '">' + simPct + '%</span>'
             + '<button class="object-sighting-dismiss" data-action-click="event.preventDefault();event.stopPropagation();dismissSighting(' + s.id + ',' + objectId + ')" '
             + 'aria-label="Wrong match — dismiss" title="Wrong match — dismiss">×</button>'
             + '</a>';
         });
         el.innerHTML = html;
+        lazyLoadBg(el);
       });
     }
 
@@ -423,7 +425,7 @@
             html += '<button class="thumb-picker-item" '
               + 'data-action-click="setThumbnail(' + objectId + ', null, ' + ref.id + ')" '
               + 'title="Reference">'
-              + '<img alt="" src="/api/objects/' + objectId + '/crop?ref=' + ref.id + '">'
+              + '<img alt="" loading="lazy" src="/api/objects/' + objectId + '/crop?ref=' + ref.id + '">'
               + '<span class="thumb-picker-badge">ref</span>'
               + '</button>';
           });
@@ -437,7 +439,7 @@
             html += '<button class="thumb-picker-item" '
               + 'data-action-click="setThumbnail(' + objectId + ', ' + jsStringArg(s.event_id) + ', null)" '
               + 'title="' + escapeAttr(s.camera + ' · ' + simPct + '% match') + '">'
-              + '<img alt="" src="/api/events/' + encodeURIComponent(s.event_id) + '/snapshot">'
+              + '<img alt="" loading="lazy" src="/api/events/' + encodeURIComponent(s.event_id) + '/snapshot">'
               + '<span class="thumb-picker-badge">' + simPct + '%</span>'
               + '</button>';
           });
@@ -579,6 +581,28 @@
       fetch('/api/objects/references/' + refId, { method: 'DELETE' }).then(function(r) {
         if (!r.ok) throw new Error('Failed');
         loadReferences(objectId);
+      });
+    }
+
+    // IntersectionObserver that reveals background-image when tiles scroll into view.
+    var _bgObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        var el = entry.target;
+        var bg = el.dataset.bg;
+        if (bg) el.style.backgroundImage = 'url(' + bg + ')';
+        _bgObserver.unobserve(el);
+      });
+    }, { rootMargin: '200px' }) : null;
+
+    function lazyLoadBg(container) {
+      if (!container) return;
+      container.querySelectorAll('[data-bg]').forEach(function(el) {
+        if (_bgObserver) {
+          _bgObserver.observe(el);
+        } else {
+          el.style.backgroundImage = 'url(' + el.dataset.bg + ')';
+        }
       });
     }
 

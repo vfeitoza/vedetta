@@ -306,16 +306,17 @@
       });
       grid.innerHTML = html;
 
-      // Load thumbnail: best face crop, or source event detection crop
+      // Set data-bg on person thumbnails for IntersectionObserver lazy loading.
       people.forEach(function(p) {
         var thumb = document.getElementById('person-thumb-' + p.id);
         if (!thumb) return;
         if (p.best_face_id) {
-          thumb.style.backgroundImage = 'url(/api/faces/' + p.best_face_id + '/crop)';
+          thumb.dataset.bg = '/api/faces/' + p.best_face_id + '/crop';
         } else if (p.source_event_id) {
-          thumb.style.backgroundImage = 'url(/api/events/' + encodeURIComponent(p.source_event_id) + '/detection-crop)';
+          thumb.dataset.bg = '/api/events/' + encodeURIComponent(p.source_event_id) + '/detection-crop';
         }
       });
+      lazyLoadBg(grid);
 
       // Re-apply current search filter (keeps results stable across reloads)
       var search = document.getElementById('people-search');
@@ -350,7 +351,7 @@
           faces.forEach(function(f) {
             var faceTs = new Date(f.timestamp).toLocaleString();
             html += '<div class="face-thumb-wrap-link" role="button" tabindex="0" data-action-click="showFaceSnapshot(' + f.id + ',' + jsStringArg(f.event_id || '') + ',' + jsStringArg(f.camera || '') + ')" aria-label="View snapshot for face from ' + escapeAttr(f.camera || 'unknown') + ', ' + escapeAttr(faceTs) + '">'
-              + '<div class="face-thumb" style="background-image:url(/api/faces/' + f.id + '/crop)" title="' + escapeAttr(f.camera || '') + ' - ' + escapeAttr(faceTs) + '"></div>'
+              + '<div class="face-thumb" data-bg="/api/faces/' + f.id + '/crop" title="' + escapeAttr(f.camera || '') + ' - ' + escapeAttr(faceTs) + '"></div>'
               + '</div>';
           });
           html += '</div>';
@@ -364,7 +365,7 @@
             var src = ev.snapshot_available ? '/api/events/' + encodeURIComponent(ev.id) + '/detection-crop' : '/api/cameras/' + encodeURIComponent(ev.camera) + '/snapshot';
             var time = new Date(ev.timestamp).toLocaleString();
             html += '<a href="/event.html?id=' + encodeURIComponent(ev.id) + '" title="' + escapeAttr(ev.camera) + ' — ' + escapeAttr(time) + '">'
-              + '<div class="appearance-thumb" style="background-image:url(' + src + ')"></div>'
+              + '<div class="appearance-thumb" data-bg="' + escapeAttr(src) + '"></div>'
               + '</a>';
           });
           html += '</div>';
@@ -375,6 +376,7 @@
         }
 
         el.innerHTML = html;
+        lazyLoadBg(el);
       });
     }
 
@@ -503,10 +505,11 @@
         _unmatchedFaces.forEach(function(f, i) {
           var faceTime = new Date(f.timestamp).toLocaleString();
           html += '<div class="unid-card" role="button" tabindex="0" data-action-click="openFaceModal(' + i + ')" aria-label="Identify face from ' + escapeAttr(f.camera || 'unknown camera') + ', ' + escapeAttr(faceTime) + '" title="' + escapeAttr((f.camera || '') + ' — ' + faceTime) + '">'
-            + '<div class="face-thumb-tile" style="background-image:url(/api/faces/' + f.id + '/crop)"></div>'
+            + '<div class="face-thumb-tile" data-bg="/api/faces/' + f.id + '/crop"></div>'
             + '</div>';
         });
         grid.innerHTML = html;
+        lazyLoadBg(grid);
       }).catch(function() {
         var empty = document.getElementById('unmatched-empty');
         if (empty) {
@@ -555,11 +558,12 @@
         unidentified.forEach(function(ev) {
           var time = new Date(ev.timestamp).toLocaleString();
           html += '<div class="unid-card" role="button" tabindex="0" data-event-id="' + escapeAttr(ev.id) + '" data-action-click="selectUnidentified(this, ' + jsStringArg(ev.id) + ')" aria-label="Identify person from ' + escapeAttr(ev.camera) + ', ' + escapeAttr(time) + '" title="' + escapeAttr(ev.camera) + ' — ' + escapeAttr(time) + '">'
-            + '<div class="face-thumb-tile" style="background-image:url(/api/events/' + encodeURIComponent(ev.id) + '/detection-crop)"></div>'
+            + '<div class="face-thumb-tile" data-bg="/api/events/' + encodeURIComponent(ev.id) + '/detection-crop"></div>'
             + '<button class="unid-dismiss" data-action-click="event.stopPropagation();dismissAppearance(' + jsStringArg(ev.id) + ',this.parentElement)" aria-label="Ignore this appearance" title="Ignore">&times;</button>'
             + '</div>';
         });
         grid.innerHTML = html;
+        lazyLoadBg(grid);
       }).catch(function() {
         var empty = document.getElementById('unidentified-empty');
         if (empty) {
@@ -814,6 +818,28 @@
         closeAssignModal();
         loadPeople();
         loadUnmatched();
+      });
+    }
+
+    // IntersectionObserver that reveals background-image when tiles scroll into view.
+    var _bgObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        var el = entry.target;
+        var bg = el.dataset.bg;
+        if (bg) el.style.backgroundImage = 'url(' + bg + ')';
+        _bgObserver.unobserve(el);
+      });
+    }, { rootMargin: '200px' }) : null;
+
+    function lazyLoadBg(container) {
+      if (!container) return;
+      container.querySelectorAll('[data-bg]').forEach(function(el) {
+        if (_bgObserver) {
+          _bgObserver.observe(el);
+        } else {
+          el.style.backgroundImage = 'url(' + el.dataset.bg + ')';
+        }
       });
     }
 
