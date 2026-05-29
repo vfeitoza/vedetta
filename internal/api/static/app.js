@@ -5810,6 +5810,7 @@ function playEventClip(overlay, eventId) {
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
+  video.poster = '/api/events/' + encodeURIComponent(eventId) + '/snapshot';
   video.src = '/api/events/' + encodeURIComponent(eventId) + '/clip';
   video.onerror = function () {
     video.remove();
