@@ -1499,8 +1499,8 @@ input, select { font-family: inherit; }
 }
 .timeline-window-box:active { cursor: grabbing; }
 
-/* Enlarge the grab target on touch/stylus, mirroring the existing scrubber rule
-   at style.css:2239 (which bumps .timeline-track height). We grow the strip
+/* Enlarge the grab target on touch/stylus, mirroring the existing coarse-pointer
+   scrubber rule (which bumps .timeline-track height). We grow the strip
    itself rather than expand a pseudo-element: .timeline-minimap has
    `overflow: hidden`, which clips descendant hit-areas, so a ::before escaping
    the box would NOT be interactable. A taller strip makes the full-height window
