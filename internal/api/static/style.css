@@ -4705,6 +4705,20 @@ kbd {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .events-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .events-legend-item {
+    min-width: 0;
+  }
 }
 
 .events-legend-dot {
