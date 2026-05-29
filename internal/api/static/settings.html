@@ -457,7 +457,7 @@
 
   // --- MQTT ---
   function loadMQTT() {
-    fetch('/api/settings/mqtt').then(function(r){return r.json()}).then(function(data) {
+    return fetch('/api/settings/mqtt').then(function(r){return r.json()}).then(function(data) {
       $('mqtt-enabled').checked = data.enabled;
       $('mqtt-host').value = data.host || '';
       $('mqtt-port').value = data.port || '';
@@ -581,7 +581,7 @@
 
   // --- Updates ---
   function loadUpdates() {
-    fetch('/api/updates/status').then(function(r){return r.json()}).then(renderUpdates);
+    return fetch('/api/updates/status').then(function(r){return r.json()}).then(renderUpdates);
   }
 
   function renderUpdates(data) {
@@ -640,7 +640,7 @@
   }
 
   function loadRecording() {
-    fetch('/api/settings/recording').then(function(r){return r.json()}).then(function(data) {
+    return fetch('/api/settings/recording').then(function(r){return r.json()}).then(function(data) {
       $('rec-continuous').checked = data.continuous;
       $('rec-retain').value = data.retain_days || '';
       $('rec-event-retain').value = data.event_retain_days || '';
@@ -681,7 +681,7 @@
   var defaultLabels = ['person','car','truck','bus','motorcycle','bicycle','dog','cat','bird'];
 
   function loadDetect() {
-    fetch('/api/settings/detect').then(function(r){return r.json()}).then(function(data) {
+    return fetch('/api/settings/detect').then(function(r){return r.json()}).then(function(data) {
       $('detect-threshold').value = data.score_threshold;
       var threshVal = Number(data.score_threshold).toFixed(2);
       $('detect-threshold-val').textContent = threshVal;
@@ -731,7 +731,7 @@
 
   // --- Password ---
   function loadAuthInfo() {
-    fetch('/api/auth/info').then(function(r){return r.json()}).then(function(data) {
+    return fetch('/api/auth/info').then(function(r){return r.json()}).then(function(data) {
       if (data.auth_method === 'proxy') {
         $('password-proxy-msg').hidden = false;
         $('password-form').style.display = 'none';
@@ -768,11 +768,9 @@
     });
   });
 
-  loadMQTT();
-  loadUpdates();
-  loadRecording();
-  loadDetect();
-  loadAuthInfo();
+  // Fire all independent data fetches concurrently rather than waiting
+  // for each to complete before starting the next.
+  Promise.all([loadMQTT(), loadUpdates(), loadRecording(), loadDetect(), loadAuthInfo()]);
 })();
   </script>
 
