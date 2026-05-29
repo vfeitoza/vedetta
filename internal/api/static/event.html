@@ -79,9 +79,10 @@
         const camera = root.dataset.eventCamera || '';
         const label = root.dataset.eventLabel || '';
         const time = root.dataset.eventTime || '';
+        const displayLabel = label.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
         const crumb = document.getElementById('event-breadcrumb');
         if (crumb && camera) crumb.textContent = camera + ' · ' + time;
-        if (camera && label) document.title = label + ' · ' + camera + ' - Vedetta';
+        if (camera && label) document.title = displayLabel + ' · ' + camera + ' - Vedetta';
       });
     })();
   </script>
