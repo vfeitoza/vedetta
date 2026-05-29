@@ -2038,38 +2038,28 @@ function initTimeline() {
     previewImg.src = url;
   }
 
-  track.addEventListener('mousedown', function(e) {
-    timelineDragging = true;
-    scrubTimeline(e, false);
-  });
-
-  track.addEventListener('mousemove', function(e) {
-    if (timelineDragging) scrubTimeline(e, false);
-    // Update hover cursor position and time
+  function handleTrackHover(e) {
+    cursor.style.display = '';
     var rect = track.getBoundingClientRect();
     var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     cursor.style.left = (pct * 100) + '%';
-    // Position preview relative to the container, just above the track
     var previewX = track.offsetLeft + pct * rect.width;
     preview.style.left = previewX + 'px';
-    // Use bottom positioning: container height minus track's top offset, plus gap
     var containerH = timelineContainer.offsetHeight;
     preview.style.bottom = (containerH - track.offsetTop + 4) + 'px';
     preview.style.top = '';
     var totalSec = pctToSec(pct);
-    var h = Math.floor(totalSec / 3600);
-    var m = Math.floor((totalSec % 3600) / 60);
-    cursorTime.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-    // Change cursor when over a recorded segment
+    var hh = Math.floor(totalSec / 3600);
+    var mm = Math.floor((totalSec % 3600) / 60);
+    cursorTime.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+
     var overEvent = false;
     if (timelineModel && timelineModel.eventIntervals.length > 0) {
-      var hoverSec = pctToSec(pct);
-      var hoverTol = TLW.snapTolerance(timelineWin.end - timelineWin.start, track.offsetWidth);
-      overEvent = TLW.snapToEvent(timelineModel.eventIntervals, hoverSec, hoverTol) !== null;
+      var tol = TLW.snapTolerance(timelineWin.end - timelineWin.start, track.offsetWidth);
+      overEvent = TLW.snapToEvent(timelineModel.eventIntervals, totalSec, tol) !== null;
     }
     track.style.cursor = overEvent ? 'pointer' : isOverSegment(pct) ? 'pointer' : 'default';
 
-    // Thumbnail request: throttle to one request per 150ms (fires immediately, then rate-limits)
     var now = Date.now();
     if (now - lastThumbTime >= 150) {
       lastThumbTime = now;
@@ -2078,45 +2068,130 @@ function initTimeline() {
       clearTimeout(thumbTimer);
       thumbTimer = setTimeout(function() { lastThumbTime = Date.now(); requestThumbnail(pct); }, 150 - (now - lastThumbTime));
     }
-  });
+  }
 
-  track.addEventListener('mouseleave', function() {
+  function hideTrackHover() {
     cursor.style.display = 'none';
     preview.style.display = 'none';
     lastThumbUrl = '';
     clearTimeout(thumbTimer);
     track.style.cursor = '';
-  });
+  }
 
-  track.addEventListener('mouseenter', function() {
-    cursor.style.display = '';
-  });
+  // ─── Pointer gesture state machine ───
+  // tap (move < threshold)  -> seek    | drag -> pan | two pointers -> pinch zoom
+  var DRAG_THRESHOLD = 6; // px before a press becomes a pan
+  var pointers = {};      // active pointers by id: { x, startX }
+  var gesture = 'idle';   // 'idle' | 'press' | 'pan' | 'pinch'
+  var panLastX = 0;
+  var pinchStartDist = 0;
+  var pinchStartSpan = 0;
 
-  document.addEventListener('mouseup', function() {
-    if (timelineDragging) {
-      timelineDragging = false;
-      scrubTimeline(lastScrubEvent, true);
-      preview.style.display = 'none';
+  function pointerCount() { return Object.keys(pointers).length; }
+  function trackRect() { return track.getBoundingClientRect(); }
+  function clampPct(p) { return Math.max(0, Math.min(1, p)); }
+
+  track.addEventListener('pointerdown', function(e) {
+    track.setPointerCapture(e.pointerId);
+    pointers[e.pointerId] = { x: e.clientX, startX: e.clientX };
+    if (pointerCount() === 2) {
+      // Begin pinch.
+      var ids = Object.keys(pointers);
+      var a = pointers[ids[0]], b = pointers[ids[1]];
+      pinchStartDist = Math.abs(a.x - b.x) || 1;
+      pinchStartSpan = timelineWin.end - timelineWin.start;
+      gesture = 'pinch';
+    } else {
+      gesture = 'press';
+      panLastX = e.clientX;
     }
   });
 
-  // Touch support
-  track.addEventListener('touchstart', function(e) {
-    timelineDragging = true;
-    scrubTimeline(e.touches[0], false);
-    e.preventDefault();
-  }, { passive: false });
-
-  track.addEventListener('touchmove', function(e) {
-    if (timelineDragging) scrubTimeline(e.touches[0], false);
-    e.preventDefault();
-  }, { passive: false });
-
-  track.addEventListener('touchend', function(e) {
-    if (timelineDragging) {
-      timelineDragging = false;
-      scrubTimeline(lastScrubEvent, true);
+  track.addEventListener('pointermove', function(e) {
+    // Desktop hover preview/cursor (no button held).
+    if (e.pointerType === 'mouse' && gesture === 'idle') {
+      handleTrackHover(e);
+      return;
     }
+    if (!pointers[e.pointerId]) return;
+    pointers[e.pointerId].x = e.clientX;
+
+    if (gesture === 'pinch' && pointerCount() === 2) {
+      var ids = Object.keys(pointers);
+      var dist = Math.abs(pointers[ids[0]].x - pointers[ids[1]].x) || 1;
+      var midX = (pointers[ids[0]].x + pointers[ids[1]].x) / 2;
+      var rect = trackRect();
+      var anchorPct = clampPct((midX - rect.left) / rect.width);
+      timelineWin = TLW.zoomAt(timelineWin, anchorPct, pinchStartSpan / (timelineWin.end - timelineWin.start) * (pinchStartDist / dist));
+      markUserAdjusted();
+      scheduleTimelineRender();
+      return;
+    }
+
+    if (gesture === 'press') {
+      if (Math.abs(e.clientX - pointers[e.pointerId].startX) >= DRAG_THRESHOLD) {
+        gesture = 'pan';
+        hideTrackHover(); // a drag is not a hover: clear the cursor/thumbnail overlay
+      }
+    }
+    if (gesture === 'pan') {
+      var r = trackRect();
+      var deltaSec = -(e.clientX - panLastX) / r.width * (timelineWin.end - timelineWin.start);
+      panLastX = e.clientX;
+      timelineWin = TLW.panBy(timelineWin, deltaSec);
+      markUserAdjusted();
+      scheduleTimelineRender();
+    }
+  });
+
+  function endPointer(e) {
+    var wasPress = gesture === 'press';
+    if (track.hasPointerCapture && track.hasPointerCapture(e.pointerId)) {
+      track.releasePointerCapture(e.pointerId);
+    }
+    delete pointers[e.pointerId];
+    if (wasPress && pointerCount() === 0) {
+      // A tap (never crossed the drag threshold): seek + commit playback.
+      // scrubTimeline reads the track rect itself, so it only needs clientX.
+      // Do NOT call markUserAdjusted() here: commitSeekToSecond owns seek/live
+      // state (it sets followLive=false when entering playback, or restores
+      // live-follow when the tap resolves to "go live"). A trailing
+      // markUserAdjusted() would wrongly clear followLive after a go-live tap.
+      scrubTimeline({ clientX: e.clientX }, true);
+      hideTrackHover(); // clear the preview after commit, matching the old mouseup path
+    }
+    if (pointerCount() === 0) {
+      gesture = 'idle';
+    } else if (pointerCount() === 1 && gesture === 'pinch') {
+      // One finger lifted: continue as a pan from the remaining pointer's
+      // current position, so the next move does not jump by a stale delta.
+      gesture = 'pan';
+      var remId = Object.keys(pointers)[0];
+      panLastX = pointers[remId].x;
+    }
+  }
+  track.addEventListener('pointerup', endPointer);
+  track.addEventListener('pointercancel', function(e) {
+    if (track.hasPointerCapture && track.hasPointerCapture(e.pointerId)) {
+      track.releasePointerCapture(e.pointerId);
+    }
+    delete pointers[e.pointerId];
+    if (pointerCount() === 0) gesture = 'idle';
+  });
+
+  // Desktop wheel zoom, anchored at the cursor.
+  track.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var rect = trackRect();
+    var anchorPct = clampPct((e.clientX - rect.left) / rect.width);
+    var factor = e.deltaY > 0 ? 1.2 : 1 / 1.2; // down = zoom out
+    timelineWin = TLW.zoomAt(timelineWin, anchorPct, factor);
+    markUserAdjusted();
+    scheduleTimelineRender();
+  }, { passive: false });
+
+  track.addEventListener('pointerleave', function(e) {
+    if (e.pointerType === 'mouse') hideTrackHover();
   });
 
   var resizeTimer;
