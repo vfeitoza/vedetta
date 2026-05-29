@@ -2385,6 +2385,11 @@ kbd {
   /* Tighter bottom tabs on very narrow screens to avoid label clipping */
   .bottom-tab { font-size: 0.5625rem; gap: 0.0625rem; }
   .bottom-tab svg { width: 18px; height: 18px; }
+
+  /* Recordings segment rows: hide size column and allow time to wrap so the
+     row fits without horizontal overflow at narrow phone widths. */
+  .rec-seg-size { display: none; }
+  .rec-seg-time { min-width: 0; white-space: normal; }
 }
 
 @media (max-width: 360px) {
