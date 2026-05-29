@@ -1022,8 +1022,8 @@
           .then(function(data) {
             if (data.status === 'config_readonly' && data.yaml_snippets) {
               var statusEl = $('add-cameras-status');
-              statusEl.innerHTML = 'Could not write to config file. Add these cameras to your <code>config.yml</code> manually:<pre style="margin-top:0.5rem;padding:0.75rem;background:var(--surface-2);border-radius:var(--radius-sm);overflow:auto;font-size:0.8rem;white-space:pre-wrap">' + escapeHtml(data.yaml_snippets.join('\n')) + '</pre>';
-              statusEl.style.color = 'var(--amber)';
+              statusEl.innerHTML = 'Could not write to config file. Add these cameras to your <code>config.yml</code> manually:<pre style="margin-top:0.5rem;padding:0.75rem;background:var(--surface);border-radius:var(--radius-sm);overflow:auto;font-size:0.8rem;white-space:pre-wrap">' + escapeHtml(data.yaml_snippets.join('\n')) + '</pre>';
+              statusEl.style.color = 'var(--warning)';
               btn.disabled = false;
               return;
             }
