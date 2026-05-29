@@ -2101,10 +2101,12 @@ function initTimeline() {
       pinchStartDist = Math.abs(a.x - b.x) || 1;
       pinchStartSpan = timelineWin.end - timelineWin.start;
       gesture = 'pinch';
-    } else {
+      timelineDragging = true; // suppress playhead repositioning during pinch
+    } else if (pointerCount() === 1) {
       gesture = 'press';
       panLastX = e.clientX;
     }
+    // 3+ pointers: leave the current gesture untouched
   });
 
   track.addEventListener('pointermove', function(e) {
@@ -2131,6 +2133,8 @@ function initTimeline() {
     if (gesture === 'press') {
       if (Math.abs(e.clientX - pointers[e.pointerId].startX) >= DRAG_THRESHOLD) {
         gesture = 'pan';
+        panLastX = e.clientX; // start the pan delta here, not from the pointerdown position
+        timelineDragging = true; // suppress the playback/live playhead while panning
         hideTrackHover(); // a drag is not a hover: clear the cursor/thumbnail overlay
       }
     }
@@ -2162,6 +2166,7 @@ function initTimeline() {
     }
     if (pointerCount() === 0) {
       gesture = 'idle';
+      timelineDragging = false;
     } else if (pointerCount() === 1 && gesture === 'pinch') {
       // One finger lifted: continue as a pan from the remaining pointer's
       // current position, so the next move does not jump by a stale delta.
@@ -2176,7 +2181,14 @@ function initTimeline() {
       track.releasePointerCapture(e.pointerId);
     }
     delete pointers[e.pointerId];
-    if (pointerCount() === 0) gesture = 'idle';
+    if (pointerCount() === 0) {
+      gesture = 'idle';
+      timelineDragging = false;
+    } else if (pointerCount() === 1 && gesture === 'pinch') {
+      gesture = 'pan';
+      var remId = Object.keys(pointers)[0];
+      panLastX = pointers[remId].x;
+    }
   });
 
   // Desktop wheel zoom, anchored at the cursor.
