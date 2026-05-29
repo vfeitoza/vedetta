@@ -2181,6 +2181,45 @@ input, select { font-family: inherit; }
   100% { background-position: -200% 0; }
 }
 
+/* Event card loading skeleton */
+.event-skeleton {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.event-skeleton-thumb {
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.event-skeleton-footer {
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.event-skeleton-line {
+  height: 0.625rem;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* End-of-list sentinel message */
+.events-end-message {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 1.25rem;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
 /* ─── Keyboard Shortcut Hints ─── */
 kbd {
   display: inline-flex;

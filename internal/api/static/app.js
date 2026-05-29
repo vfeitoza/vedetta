@@ -4932,6 +4932,10 @@ function loadMoreEvents() {
       if (newCards.length === 0) {
         eventsExhausted = true;
         eventsLoading = false;
+        var endMsg = document.createElement('div');
+        endMsg.className = 'events-end-message';
+        endMsg.textContent = 'All events loaded';
+        gallery.appendChild(endMsg);
         return;
       }
 
@@ -4973,6 +4977,19 @@ function initEventSearch() {
 // Patch reloadEvents to include search term
 var _origReloadEvents = typeof reloadEvents === 'function' ? reloadEvents : null;
 
+function buildEventSkeletonHTML() {
+  var skeletonCard = '<div class="event-skeleton">'
+    + '<div class="event-skeleton-thumb"></div>'
+    + '<div class="event-skeleton-footer">'
+    + '<div class="event-skeleton-line" style="width:45%"></div>'
+    + '<div class="event-skeleton-line" style="width:28%"></div>'
+    + '</div>'
+    + '</div>';
+  var html = '';
+  for (var i = 0; i < 8; i++) { html += skeletonCard; }
+  return html;
+}
+
 function reloadEventsWithSearch() {
   var gallery = el('events-gallery');
   if (!gallery) return;
@@ -4999,6 +5016,9 @@ function reloadEventsWithSearch() {
   // Reset infinite scroll state
   eventsOffset = 0;
   eventsExhausted = false;
+
+  // Show skeleton cards while new results load to avoid a blank flash.
+  gallery.innerHTML = buildEventSkeletonHTML();
 
   gallery.setAttribute('hx-get', url);
   htmx.ajax('GET', url, { target: '#events-gallery', swap: 'innerHTML' });
