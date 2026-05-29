@@ -238,7 +238,7 @@
           +     '<div class="object-info">'
           +       '<input type="text" class="person-name-input" value="' + escapeAttr(obj.name) + '" '
           +         'data-action-change="renameObject(' + obj.id + ', this.value)" data-action-focus="this.select()" '
-          +         'aria-label="Object name">'
+          +         'aria-label="Name for ' + escapeAttr(obj.name || 'unnamed object') + '" id="name-input-' + obj.id + '">'
           +       '<div class="object-meta">'
           +         '<span class="object-label">' + (dotClass ? '<span class="chip-dot ' + dotClass + '"></span>' : '') + escapeHtml(obj.label) + '</span>'
           +         '<span>·</span>'
@@ -545,6 +545,8 @@
         if (local) local.name = trimmed;
         var card = document.getElementById('object-' + id);
         if (card) card.dataset.name = trimmed;
+        var input = document.getElementById('name-input-' + id);
+        if (input) input.setAttribute('aria-label', 'Name for ' + (trimmed || 'unnamed object'));
         if (typeof toast === 'function') toast('Renamed to ' + trimmed);
       }).catch(function() {
         if (typeof toast === 'function') toast('Rename failed', 'error');

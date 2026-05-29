@@ -287,6 +287,8 @@
           + '<div class="person-info">'
           + '<input type="text" class="person-name-input" value="' + escapeAttr(p.name) + '" '
           + 'placeholder="Unnamed" '
+          + 'id="name-input-' + p.id + '" '
+          + 'aria-label="Name for ' + escapeAttr(p.name || 'unnamed person') + '" '
           + 'data-action-change="renamePerson(' + p.id + ', this.value)" '
           + 'data-action-focus="this.select()">'
           + '<div class="person-meta">'
@@ -430,6 +432,8 @@
         // Update local data so future renames can match
         var p = peopleData.find(function(pp) { return pp.id === id; });
         if (p) p.name = trimmed;
+        var input = document.getElementById('name-input-' + id);
+        if (input) input.setAttribute('aria-label', 'Name for ' + (trimmed || 'unnamed person'));
         if (typeof toast === 'function') toast(trimmed ? ('Renamed to ' + trimmed) : 'Name cleared');
       }).catch(function() {
         if (typeof toast === 'function') toast('Failed to rename');
