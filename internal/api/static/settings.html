@@ -193,11 +193,11 @@
                 <input type="text" id="rec-segment" placeholder="10m" class="form-input">
               </div>
               <div class="form-field">
-                <label for="rec-precap">Pre-capture</label>
+                <label for="rec-precap">Pre-capture <span class="form-meta">(seconds)</span></label>
                 <input type="text" id="rec-precap" placeholder="5s" class="form-input">
               </div>
               <div class="form-field">
-                <label for="rec-postcap">Post-capture</label>
+                <label for="rec-postcap">Post-capture <span class="form-meta">(seconds)</span></label>
                 <input type="text" id="rec-postcap" placeholder="10s" class="form-input">
               </div>
             </div>
@@ -491,10 +491,10 @@
   $('mqtt-discover-btn').addEventListener('click', function() {
     var btn = this;
     btn.disabled = true;
-    btn.textContent = 'Scanning…';
+    btn.classList.add('btn-loading');
     fetch('/api/settings/mqtt/discover').then(function(r){return r.json()}).then(function(data) {
       btn.disabled = false;
-      btn.textContent = 'Scan local network';
+      btn.classList.remove('btn-loading');
       var results = $('mqtt-discover-results');
       var brokers = data.brokers || [];
       if (brokers.length === 0) {
@@ -514,13 +514,14 @@
       });
     }).catch(function() {
       btn.disabled = false;
-      btn.textContent = 'Scan local network';
+      btn.classList.remove('btn-loading');
     });
   });
 
   $('mqtt-test-btn').addEventListener('click', function() {
     var btn = this;
     btn.disabled = true;
+    btn.classList.add('btn-loading');
     setMQTTStatus('Testing…', '');
     fetch('/api/settings/mqtt/test', {
       method: 'POST',
@@ -533,6 +534,7 @@
       })
     }).then(function(r){return r.json()}).then(function(data) {
       btn.disabled = false;
+      btn.classList.remove('btn-loading');
       if (data.status === 'ok') {
         setMQTTStatus('Connection successful', 'success');
       } else {
@@ -540,6 +542,7 @@
       }
     }).catch(function(err) {
       btn.disabled = false;
+      btn.classList.remove('btn-loading');
       setMQTTStatus('Test failed: ' + err.message, 'error');
     });
   });
