@@ -2291,6 +2291,16 @@ function initTimeline() {
     }, 200);
   });
 
+  // Set initial aria value so screen readers get a meaningful position on load.
+  // timelineWin is not set yet (fetchTimelineData is async), so use the current
+  // wall-clock time for today, or midnight for past days.
+  (function() {
+    var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
+    var now = new Date();
+    var initSec = isToday ? (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) : 0;
+    setSeekAria(initSec);
+  })();
+
   // Show zoom/pan hint until the user first interacts with the timeline.
   initTimelineHint();
 }
