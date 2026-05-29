@@ -139,6 +139,66 @@
       outline: none;
       border-color: rgba(93, 215, 255, 0.4);
     }
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Screen-reader-only utility */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* Password reveal toggle */
+    .pw-wrap {
+      position: relative;
+      margin-bottom: 0.85rem;
+    }
+    .pw-wrap input[type="text"],
+    .pw-wrap input[type="password"] {
+      margin-bottom: 0;
+      padding-right: 2.6rem;
+    }
+    .pw-reveal {
+      position: absolute;
+      top: 50%;
+      right: 0.55rem;
+      transform: translateY(-50%);
+      width: 1.9rem;
+      height: 1.9rem;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: inherit;
+    }
+    .pw-reveal:hover { color: var(--text); }
+    .pw-reveal:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .radar-sweep { animation: none; }
+      .camera-thumbnail-wrap.loading::after { animation: none; }
+      .step-dot { transition: none; }
+      .btn { transition: none; }
+      input[type="text"],
+      input[type="password"] { transition: none; }
+    }
 
     /* Buttons */
     .btn {
@@ -463,9 +523,10 @@
   <!-- Screen 1: Create Admin Account -->
   <div id="screen-admin" class="screen active">
     <main class="shell">
-      <div class="steps">
+      <div class="steps" id="steps-admin" role="progressbar" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1" aria-label="Setup step 1 of 2">
         <div class="step-dot active"></div>
         <div class="step-dot"></div>
+        <span class="sr-only">Step 1 of 2</span>
       </div>
       <div class="brand">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -480,11 +541,23 @@
         <label for="admin-username">Username</label>
         <input id="admin-username" type="text" autocomplete="username" autofocus required>
         <label for="admin-password">Password</label>
-        <input id="admin-password" type="password" autocomplete="new-password" required>
+        <div class="pw-wrap">
+          <input id="admin-password" type="password" autocomplete="new-password" required>
+          <button type="button" class="pw-reveal" aria-pressed="false" aria-label="Show password" data-target="admin-password">
+            <svg data-icon="show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg data-icon="hide" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
         <label for="admin-confirm">Confirm password</label>
-        <input id="admin-confirm" type="password" autocomplete="new-password" required>
+        <div class="pw-wrap">
+          <input id="admin-confirm" type="password" autocomplete="new-password" required>
+          <button type="button" class="pw-reveal" aria-pressed="false" aria-label="Show password" data-target="admin-confirm">
+            <svg data-icon="show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg data-icon="hide" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
         <button type="submit" class="btn btn-primary" id="admin-submit">Continue</button>
-        <div class="status" id="admin-status"></div>
+        <div class="status" id="admin-status" role="status" aria-live="polite" aria-atomic="true"></div>
       </form>
 
       <!-- Config readonly fallback -->
@@ -502,9 +575,10 @@
   <!-- Screen 2: Camera Discovery -->
   <div id="screen-cameras" class="screen">
     <main class="shell-wide">
-      <div class="steps">
+      <div class="steps" id="steps-cameras" role="progressbar" aria-valuemin="1" aria-valuemax="2" aria-valuenow="2" aria-label="Setup step 2 of 2">
         <div class="step-dot done"></div>
         <div class="step-dot active"></div>
+        <span class="sr-only">Step 2 of 2</span>
       </div>
       <div class="brand">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -563,21 +637,24 @@
           <div class="connect-prompt" id="connect-prompt">
             <p class="connect-label">Enter your camera login to connect and preview streams.</p>
             <div class="connect-row">
-              <input id="cam-username" type="text" placeholder="Username">
-              <input id="cam-password" type="password" placeholder="Password">
+              <label for="cam-username" class="sr-only">Camera username</label>
+              <input id="cam-username" type="text" placeholder="Username" autocomplete="username">
+              <label for="cam-password" class="sr-only">Camera password</label>
+              <input id="cam-password" type="password" placeholder="Password" autocomplete="current-password">
               <button type="button" class="btn btn-secondary btn-small" id="test-creds">Connect</button>
             </div>
-            <div class="status" id="cred-status"></div>
+            <div class="status" id="cred-status" role="status" aria-live="polite" aria-atomic="true"></div>
           </div>
 
           <div class="actions">
             <button type="button" class="btn btn-primary" id="add-cameras" disabled>Add Selected Cameras</button>
           </div>
-          <div class="status" id="add-cameras-status" style="margin-top:0.5rem"></div>
+          <div class="status" id="add-cameras-status" role="status" aria-live="polite" aria-atomic="true" style="margin-top:0.5rem"></div>
         </div>
 
         <div class="actions">
           <button type="button" class="btn-ghost" id="skip-setup">Finish Setup</button>
+          <button type="button" class="btn-ghost" id="back-to-admin">Back</button>
         </div>
       </div>
     </main>
@@ -585,11 +662,11 @@
 
   <script>
     (function() {
-	      // --- Utilities ---
-	      function $(id) { return document.getElementById(id); }
+      // --- Utilities ---
+      function $(id) { return document.getElementById(id); }
 
-	      function setStatus(el, message, type) {
-	        el.textContent = message || '';
+      function setStatus(el, message, type) {
+        el.textContent = message || '';
         el.className = 'status' + (type ? ' ' + type : '');
       }
 
@@ -602,6 +679,22 @@
 
       function show(el) { el.classList.remove('hidden'); }
       function hide(el) { el.classList.add('hidden'); }
+
+      // --- Password reveal toggles ---
+      document.querySelectorAll('.pw-reveal').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var field = $(btn.getAttribute('data-target'));
+          if (!field) return;
+          var showing = field.type === 'text';
+          field.type = showing ? 'password' : 'text';
+          btn.setAttribute('aria-pressed', showing ? 'false' : 'true');
+          btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+          var iconShow = btn.querySelector('[data-icon="show"]');
+          var iconHide = btn.querySelector('[data-icon="hide"]');
+          if (iconShow) iconShow.style.display = showing ? '' : 'none';
+          if (iconHide) iconHide.style.display = showing ? 'none' : '';
+        });
+      });
 
       // --- Screen 1: Admin Account ---
       var adminForm = $('admin-form');
@@ -626,10 +719,10 @@
         adminSubmit.disabled = true;
         setStatus(adminStatus, 'Creating account…', '');
 
-	        fetch('/api/setup', {
-	          method: 'POST',
-	          headers: { 'Content-Type': 'application/json' },
-	          body: JSON.stringify({ username: username, password: password })
+        fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username, password: password })
         })
           .then(function(resp) {
             return resp.json().then(function(body) {
@@ -681,6 +774,10 @@
         refreshCodecStatus();
         startDiscovery();
       }
+
+      $('back-to-admin').addEventListener('click', function() {
+        showScreen('screen-admin');
+      });
 
       function setCodecBadge(text, tone) {
         codecBadge.textContent = text;
@@ -776,7 +873,7 @@
         show($('scan-loading'));
         $('discover-subtitle').textContent = 'Scanning your network for cameras…';
 
-	        fetch('/api/discover')
+        fetch('/api/discover')
           .then(function(resp) { return resp.json(); })
           .then(function(data) {
             discoveredCameras = data.cameras || [];
@@ -936,10 +1033,10 @@
           return { ip: c.ip, port: c.port || 554, manufacturer: c.manufacturer || '', name: c.name || '' };
         });
 
-	        fetch('/api/discover/probe', {
-	          method: 'POST',
-	          headers: { 'Content-Type': 'application/json' },
-	          body: JSON.stringify({ cameras: camerasToProbe, username: username, password: password })
+        fetch('/api/discover/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cameras: camerasToProbe, username: username, password: password })
         })
           .then(function(resp) { return resp.json(); })
           .then(function(data) {
@@ -966,9 +1063,9 @@
         var password = document.getElementById('override-pass-' + index).value;
         if (!username || !password) return;
 
-	        fetch('/api/discover/probe', {
-	          method: 'POST',
-	          headers: { 'Content-Type': 'application/json' },
+        fetch('/api/discover/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cameras: [{ ip: cam.ip, port: cam.port || 554, manufacturer: cam.manufacturer || '', name: cam.name || '' }],
             username: username,
@@ -1013,9 +1110,9 @@
           selected.push({ name: name, url: streamUrl, record_url: recordUrl });
         });
 
-	        fetch('/api/cameras', {
-	          method: 'POST',
-	          headers: { 'Content-Type': 'application/json' },
+        fetch('/api/cameras', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cameras: selected })
         })
           .then(function(resp) { return resp.json(); })
@@ -1051,14 +1148,19 @@
         return div.innerHTML;
       }
 
-	      function escapeAttr(str) {
-	        return String(str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-	      }
+      function escapeAttr(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
 
-	      // If admin account already exists (page refresh after step 1), skip to cameras
-	      fetch('/api/setup/status').then(function(r) { return r.json(); }).then(function(d) {
-	        if (d.admin_configured) goToCameraScreen();
-	      }).catch(function() {});
+      // On load: check setup state. Redirect to app when already running;
+      // skip to cameras when admin account was already created (page refresh).
+      fetch('/api/setup/status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.status === 'running') {
+          location.replace('/');
+        } else if (d.admin_configured) {
+          goToCameraScreen();
+        }
+      }).catch(function() {});
     })();
   </script>
 </body>
