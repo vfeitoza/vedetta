@@ -2124,6 +2124,9 @@ function initTimeline() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function() {
       renderWaveform();
+      renderMinimap();
+      renderMinimapOverlays();
+      renderAxisLabels();
     }, 200);
   });
 }
@@ -2305,6 +2308,9 @@ function fetchTimelineData() {
       cachedTimelineEvents = data.events || [];
       prepareTimelineModel(cachedActivity, cachedTimelineEvents, cachedSegments);
       renderWaveform();
+      renderMinimap();
+      renderMinimapOverlays();
+      renderAxisLabels();
     })
     .catch(function(err) {
       console.error('Timeline fetch error:', err);
@@ -4513,8 +4519,89 @@ function scheduleTimelineRender() {
   });
 }
 
-function renderAxisLabels() {} // stub; real body replaces this once labels exist
-function renderMinimapOverlays() {} // stub; real body replaces this once the minimap exists
+// Dynamic tick labels positioned absolutely within the window.
+function renderAxisLabels() {
+  var labels = el('timeline-labels');
+  if (!labels) return;
+  var win = timelineWin;
+  var ticks = TLW.niceTicks(win.start, win.end, 5);
+  var html = '';
+  ticks.forEach(function(sec) {
+    var pct = TLW.secToPctRaw(win, sec) * 100;
+    // End-of-day tick reads as 24:00, not a second 00:00.
+    var hh = (sec === TLW.SECONDS_PER_DAY) ? '24' : String(Math.floor(sec / 3600) % 24).padStart(2, '0');
+    var mm = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+    // Nudge labels at the very edges inward so they do not overflow the strip.
+    var tx = 'translateX(-50%)';
+    if (pct < 2) tx = 'translateX(0)';
+    else if (pct > 98) tx = 'translateX(-100%)';
+    html += '<span style="left:' + pct + '%;transform:' + tx + '">' + hh + ':' + mm + '</span>';
+  });
+  labels.innerHTML = html;
+}
+
+// Draw the full-day heatmap onto the minimap canvas. Cheap; only on data/resize.
+function renderMinimap() {
+  var canvas = el('timeline-minimap-canvas');
+  if (!canvas || !timelineModel) return;
+  var mini = el('timeline-minimap');
+  var dpr = window.devicePixelRatio || 1;
+  var w = mini.offsetWidth;
+  var h = mini.offsetHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  var style = getComputedStyle(document.documentElement);
+  var color = style.getPropertyValue('--cyan-dim').trim() || '#00b8d4';
+  ctx.fillStyle = color;
+
+  // One column per pixel; mark covered minutes, brighten by motion score.
+  var scores = timelineModel.scores;
+  var cover = timelineModel.hasCoverage;
+  for (var x = 0; x < w; x++) {
+    var mStart = Math.floor(x / w * 1440);
+    var mEnd = Math.ceil((x + 1) / w * 1440); // ceil: never an empty minute range on wide canvases
+    var covered = false, maxScore = 0;
+    for (var m = mStart; m < mEnd && m < 1440; m++) {
+      if (cover[m]) covered = true;
+      if (scores[m] > maxScore) maxScore = scores[m];
+    }
+    if (!covered) continue;
+    var barH = Math.max(2, maxScore * h);
+    ctx.globalAlpha = 0.4 + 0.6 * Math.min(1, maxScore);
+    ctx.fillRect(x, h - barH, 1, barH);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Position the window box + now/playhead overlays. Cheap; called every frame.
+function renderMinimapOverlays() {
+  var box = el('timeline-window-box');
+  if (box) {
+    var leftPct = timelineWin.start / TLW.SECONDS_PER_DAY * 100;
+    var widthPct = (timelineWin.end - timelineWin.start) / TLW.SECONDS_PER_DAY * 100;
+    box.style.left = leftPct + '%';
+    box.style.width = widthPct + '%';
+  }
+  var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
+  var nowEl = el('timeline-minimap-now');
+  if (nowEl) {
+    if (isToday) {
+      var now = new Date();
+      var sec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      nowEl.style.left = (sec / TLW.SECONDS_PER_DAY * 100) + '%';
+      nowEl.style.display = '';
+    } else {
+      nowEl.style.display = 'none';
+    }
+  }
+}
 
 function startPlayheadAnimation() {
   if (playheadRAF) cancelAnimationFrame(playheadRAF);

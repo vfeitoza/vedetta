@@ -171,14 +171,20 @@
             </button>
           </div>
         </div>
-        <div class="timeline-track" id="timeline-track" role="slider" aria-label="Recording timeline" tabindex="0">
+        <!-- Minimap: full-day overview + draggable visible-window box -->
+        <div class="timeline-minimap" id="timeline-minimap" aria-hidden="true">
+          <canvas id="timeline-minimap-canvas"></canvas>
+          <div class="timeline-window-box" id="timeline-window-box"></div>
+          <div class="timeline-minimap-now" id="timeline-minimap-now" style="display:none"></div>
+          <div class="timeline-minimap-playhead" id="timeline-minimap-playhead" style="display:none"></div>
+        </div>
+        <div class="timeline-track" id="timeline-track" role="slider" aria-label="Recording timeline"
+             aria-valuemin="0" aria-valuemax="86399" aria-valuenow="0" tabindex="0">
           <canvas id="timeline-canvas"></canvas>
           <div class="timeline-playhead" id="timeline-playhead" style="left: 50%"></div>
           <div class="timeline-now-marker" id="timeline-now-marker" style="display:none"></div>
         </div>
-        <div class="timeline-labels">
-          <span>00:00</span><span>03:00</span><span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
-        </div>
+        <div class="timeline-labels" id="timeline-labels"></div>
       </div>
 
       <!-- Section tabs -->

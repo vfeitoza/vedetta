@@ -1465,7 +1465,61 @@ input, select { font-family: inherit; }
   overflow: hidden;
   cursor: crosshair;
   user-select: none;
+  touch-action: none; /* gestures own the pointer; never page-scroll mid-drag */
 }
+
+.timeline-minimap {
+  position: relative;
+  height: 16px;
+  margin-bottom: 0.375rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+}
+
+#timeline-minimap-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.timeline-window-box {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  background: rgba(34, 211, 238, 0.18);
+  border: 1.5px solid var(--cyan);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  box-sizing: border-box;
+}
+.timeline-window-box:active { cursor: grabbing; }
+
+/* Enlarge the grab target on touch/stylus, mirroring the existing scrubber rule
+   at style.css:2239 (which bumps .timeline-track height). We grow the strip
+   itself rather than expand a pseudo-element: .timeline-minimap has
+   `overflow: hidden`, which clips descendant hit-areas, so a ::before escaping
+   the box would NOT be interactable. A taller strip makes the full-height window
+   box (top/bottom: -1px) a large, easy-to-grab target; renderMinimap reads
+   offsetHeight so the heatmap canvas scales to match. */
+@media (pointer: coarse) {
+  .timeline-minimap { height: 24px; }
+}
+
+.timeline-minimap-now,
+.timeline-minimap-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+}
+.timeline-minimap-now { background: rgba(255, 255, 255, 0.5); }
+.timeline-minimap-playhead { background: var(--cyan); box-shadow: 0 0 4px var(--cyan); }
 
 #timeline-canvas {
   position: absolute;
@@ -1525,12 +1579,23 @@ input, select { font-family: inherit; }
 
 /* Time labels */
 .timeline-labels {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  display: block;
+  height: 0.875rem;
   margin-top: 0.25rem;
   font-size: 0.5625rem;
   font-family: var(--font-mono);
   color: var(--text-tertiary);
+}
+.timeline-labels span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-window-box,
+  .timeline-labels span { transition: none !important; }
 }
 
 
@@ -3653,6 +3718,10 @@ kbd {
   .timeline-track {
     height: 36px;
   }
+
+  /* Hide the full-day minimap in landscape; vertical space is scarce and the
+     main windowed track is the primary control. */
+  .timeline-minimap { display: none; }
 }
 
 /* ─── Settings page layout (sidebar + panel) ─── */
