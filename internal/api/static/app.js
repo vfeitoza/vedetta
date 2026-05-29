@@ -3052,7 +3052,8 @@ function renderCalendar() {
         var btn = grid.querySelector('.calendar-day[data-day="' + selectDay + '"]');
         if (btn) btn.click();
       } else {
-        renderEmptyRecordings();
+        var monthName = calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        renderEmptyRecordings('No recordings in ' + monthName + '.');
       }
     })
     .catch(function(err) { console.error('Failed to load calendar data:', err); });
@@ -3069,15 +3070,22 @@ function humanizeName(name) {
   return name.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 }
 
-function renderEmptyRecordings() {
+function renderEmptyRecordings(label) {
   var summary = el('day-summary');
   var cards = el('camera-cards');
   if (summary) summary.innerHTML = '';
-  if (cards) cards.innerHTML = '<div class="empty-state"><p>No recordings for this date.</p></div>';
+  var msg = label || 'No recordings for this date.';
+  if (cards) cards.innerHTML = '<div class="empty-state"><p>' + msg + '</p></div>';
 }
 
 function loadRecordingsSummary(date) {
   var dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+
+  // Show a loading state while the fetch is in flight.
+  var summary = el('day-summary');
+  var cards = el('camera-cards');
+  if (summary) summary.innerHTML = '';
+  if (cards) cards.innerHTML = '<div class="loading-state">Loading...</div>';
 
   fetch('/api/recordings/summary?date=' + dateStr)
     .then(function(resp) { return resp.json(); })
@@ -3086,6 +3094,7 @@ function loadRecordingsSummary(date) {
     })
     .catch(function(err) {
       console.error('Failed to load recordings summary:', err);
+      if (cards) cards.innerHTML = '<div class="empty-state"><p>Failed to load recordings.</p></div>';
     });
 }
 
@@ -3098,8 +3107,9 @@ function renderRecordingsSummary(data, date) {
   var totalBytes = data.total_bytes || 0;
 
   if (cameras.length === 0) {
+    var dayLabel = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     summary.innerHTML = '';
-    cardsContainer.innerHTML = '<div class="empty-state"><p>No recordings for this date.</p></div>';
+    cardsContainer.innerHTML = '<div class="empty-state"><p>No recordings on ' + dayLabel + '.</p></div>';
     return;
   }
 
