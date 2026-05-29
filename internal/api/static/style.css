@@ -4943,6 +4943,11 @@ kbd {
   color: var(--text-primary) !important;
 }
 
+.oldest-rel {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .storage-actions {
   display: flex;
   gap: 0.375rem;

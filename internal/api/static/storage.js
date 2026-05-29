@@ -22,11 +22,43 @@ function esc(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function daysAgo(dateStr) {
+  var d = new Date(dateStr + "T00:00:00Z");
+  if (isNaN(d)) return "";
+  var diffMs = Date.now() - d.getTime();
+  var days = Math.round(diffMs / 86400000);
+  if (days < 1) return "today";
+  if (days === 1) return "yesterday";
+  return days + "d ago";
+}
+
+function renderLoadingSkeleton() {
+  var body = $("#camera-table-body");
+  if (!body) return;
+  var rows = "";
+  for (var i = 0; i < 3; i++) {
+    rows += `<tr class="storage-cam-row">
+      <td><div class="skeleton" style="height:0.875rem;width:7rem"></div></td>
+      <td class="num"><div class="skeleton" style="height:0.875rem;width:4rem;margin-left:auto"></div></td>
+      <td class="num"><div class="skeleton" style="height:0.875rem;width:4rem;margin-left:auto"></div></td>
+      <td><div class="skeleton" style="height:0.875rem;width:5rem"></div></td>
+      <td class="num"><div class="skeleton" style="height:0.875rem;width:4rem;margin-left:auto"></div></td>
+      <td></td>
+    </tr>
+    <tr class="storage-spark-row"><td colspan="6"><div class="skeleton" style="height:36px;max-width:420px"></div></td></tr>`;
+  }
+  body.innerHTML = rows;
+}
+
 async function loadSummary() {
+  var firstLoad = !$("#camera-table-body").dataset.loaded;
+  if (firstLoad) renderLoadingSkeleton();
+
   const r = await fetch("/api/storage");
   if (!r.ok) return;
   const data = await r.json();
 
+  $("#camera-table-body").dataset.loaded = "1";
   $("#recording-paused-banner").hidden = !data.recording_paused;
 
   renderSummaryCards(data);
@@ -126,7 +158,7 @@ function renderCameraTable(cameras) {
       <td class="storage-cam-name">${esc(c.name)}</td>
       <td class="num mono">${fmtBytes(c.segment_bytes)}</td>
       <td class="num mono">${fmtBytes(c.clip_bytes)}</td>
-      <td class="mono oldest-cell">${c.oldest_segment ? esc(c.oldest_segment.slice(0,10)) : "-"}</td>
+      <td class="mono oldest-cell">${c.oldest_segment ? esc(c.oldest_segment.slice(0,10)) + '<span class="oldest-rel"> (' + esc(daysAgo(c.oldest_segment.slice(0,10))) + ')</span>' : "-"}</td>
       <td class="num mono">${fmtBytes(c.last_7d_bytes)}</td>
       <td class="storage-actions">
         <button class="btn btn-xs btn-secondary" data-action="older" data-camera="${esc(c.name)}" data-days="${c.effective_retain_days}" aria-label="Delete segments older than ${c.effective_retain_days} days for ${esc(displayName)}">Older than ${c.effective_retain_days}d</button>
