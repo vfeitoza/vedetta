@@ -90,6 +90,33 @@ TimelineWindow.shouldResetView = function (trigger) {
     || trigger === 'return-live' || trigger === 'viewport-cross';
 };
 
+// Includes 600 (10 min): it is only ever selected for spans in (1500, 3000]s
+// (i.e. the deepest zoom, ~25-50 min), where it yields ~3 ticks instead of the
+// 2 that jumping straight to 900 would give. It never affects the 3h or full-day
+// windows (those select 3600 / 21600).
+TimelineWindow.NICE_INTERVALS = [300, 600, 900, 1800, 3600, 10800, 21600];
+
+TimelineWindow.niceTickInterval = function (span, targetCount) {
+  var target = targetCount || 5;
+  var list = TimelineWindow.NICE_INTERVALS;
+  for (var i = 0; i < list.length; i++) {
+    if (span / list[i] <= target) return list[i];
+  }
+  return list[list.length - 1];
+};
+
+TimelineWindow.niceTicks = function (start, end, targetCount) {
+  var interval = TimelineWindow.niceTickInterval(end - start, targetCount);
+  var ticks = [];
+  var first = Math.ceil(start / interval) * interval;
+  for (var t = first; t <= end; t += interval) ticks.push(t);
+  return ticks;
+};
+
+TimelineWindow.snapTolerance = function (span, trackWidthPx) {
+  return clamp(Math.round(span / trackWidthPx * 4), 5, 120);
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = TimelineWindow;
 }

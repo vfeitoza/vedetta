@@ -154,3 +154,25 @@ test('shouldResetView gates triggers (refresh never resets)', () => {
   assert.equal(TLW.shouldResetView('refresh'), false);
   assert.equal(TLW.shouldResetView('whatever'), false);
 });
+
+test('niceTickInterval picks smallest interval with span/interval <= target (default 5)', () => {
+  assert.equal(TLW.niceTickInterval(86400, 5), 21600); // /21600 = 4 <= 5 (6h ticks, full day)
+  assert.equal(TLW.niceTickInterval(10800, 5), 3600);  // /1800 = 6 > 5, /3600 = 3 <= 5 (1h ticks, 3h window)
+  assert.equal(TLW.niceTickInterval(1800, 5), 600);    // /300 = 6 > 5, /600 = 3 <= 5 (10m ticks at max zoom)
+  assert.equal(TLW.niceTickInterval(1800), 600);       // default target is 5
+});
+
+test('niceTicks returns multiples strictly inside the window', () => {
+  const ticks = TLW.niceTicks(50400, 61200, 5); // 14:00-17:00, 1h interval
+  assert.deepEqual(ticks, [50400, 54000, 57600, 61200]);
+  // a window not starting on a tick boundary: full array asserted
+  assert.deepEqual(TLW.niceTicks(50500, 61300, 5), [54000, 57600, 61200]);
+});
+
+test('snapTolerance: 4px of time, floored 5s, capped 120s', () => {
+  // wide span, narrow track -> capped at 120
+  assert.equal(TLW.snapTolerance(86400, 340), 120);
+  // tight span, wide track -> floored at 5
+  assert.equal(TLW.snapTolerance(1800, 1000), 7); // round(1800/1000*4)=7
+  assert.equal(TLW.snapTolerance(600, 1000), 5);  // round(2.4)=2 -> floor 5
+});
