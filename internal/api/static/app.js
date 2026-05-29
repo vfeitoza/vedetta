@@ -3230,13 +3230,22 @@ function renderRecordingsSummary(data, date) {
     labels.innerHTML = '<span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>';
     card.appendChild(labels);
 
+    // Sum covered duration from the merged blocks already computed for the
+    // coverage bar - the API does not expose a pre-computed duration field.
+    var coveredSecs = 0;
+    blocks.forEach(function(b) { coveredSecs += b.end - b.start; });
+    var covMins = Math.round(coveredSecs / 60);
+    var covStr = covMins >= 60
+      ? Math.floor(covMins / 60) + 'h' + (covMins % 60 ? ' ' + (covMins % 60) + 'm' : '')
+      : covMins + 'm';
+
     // Expandable segment list
     var toggle = document.createElement('button');
     toggle.className = 'btn btn-sm rec-segments-toggle';
     toggle.setAttribute('aria-expanded', 'false');
     toggle.innerHTML =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
-      cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '');
+      cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '') + ' – ' + covStr;
 
     var segList = document.createElement('div');
     segList.className = 'rec-segment-list hidden';
