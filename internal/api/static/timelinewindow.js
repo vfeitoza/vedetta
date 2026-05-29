@@ -117,6 +117,70 @@ TimelineWindow.snapTolerance = function (span, trackWidthPx) {
   return clamp(Math.round(span / trackWidthPx * 4), 5, 120);
 };
 
+// rawEvents: [{ startSec, endSec }] (endSec may be null/<=startSec).
+// Returns sorted [{ startSec, endSec, snapSec }] with each interval at least
+// MIN_EVENT_SEC wide so a start-only event still colors a column and snaps.
+TimelineWindow.buildEventIntervals = function (rawEvents) {
+  return rawEvents.map(function (e) {
+    var startSec = e.startSec;
+    var endSec = (e.endSec != null && e.endSec > startSec) ? e.endSec : startSec;
+    endSec = Math.max(endSec, startSec + TimelineWindow.MIN_EVENT_SEC);
+    return { startSec: startSec, endSec: endSec, snapSec: startSec };
+  }).sort(function (a, b) { return a.startSec - b.startSec; });
+};
+
+TimelineWindow.snapToEvent = function (eventIntervals, sec, tolerance) {
+  var best = null, bestDist = Infinity;
+  for (var i = 0; i < eventIntervals.length; i++) {
+    var d = Math.abs(sec - eventIntervals[i].snapSec);
+    if (d <= tolerance && d < bestDist) { bestDist = d; best = eventIntervals[i].snapSec; }
+  }
+  return best;
+};
+
+TimelineWindow.intervalsIntersect = function (aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+};
+
+TimelineWindow.isCovered = function (mergedBlocks, startSec, endSec) {
+  for (var i = 0; i < mergedBlocks.length; i++) {
+    if (TimelineWindow.intervalsIntersect(startSec, endSec, mergedBlocks[i].start, mergedBlocks[i].end)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+TimelineWindow.nearestSegmentEdge = function (mergedBlocks, sec) {
+  var best = null, bestDist = Infinity;
+  for (var i = 0; i < mergedBlocks.length; i++) {
+    var b = mergedBlocks[i];
+    if (Math.abs(sec - b.start) < bestDist) { bestDist = Math.abs(sec - b.start); best = b.start; }
+    if (Math.abs(sec - b.end) < bestDist) { bestDist = Math.abs(sec - b.end); best = b.end; }
+  }
+  return best;
+};
+
+// One shared seek-resolution path for tap, touch, and keyboard seeks. Snap to
+// the nearest event start within tolerance; if the (snapped) second sits on a
+// recording segment, play there; else snap to the nearest segment edge within
+// 300s and play; else signal "go live". Returns { sec, play }.
+TimelineWindow.resolveSeek = function (eventIntervals, mergedBlocks, sec, tolerance) {
+  var snap = TimelineWindow.snapToEvent(eventIntervals, sec, tolerance);
+  if (snap !== null) sec = snap;
+  if (TimelineWindow.isCovered(mergedBlocks, sec, sec + 1)) return { sec: sec, play: true };
+  var nearest = TimelineWindow.nearestSegmentEdge(mergedBlocks, sec);
+  if (nearest !== null && Math.abs(sec - nearest) < 300) return { sec: nearest, play: true };
+  return { sec: sec, play: false };
+};
+
+// The [startSec, endSec) time interval covered by integer pixel column `col` of
+// a `widthPx`-wide track. The renderer intersects this against coverage so a
+// sub-pixel recording span is still drawn at high zoom.
+TimelineWindow.columnTimeInterval = function (win, col, widthPx) {
+  return [TimelineWindow.pctToSec(win, col / widthPx), TimelineWindow.pctToSec(win, (col + 1) / widthPx)];
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = TimelineWindow;
 }

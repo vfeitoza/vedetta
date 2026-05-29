@@ -176,3 +176,66 @@ test('snapTolerance: 4px of time, floored 5s, capped 120s', () => {
   assert.equal(TLW.snapTolerance(1800, 1000), 7); // round(1800/1000*4)=7
   assert.equal(TLW.snapTolerance(600, 1000), 5);  // round(2.4)=2 -> floor 5
 });
+
+test('buildEventIntervals widens zero-length/start-only events, sorts', () => {
+  const out = TLW.buildEventIntervals([
+    { startSec: 100, endSec: 130 },
+    { startSec: 50, endSec: null },   // start-only
+    { startSec: 200, endSec: 200 },   // zero-length
+  ]);
+  assert.equal(out[0].startSec, 50);  // sorted
+  assert.equal(out[0].endSec, 51);    // widened by MIN_EVENT_SEC
+  assert.equal(out[0].snapSec, 50);
+  assert.equal(out[1].startSec, 100);
+  assert.equal(out[1].endSec, 130);
+  assert.equal(out[2].endSec, 201);   // widened
+});
+
+test('snapToEvent returns nearest snapSec within tolerance, else null', () => {
+  const ev = TLW.buildEventIntervals([{ startSec: 1000, endSec: 1000 }, { startSec: 2000, endSec: 2000 }]);
+  assert.equal(TLW.snapToEvent(ev, 1005, 10), 1000);
+  assert.equal(TLW.snapToEvent(ev, 1990, 30), 2000);
+  assert.equal(TLW.snapToEvent(ev, 1500, 10), null); // too far from both
+});
+
+test('intervalsIntersect is half-open overlap', () => {
+  assert.equal(TLW.intervalsIntersect(0, 10, 5, 15), true);
+  assert.equal(TLW.intervalsIntersect(0, 10, 10, 20), false); // touching, not overlapping
+  assert.equal(TLW.intervalsIntersect(0, 10, -5, 1), true);
+});
+
+test('isCovered: a time interval intersects any merged block', () => {
+  const blocks = [{ start: 100, end: 200 }, { start: 500, end: 600 }];
+  assert.equal(TLW.isCovered(blocks, 150, 160), true);
+  assert.equal(TLW.isCovered(blocks, 250, 300), false);
+  assert.equal(TLW.isCovered(blocks, 590, 700), true);
+});
+
+test('nearestSegmentEdge returns the closest block boundary, null if empty', () => {
+  const blocks = [{ start: 100, end: 200 }, { start: 500, end: 600 }];
+  assert.equal(TLW.nearestSegmentEdge(blocks, 210), 200);
+  assert.equal(TLW.nearestSegmentEdge(blocks, 480), 500);
+  assert.equal(TLW.nearestSegmentEdge([], 100), null);
+});
+
+test('resolveSeek snaps event -> segment -> live (single shared path)', () => {
+  const ev = TLW.buildEventIntervals([{ startSec: 1000, endSec: 1000 }]);
+  const blocks = [{ start: 990, end: 1100 }, { start: 5000, end: 5100 }];
+  // near an event start AND inside coverage -> play at the event start
+  assert.deepEqual(TLW.resolveSeek(ev, blocks, 1003, 10), { sec: 1000, play: true });
+  // not near event, just inside a block -> play where requested
+  assert.deepEqual(TLW.resolveSeek([], blocks, 1050, 10), { sec: 1050, play: true });
+  // outside coverage but within 300s of an edge -> snap to edge and play
+  assert.deepEqual(TLW.resolveSeek([], blocks, 5200, 10), { sec: 5100, play: true });
+  // far from everything -> signal "go live"
+  assert.deepEqual(TLW.resolveSeek([], blocks, 20000, 10), { sec: 20000, play: false });
+});
+
+test('columnTimeInterval detects a sub-pixel coverage span (high zoom)', () => {
+  const win = TLW.makeWindow(0, 3400); // with a 3400px track -> 1s per pixel
+  const iv = TLW.columnTimeInterval(win, 100, 3400); // column 100 covers [100,101)
+  assert.ok(Math.abs(iv[0] - 100) < 1e-9);
+  assert.ok(Math.abs(iv[1] - 101) < 1e-9);
+  // a 0.5s recording block inside that column is still detected as covered
+  assert.equal(TLW.isCovered([{ start: 100.2, end: 100.7 }], iv[0], iv[1]), true);
+});
