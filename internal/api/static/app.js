@@ -2270,17 +2270,20 @@ function updatePlayheadToNow() {
   if (!playhead) return;
 
   const now = new Date();
-  const today = new Date();
-  const isToday = timelineDate.toDateString() === today.toDateString();
-
-  if (isToday) {
-    var pct = (now.getHours() * 60 + now.getMinutes()) / (24 * 60) * 100;
-    playhead.style.left = pct + '%';
+  const isToday = timelineDate.toDateString() === new Date().toDateString();
+  if (!isToday) {
+    playhead.style.display = 'none';
+    setMinimapPlayhead(0, false);
+    return;
+  }
+  var sec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  if (TLW.isSecInView(timelineWin, sec)) {
+    playhead.style.left = (TLW.secToPctRaw(timelineWin, sec) * 100) + '%';
     playhead.style.display = '';
   } else {
-    playhead.style.left = '0%';
     playhead.style.display = 'none';
   }
+  setMinimapPlayhead(sec, true);
 }
 
 function fetchTimelineData() {
@@ -2707,11 +2710,15 @@ function updatePlayheadForPlayback(currentTime) {
   var playhead = el('timeline-playhead');
   if (!playhead) return;
 
-  // Calculate the wall-clock time being played
   var wallTime = new Date(playbackStartTime.getTime() + currentTime * 1000);
-  var pct = (wallTime.getHours() * 3600 + wallTime.getMinutes() * 60 + wallTime.getSeconds()) / 86400 * 100;
-  playhead.style.left = pct + '%';
-  playhead.style.display = '';
+  var sec = wallTime.getHours() * 3600 + wallTime.getMinutes() * 60 + wallTime.getSeconds();
+  if (TLW.isSecInView(timelineWin, sec)) {
+    playhead.style.left = (TLW.secToPctRaw(timelineWin, sec) * 100) + '%';
+    playhead.style.display = '';
+  } else {
+    playhead.style.display = 'none';
+  }
+  setMinimapPlayhead(sec, true);
 }
 
 // ─── Filter Chips ───
@@ -4492,21 +4499,44 @@ function drawBoxThumbnail(canvas, box) {
 // ─── Real-time Playhead Animation ───
 var playheadRAF = null;
 var lastTimelineRefresh = 0;
+var lastFollowSec = -1; // last integer second the live-follow window tracked
+
+// rAF-throttled main-track re-render (used by pan, live-follow, keyboard).
+var timelineRenderRAF = null;
+function scheduleTimelineRender() {
+  if (timelineRenderRAF) return;
+  timelineRenderRAF = requestAnimationFrame(function () {
+    timelineRenderRAF = null;
+    renderWaveform();
+    renderAxisLabels();
+    renderMinimapOverlays();
+  });
+}
+
+function renderAxisLabels() {} // stub; real body replaces this once labels exist
+function renderMinimapOverlays() {} // stub; real body replaces this once the minimap exists
 
 function startPlayheadAnimation() {
   if (playheadRAF) cancelAnimationFrame(playheadRAF);
 
   function tick() {
     var now = new Date();
-    var today = new Date();
-    var isToday = timelineDate.toDateString() === today.toDateString();
-    var nowPct = isToday ? (now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60) / (24 * 60) * 100 : -1;
+    var isToday = timelineDate.toDateString() === new Date().toDateString();
+    var nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
 
-    // During playback: show a "now" marker so user knows where current time is
+    // Live-follow: keep the window pinned ahead of "now". Recompute + re-render
+    // only when the second ticks over, not every RAF frame.
+    if (followLive && isToday && Math.floor(nowSec) !== lastFollowSec) {
+      lastFollowSec = Math.floor(nowSec);
+      timelineWin = TLW.followLiveWindow(nowSec, timelineWin.end - timelineWin.start);
+      scheduleTimelineRender();
+    }
+
+    // "Now" marker (shown during playback so the user sees current time).
     var nowMarker = el('timeline-now-marker');
     if (nowMarker) {
-      if (playbackMode && isToday && nowPct >= 0) {
-        nowMarker.style.left = nowPct + '%';
+      if (playbackMode && isToday && TLW.isSecInView(timelineWin, nowSec)) {
+        nowMarker.style.left = (TLW.secToPctRaw(timelineWin, nowSec) * 100) + '%';
         nowMarker.style.display = '';
       } else {
         nowMarker.style.display = 'none';
@@ -4516,15 +4546,21 @@ function startPlayheadAnimation() {
     if (!playbackMode && !timelineDragging) {
       var playhead = el('timeline-playhead');
       if (playhead && isToday) {
-        playhead.style.left = nowPct + '%';
-        playhead.style.display = '';
+        if (TLW.isSecInView(timelineWin, nowSec)) {
+          playhead.style.left = (TLW.secToPctRaw(timelineWin, nowSec) * 100) + '%';
+          playhead.style.display = '';
+        } else {
+          playhead.style.display = 'none';
+        }
+        setMinimapPlayhead(nowSec, true);
       }
 
-      // Refresh timeline segments every 30s so blue bars stay current
+      // Refresh segments every 30s so blue bars stay current. This MUST NOT
+      // reset the window (shouldResetView('refresh') === false).
       var ts = Date.now();
       if (ts - lastTimelineRefresh > 30000) {
         lastTimelineRefresh = ts;
-        fetchTimelineData();
+        fetchTimelineData('refresh');
       }
     }
     playheadRAF = requestAnimationFrame(tick);
