@@ -63,6 +63,33 @@ TimelineWindow.followLiveWindow = function (nowSec, span) {
   return TimelineWindow.makeWindow(start, end);
 };
 
+TimelineWindow.isWideTimeline = function (trackWidthPx, pointerFine) {
+  return trackWidthPx >= TimelineWindow.WIDE_MIN_PX && !!pointerFine;
+};
+
+// opts: { wide, isToday, nowSec, latestActivitySec }
+// Returns { start, end, followLive }. Pure: caller supplies wide/now/activity.
+TimelineWindow.defaultWindow = function (opts) {
+  if (opts.wide) {
+    return { start: 0, end: TimelineWindow.SECONDS_PER_DAY, followLive: false };
+  }
+  var span = TimelineWindow.DEFAULT_NARROW_SPAN;
+  if (opts.isToday) {
+    var live = TimelineWindow.followLiveWindow(opts.nowSec, span);
+    return { start: live.start, end: live.end, followLive: true };
+  }
+  var center = (opts.latestActivitySec != null)
+    ? opts.latestActivitySec
+    : TimelineWindow.SECONDS_PER_DAY / 2;
+  var w = TimelineWindow.setWindow(center - span / 2, span);
+  return { start: w.start, end: w.end, followLive: false };
+};
+
+TimelineWindow.shouldResetView = function (trigger) {
+  return trigger === 'init' || trigger === 'daychange'
+    || trigger === 'return-live' || trigger === 'viewport-cross';
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = TimelineWindow;
 }

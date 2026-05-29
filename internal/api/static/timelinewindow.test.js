@@ -111,3 +111,46 @@ test('followLiveWindow early in the day pins start to 0', () => {
   assert.equal(w.start, 0);
   assert.equal(w.end, 10800);
 });
+
+test('isWideTimeline: 640px boundary AND pointer fine', () => {
+  assert.equal(TLW.isWideTimeline(639, true), false);
+  assert.equal(TLW.isWideTimeline(640, true), true);
+  assert.equal(TLW.isWideTimeline(641, true), true);
+  assert.equal(TLW.isWideTimeline(1200, false), false); // wide but coarse pointer
+  assert.equal(TLW.isWideTimeline(300, true), false);
+});
+
+test('defaultWindow wide -> full day, no follow', () => {
+  const d = TLW.defaultWindow({ wide: true, isToday: true, nowSec: 50400, latestActivitySec: null });
+  assert.equal(d.start, 0);
+  assert.equal(d.end, 86400);
+  assert.equal(d.followLive, false);
+});
+
+test('defaultWindow narrow + today -> followLiveWindow + follow', () => {
+  const d = TLW.defaultWindow({ wide: false, isToday: true, nowSec: 50400, latestActivitySec: null });
+  assert.equal(d.end - d.start, 10800);
+  assert.equal(d.end, 50700); // matches followLiveWindow(50400, 10800)
+  assert.equal(d.followLive, true);
+});
+
+test('defaultWindow narrow + past + activity -> centered on activity', () => {
+  const d = TLW.defaultWindow({ wide: false, isToday: false, nowSec: 0, latestActivitySec: 43200 });
+  assert.equal(d.end - d.start, 10800);
+  assert.equal(d.start, 43200 - 5400); // centered: 37800
+  assert.equal(d.followLive, false);
+});
+
+test('defaultWindow narrow + past + no activity -> centered on midday', () => {
+  const d = TLW.defaultWindow({ wide: false, isToday: false, nowSec: 0, latestActivitySec: null });
+  assert.equal(d.start, 43200 - 5400);
+  assert.equal(d.followLive, false);
+});
+
+test('shouldResetView gates triggers (refresh never resets)', () => {
+  for (const t of ['init', 'daychange', 'return-live', 'viewport-cross']) {
+    assert.equal(TLW.shouldResetView(t), true, t);
+  }
+  assert.equal(TLW.shouldResetView('refresh'), false);
+  assert.equal(TLW.shouldResetView('whatever'), false);
+});
