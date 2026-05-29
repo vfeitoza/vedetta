@@ -3680,11 +3680,43 @@ kbd {
     min-height: 2.75rem;
   }
 
-  /* Standard and small buttons (were 26–30px tall) */
+  /* Standard and small buttons (were 26-30px tall) */
   .btn,
   .btn-sm,
   .btn-small {
     min-height: 2.75rem;
+  }
+
+  /* Extra-small buttons (were ~20px tall) */
+  .btn-xs {
+    min-height: 2.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  /* Density selector buttons (were ~22px tall) */
+  .density-btn {
+    min-height: 2.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  /* Calendar day cells (were ~30px, constrained by aspect-ratio 1) */
+  .calendar-day {
+    min-height: 2.75rem;
+    aspect-ratio: unset;
+  }
+
+  /* Settings sidebar tabs (were ~32px tall) */
+  .settings-tab {
+    min-height: 2.75rem;
+  }
+
+  /* Micro dismiss/delete buttons - grow to minimum touch target size */
+  .object-sighting-dismiss,
+  .object-ref-delete {
+    width: 2.75rem;
+    height: 2.75rem;
   }
 }
 
