@@ -276,7 +276,7 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 
 	tmpl := template.Must(template.New("detail").Funcs(s.funcMap).Parse(
 		`<div class="event-detail-root" data-event-camera="{{.CameraName}}" data-event-label="{{.Label}}" data-event-time="{{.Timestamp.UTC.Format "2006-01-02 15:04:05 UTC"}}"></div>` +
-			`<div class="page-header"><h1>{{.Label}} Detection</h1></div>` +
+			`<div class="page-header"><h1>{{displayName .Label}} Detection</h1></div>` +
 			`<div class="event-detail-layout">` +
 			`<div class="event-media">` +
 			`{{if .SnapshotAvailable}}<div class="detection-overlay-wrap" id="detection-wrap">` +
@@ -303,13 +303,17 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`</button>{{end}}` +
 			`</div>` +
 			`<div class="event-sidebar">` +
+			`<div class="event-nav">` +
+			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<button class="btn" disabled>&#8592; Previous</button>{{end}}` +
+			`{{if .NextID}}<a href="/event.html?id={{.NextID}}" class="btn" data-next-id="{{.NextID}}">Next &#8594;</a>{{else}}<button class="btn" disabled>Next &#8594;</button>{{end}}` +
+			`</div>` +
 			`<div class="meta-card">` +
 			`<div class="meta-card-header">Details</div>` +
 			`<div class="meta-row"><span class="key">Camera</span><span class="val">{{.CameraName}}</span></div>` +
 			`<div class="meta-row"><span class="key">Label</span><span class="val">{{.Label}}</span></div>` +
 			`{{if .SubLabel}}<div class="meta-row"><span class="key">Identity</span><span class="val">{{.SubLabel}}</span></div>{{end}}` +
 			`<div class="meta-row"><span class="key">Confidence</span><span class="val">{{scorePercent .Score}}</span></div>` +
-			`<div class="meta-row"><span class="key">Time</span><span class="val">{{formatTime .Timestamp}}</span></div>` +
+			`<div class="meta-row"><span class="key">Time</span><span class="val">{{formatTime .Timestamp}} <span class="text-tertiary">({{timeAgo .Timestamp}})</span></span></div>` +
 			`{{if .Duration}}<div class="meta-row"><span class="key">Duration</span><span class="val">{{.Duration}}</span></div>{{end}}` +
 			`<div class="meta-row"><span class="key">Event ID</span><span class="val mono">{{.ID}}</span></div>` +
 			`</div>` +
@@ -332,25 +336,21 @@ func (s *Server) handleEventDetailPartial(w http.ResponseWriter, r *http.Request
 			`</div>{{end}}` +
 			`{{if .SnapshotAvailable}}<div class="meta-card">` +
 			`{{if .SubLabel}}<div class="meta-card-header">Tracked</div>` +
-			`<div style="display:flex;gap:0.75rem;align-items:center">` +
-			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:80px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--green)">` +
-			`<span style="font-size:var(--text-sm);color:var(--green);font-weight:600">{{.SubLabel}}</span>` +
+			`<div class="tracked-row">` +
+			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" class="detect-crop-thumb detect-crop-thumb--tracked">` +
+			`<span class="tracked-name">{{.SubLabel}}</span>` +
 			`</div>` +
 			`{{else}}<div class="meta-card-header">Identify</div>` +
-			`<div style="display:flex;gap:0.75rem;margin-bottom:0.5rem;align-items:center">` +
-			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" style="width:64px;height:auto;border-radius:var(--radius-sm);border:2px solid var(--accent)">` +
+			`<div class="identify-row">` +
+			`<img src="/api/events/{{.ID}}/detection-crop" alt="detection" class="detect-crop-thumb detect-crop-thumb--identify">` +
+			`<label for="identify-search" class="sr-only">Search or add {{.Label}} identity</label>` +
 			`<input type="text" id="identify-search" class="person-name-input" placeholder="Search or add new {{.Label}}..." ` +
-			`style="flex:1;padding:0.5rem 0.7rem;font-size:var(--text-sm)" ` +
 			`data-action-input="filterIdentifyResults(this.value)" ` +
 			`data-identify-enter-id="{{.ID}}" data-identify-enter-label="{{.Label}}">` +
 			`</div>` +
 			`<div id="identify-grid" data-event-id="{{.ID}}" data-label="{{.Label}}"></div>` +
 			`{{end}}` +
 			`</div>{{end}}` +
-			`<div class="event-nav">` +
-			`{{if .PrevID}}<a href="/event.html?id={{.PrevID}}" class="btn" data-prev-id="{{.PrevID}}">&#8592; Previous</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">&#8592; Previous</span>{{end}}` +
-			`{{if .NextID}}<a href="/event.html?id={{.NextID}}" class="btn" data-next-id="{{.NextID}}">Next &#8594;</a>{{else}}<span class="btn" style="opacity:0.3;pointer-events:none">Next &#8594;</span>{{end}}` +
-			`</div>` +
 			`</div>` +
 			`</div>`))
 
