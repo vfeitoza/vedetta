@@ -1570,6 +1570,8 @@ function togglePause() {
 }
 
 function seekToLive() {
+  if (playbackMode) { returnToLive(); return; } // exit playback fully, then live
+  restoreTimelineFollow();
   var video = el('live-video');
   if (!video || video.classList.contains('hidden')) return;
   resumedFromPause = 0; // re-enable auto-seek
@@ -1974,8 +1976,7 @@ function updateFullscreenIcon() {
 function initTimeline() {
   if (!timelineDate) timelineDate = new Date();
   updateTimelineDate();
-  updatePlayheadToNow();
-  fetchTimelineData();
+  fetchTimelineData('init');
   startPlayheadAnimation();
 
   const track = el('timeline-track');
@@ -2210,6 +2211,16 @@ function initTimeline() {
   window.addEventListener('resize', function() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function() {
+      var track = el('timeline-track');
+      var widthPx = track ? track.offsetWidth : 0;
+      var pointerFine = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+      var wide = TLW.isWideTimeline(widthPx, pointerFine);
+      if (lastWideResult !== null && wide !== lastWideResult) {
+        resetViewForViewport(); // viewport-cross: re-default
+      } else if (!userAdjustedView) {
+        resetViewForViewport();
+      }
+      lastWideResult = wide;
       renderWaveform();
       renderMinimap();
       renderMinimapOverlays();
@@ -2321,14 +2332,14 @@ function timelineNav(delta) {
   timelineDate.setDate(timelineDate.getDate() + delta);
   updateTimelineDate();
   updatePlayheadToNow();
-  fetchTimelineData();
+  fetchTimelineData('daychange');
 }
 
 function timelineToday() {
   timelineDate = new Date();
   updateTimelineDate();
   updatePlayheadToNow();
-  fetchTimelineData();
+  fetchTimelineData('daychange');
 }
 
 function updateTimelineDate() {
@@ -2376,7 +2387,27 @@ function updatePlayheadToNow() {
   setMinimapPlayhead(sec, true);
 }
 
-function fetchTimelineData() {
+// Recompute the default window for the current viewport. Called only for
+// reset-worthy triggers (see TLW.shouldResetView) and the resize no-adjust path.
+function resetViewForViewport() {
+  var track = el('timeline-track');
+  var widthPx = track ? track.offsetWidth : 0;
+  var pointerFine = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+  var wide = TLW.isWideTimeline(widthPx, pointerFine);
+  lastWideResult = wide;
+
+  var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
+  var now = new Date();
+  var nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  var latest = (mergedBlocks.length > 0) ? mergedBlocks[mergedBlocks.length - 1].end : null;
+
+  var d = TLW.defaultWindow({ wide: wide, isToday: isToday, nowSec: nowSec, latestActivitySec: latest });
+  timelineWin = TLW.makeWindow(d.start, d.end);
+  followLive = d.followLive;
+  userAdjustedView = false;
+}
+
+function fetchTimelineData(trigger) {
   var name = getCameraName();
   if (!name) return;
 
@@ -2394,10 +2425,12 @@ function fetchTimelineData() {
       cachedActivity = data.activity || [];
       cachedTimelineEvents = data.events || [];
       prepareTimelineModel(cachedActivity, cachedTimelineEvents, cachedSegments);
+      if (TLW.shouldResetView(trigger)) resetViewForViewport();
       renderWaveform();
       renderMinimap();
       renderMinimapOverlays();
       renderAxisLabels();
+      updatePlayheadToNow();
     })
     .catch(function(err) {
       console.error('Timeline fetch error:', err);
@@ -2756,6 +2789,15 @@ function startPlayback(timestamp) {
   toast('Playing recording from ' + timestamp.toLocaleTimeString());
 }
 
+// Re-default the timeline window for the current viewport (the 'return-live'
+// trigger). resetViewForViewport (run in the fetch .then) sets followLive
+// itself via defaultWindow - true on mobile-today, false on desktop - so we do
+// NOT pre-set followLive here; doing so caused a brief window jump on desktop
+// while the fetch was in flight. Called by both live controls; safe anytime.
+function restoreTimelineFollow() {
+  fetchTimelineData('return-live');
+}
+
 function returnToLive() {
   cleanupPlaybackHls();
   var video = el('live-video');
@@ -2781,6 +2823,7 @@ function returnToLive() {
   updatePlayheadToNow();
 
   toast('Returned to live view');
+  restoreTimelineFollow();
 }
 
 function updatePlaybackUI() {
@@ -4916,7 +4959,7 @@ function onTimelineDatePick(input) {
   timelineDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   updateTimelineDate();
   updatePlayheadToNow();
-  fetchTimelineData();
+  fetchTimelineData('daychange');
 }
 
 // ─── WebRTC Auto-Reconnect ───
