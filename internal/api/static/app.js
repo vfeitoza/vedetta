@@ -2172,7 +2172,7 @@ function commitSeekToSecond(sec) {
     // Seek landed far from any recording. If we were playing back, exit playback
     // fully (returnToLive restores follow + window). Otherwise we are already
     // live: just move the playhead to now (parity with the original behavior).
-    // We deliberately do NOT force-resume follow here — a stray empty-space tap
+    // We deliberately do NOT force-resume follow here - a stray empty-space tap
     // should not yank a user who has panned into the past back to live; the LIVE
     // button (or zooming back) is the explicit "resume follow" affordance.
     if (playbackMode) { returnToLive(); return; }
@@ -2214,8 +2214,8 @@ function setSeekAria(sec) {
 }
 
 // Position (or hide) the minimap playhead overlay in full-day coordinates.
-// el() returns null until the minimap markup lands in Task 8, so this is a
-// harmless no-op until then.
+// el() returns null when the minimap markup is absent, so this is a harmless
+// no-op until that markup exists.
 function setMinimapPlayhead(sec, show) {
   var pl = el('timeline-minimap-playhead');
   if (!pl) return;
