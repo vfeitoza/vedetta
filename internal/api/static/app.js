@@ -4526,8 +4526,8 @@ function startPlayheadAnimation() {
 
     // Live-follow: keep the window pinned ahead of "now". Recompute + re-render
     // only when the second ticks over, not every RAF frame.
-    if (followLive && isToday && Math.floor(nowSec) !== lastFollowSec) {
-      lastFollowSec = Math.floor(nowSec);
+    if (followLive && isToday && nowSec !== lastFollowSec) {
+      lastFollowSec = nowSec;
       timelineWin = TLW.followLiveWindow(nowSec, timelineWin.end - timelineWin.start);
       scheduleTimelineRender();
     }
@@ -4553,6 +4553,10 @@ function startPlayheadAnimation() {
           playhead.style.display = 'none';
         }
         setMinimapPlayhead(nowSec, true);
+      } else if (playhead) {
+        // Past date: there is no live "now" on this day; keep the playhead hidden
+        // every frame (not just on the date-change call) so it never lingers.
+        playhead.style.display = 'none';
       }
 
       // Refresh segments every 30s so blue bars stay current. This MUST NOT
