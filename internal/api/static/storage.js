@@ -105,6 +105,10 @@ function renderSummaryCards({ recording, snapshots }) {
   $("#storage-roots").textContent = roots;
 }
 
+function camDisplayName(slug) {
+  return slug.replace(/[_-]/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
 function renderCameraTable(cameras) {
   const body = $("#camera-table-body");
   if (!cameras.length) {
@@ -115,18 +119,19 @@ function renderCameraTable(cameras) {
   }
   body.innerHTML = "";
   for (const c of cameras) {
+    const displayName = camDisplayName(c.name);
     const tr = document.createElement("tr");
     tr.className = "storage-cam-row";
     tr.innerHTML = `
       <td class="storage-cam-name">${esc(c.name)}</td>
       <td class="num mono">${fmtBytes(c.segment_bytes)}</td>
       <td class="num mono">${fmtBytes(c.clip_bytes)}</td>
-      <td class="mono">${c.oldest_segment ? esc(c.oldest_segment.slice(0,10)) : "-"}</td>
+      <td class="mono oldest-cell">${c.oldest_segment ? esc(c.oldest_segment.slice(0,10)) : "-"}</td>
       <td class="num mono">${fmtBytes(c.last_7d_bytes)}</td>
       <td class="storage-actions">
-        <button class="btn btn-xs btn-secondary" data-action="older" data-camera="${esc(c.name)}" data-days="${c.effective_retain_days}">Older than ${c.effective_retain_days}d</button>
-        <button class="btn btn-xs btn-secondary" data-action="range" data-camera="${esc(c.name)}">Range…</button>
-        <button class="btn btn-xs btn-danger" data-action="clips" data-camera="${esc(c.name)}">All clips</button>
+        <button class="btn btn-xs btn-secondary" data-action="older" data-camera="${esc(c.name)}" data-days="${c.effective_retain_days}" aria-label="Delete segments older than ${c.effective_retain_days} days for ${esc(displayName)}">Older than ${c.effective_retain_days}d</button>
+        <button class="btn btn-xs btn-secondary" data-action="range" data-camera="${esc(c.name)}" aria-label="Delete date range for ${esc(displayName)}">Date range...</button>
+        <button class="btn btn-xs btn-danger" data-action="clips" data-camera="${esc(c.name)}" aria-label="Delete all clips for ${esc(displayName)}">All clips</button>
       </td>
     `;
     body.appendChild(tr);
