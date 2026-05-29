@@ -184,6 +184,9 @@ func TestDisplayName(t *testing.T) {
 		{"", ""},
 		{"a_b_c", "A B C"},
 		{"already", "Already"},
+		{"kids_bedroom_1", "Kids Bedroom 1"},
+		{"front-door", "Front Door"},
+		{"reolink-front", "Reolink Front"},
 	}
 	for _, tt := range tests {
 		got := displayName(tt.input)

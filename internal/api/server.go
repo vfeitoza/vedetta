@@ -681,7 +681,9 @@ func formatBytes(bytes int64) string {
 }
 
 func displayName(name string) string {
-	parts := strings.Split(name, "_")
+	// Replace hyphens with underscores so both separators split uniformly.
+	normalized := strings.ReplaceAll(name, "-", "_")
+	parts := strings.Split(normalized, "_")
 	for i, p := range parts {
 		if len(p) > 0 {
 			parts[i] = strings.ToUpper(p[:1]) + p[1:]
