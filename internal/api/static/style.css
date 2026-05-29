@@ -1710,6 +1710,22 @@ input, select { font-family: inherit; }
   .timeline-labels span { transition: none !important; }
 }
 
+/* Discoverability hint shown below the timeline header until the user
+   first interacts with the timeline. JS sets display:none once dismissed
+   and persists the decision in localStorage. */
+.timeline-hint {
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  text-align: right;
+  margin-bottom: 0.375rem;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+.timeline-hint.hint-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 
 /* ─── Buttons ─── */
 .btn {

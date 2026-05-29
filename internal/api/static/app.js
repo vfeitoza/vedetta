@@ -2290,6 +2290,37 @@ function initTimeline() {
       updatePlayheadToNow();
     }, 200);
   });
+
+  // Show zoom/pan hint until the user first interacts with the timeline.
+  initTimelineHint();
+}
+
+// Show a one-time hint in the timeline header explaining zoom/pan gestures.
+// Dismissed on first user interaction; dismissed state persisted in localStorage.
+function initTimelineHint() {
+  var hint = el('timeline-hint');
+  if (!hint) return;
+  if (localStorage.getItem('timeline:hintseen') === '1') { hint.style.display = 'none'; return; }
+
+  var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  hint.textContent = coarse ? 'Pinch to zoom - drag to pan' : 'Scroll to zoom - drag to pan';
+
+  function dismissHint() {
+    localStorage.setItem('timeline:hintseen', '1');
+    hint.classList.add('hint-hidden');
+    setTimeout(function() { hint.style.display = 'none'; }, 400);
+    var track = el('timeline-track');
+    if (track) track.removeEventListener('pointerdown', dismissHint);
+    var mini = el('timeline-minimap');
+    if (mini) mini.removeEventListener('pointerdown', dismissHint);
+    document.removeEventListener('wheel', dismissHint);
+  }
+
+  var track = el('timeline-track');
+  if (track) track.addEventListener('pointerdown', dismissHint, { once: true });
+  var mini = el('timeline-minimap');
+  if (mini) mini.addEventListener('pointerdown', dismissHint, { once: true });
+  document.addEventListener('wheel', dismissHint, { once: true, passive: true });
 }
 
 var lastScrubEvent = null;
