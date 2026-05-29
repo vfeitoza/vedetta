@@ -3206,7 +3206,16 @@ function renderRecordingsSummary(data, date) {
       var totalSec = pct * 86400;
       var h = Math.floor(totalSec / 3600);
       var m = Math.floor((totalSec % 3600) / 60);
-      cursorTime.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+      var timeStr = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+      // Check whether the cursor position falls inside a recorded block.
+      var covered = blocks.some(function(b) { return totalSec >= b.start && totalSec <= b.end; });
+      if (covered) {
+        cursorTime.textContent = timeStr;
+        cursorTime.classList.remove('rec-coverage-cursor-time--gap');
+      } else {
+        cursorTime.textContent = timeStr + ' – No recording';
+        cursorTime.classList.add('rec-coverage-cursor-time--gap');
+      }
     });
 
     barWrap.addEventListener('mouseleave', function() {

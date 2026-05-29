@@ -1962,6 +1962,11 @@ input, select { font-family: inherit; }
   margin-bottom: 4px;
 }
 
+.rec-coverage-cursor-time--gap {
+  color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+}
+
 /* Coverage labels */
 .rec-coverage-labels {
   display: flex;
