@@ -5071,6 +5071,18 @@ kbd {
   #run-cleanup-btn { width: 100%; }
 }
 
+@media (max-width: 600px) {
+  /* Hide the Event clips (col 3) and Oldest (col 4) columns to fit the
+     camera table on narrow phones. Camera, Segments, Last 7d and
+     Actions remain visible. Desktop layout is not affected. */
+  .storage-table th:nth-child(3),
+  .storage-table th:nth-child(4),
+  .storage-cam-row td:nth-child(3),
+  .storage-cam-row td:nth-child(4) {
+    display: none;
+  }
+}
+
 /* Add Camera flow */
 .addcam-steps > [data-step] { display: none; }
 .addcam-steps[data-active="scan"]    [data-step="scan"],
