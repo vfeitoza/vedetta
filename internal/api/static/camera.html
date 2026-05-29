@@ -576,9 +576,10 @@
       const name = new URLSearchParams(location.search).get('name');
       if (!name) { location.href = '/'; return; }
 
-      document.getElementById('camera-title').textContent = name.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-      document.getElementById('cam-breadcrumb').textContent = name;
-      document.title = name + ' - Vedetta';
+      var displayName = name.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      document.getElementById('camera-title').textContent = displayName;
+      document.getElementById('cam-breadcrumb').textContent = displayName;
+      document.title = displayName + ' - Vedetta';
 
       // Verify the camera exists before starting the live view. A 404 means the
       // slug is unknown — replace the viewport with a not-found panel and skip
