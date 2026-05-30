@@ -37,6 +37,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.5](https://github.com/rvben/vedetta/compare/v0.7.4...v0.7.5) - 2026-05-30
+
+### Added
+
+- **ui**: play recording segments inline on the recordings page ([b764246](https://github.com/rvben/vedetta/commit/b76424654243302b0cf52fe8840f24dfa90af1b0))
+- **ui**: add keyboard hint title to timeline track ([efab281](https://github.com/rvben/vedetta/commit/efab28184f7c0fd289c1fef18cd2db336a0a157b))
+- **ui**: humanize camera name in breadcrumb and title ([16fcbf6](https://github.com/rvben/vedetta/commit/16fcbf6a3deba6eb476403d2911b778d15553ab9))
+- **ui**: set initial timeline slider aria value on load ([aa1714f](https://github.com/rvben/vedetta/commit/aa1714f832b9866a48a245e49fe4e27eb71db2ba))
+- **ui**: add zoom in/out buttons to the timeline ([7edc8c0](https://github.com/rvben/vedetta/commit/7edc8c0d6525fc967ddae0da766071645671ed50))
+- **ui**: add discoverability hint for timeline zoom/pan ([8be6b73](https://github.com/rvben/vedetta/commit/8be6b737d64bbbc18da7bb078ff7190e54a90d9a))
+- **ui**: improve setup wizard accessibility and add back navigation ([fb528c0](https://github.com/rvben/vedetta/commit/fb528c0ff5b7fa7138920c560c51a85031400193))
+- **ui**: improve login accessibility (live errors, password toggle, focus, copy) ([d979792](https://github.com/rvben/vedetta/commit/d9797925a93bc1cd3c1280df1aed4ea443550328))
+- **ui**: event detail UX improvements - label, a11y, layout, styles ([5ec8fa6](https://github.com/rvben/vedetta/commit/5ec8fa637f3d960aab7ea802e605464411fc2b0e))
+- **ui**: title-case detection label in document title ([c299f65](https://github.com/rvben/vedetta/commit/c299f6543efea1cf4bdf2e843e515616a7309cf8))
+- **ui**: show snapshot poster while event clip buffers ([59da90c](https://github.com/rvben/vedetta/commit/59da90cea717c726abdf0aafdafbce12b2f11dfb))
+- **ui**: expose dashboard view-toggle state via aria-pressed ([31e4981](https://github.com/rvben/vedetta/commit/31e4981617c4fd9a32c5e79421635c86d7754319))
+- **ui**: humanize camera names and labels on dashboard cards ([3bda680](https://github.com/rvben/vedetta/commit/3bda680025f959dc5e48b87bfc6b3476d12aa015))
+- **ui**: add page title and skip-to-content link to dashboard ([e4539e6](https://github.com/rvben/vedetta/commit/e4539e635d775d4e68134f6ff2c311c37f3023d6))
+- **ui**: add empty and loading states to recordings ([3157418](https://github.com/rvben/vedetta/commit/3157418bdbae004850d6d9ccb6eaa26c0b7faca1))
+- **ui**: show total coverage duration on recordings segment toggle ([915acf9](https://github.com/rvben/vedetta/commit/915acf96207b84cb59405f03e6b04545f8d919bc))
+- **ui**: explain recording gaps on the coverage timeline ([6bb1db4](https://github.com/rvben/vedetta/commit/6bb1db46f8bcd4836f4a25c9470da5942967207d))
+- **ui**: add accessible names and roles to recordings controls ([b2a3bea](https://github.com/rvben/vedetta/commit/b2a3beafcd5d69585f9ea9338e755a9774a1a7ca))
+- **ui**: flag duplicate people, show last-seen, handle empty thumbnails ([c89d842](https://github.com/rvben/vedetta/commit/c89d8428b2f423b3471ba3f5fa0e4b59ddf57b03))
+- **ui**: disambiguate duplicate objects and label confirm modal ([7862209](https://github.com/rvben/vedetta/commit/7862209263dd6f4c5031fce9ac7e0fa44cbca81d))
+- **ui**: make object/person thumbnails keyboard-accessible ([e84398d](https://github.com/rvben/vedetta/commit/e84398d77980a3efe4eed0cd5939b2bb9d9b0cbd))
+- **ui**: add accessible names to editable name fields ([bc83b23](https://github.com/rvben/vedetta/commit/bc83b2317bbaf109ab6559c7e6c970b33976e799))
+- **ui**: make editable name fields visibly editable ([a886b82](https://github.com/rvben/vedetta/commit/a886b82c8bc59b437d2fcbed586f5eb60da88767))
+- **ui**: add unit hints and busy state to settings controls ([99cdeb4](https://github.com/rvben/vedetta/commit/99cdeb4403aeeece4396d0cf3e68553e9c30669a))
+- **ui**: announce settings save status via aria-live ([626b0ef](https://github.com/rvben/vedetta/commit/626b0efad1260e1d03c718f39c02be9bb83662d0))
+- **ui**: associate labels with settings form controls ([5bf170c](https://github.com/rvben/vedetta/commit/5bf170c6499bfc1ade150f2ea0141684f9f10d44))
+- **ui**: add relative oldest-time and loading state to storage ([cc1a42b](https://github.com/rvben/vedetta/commit/cc1a42b87a9dd00951145a508630cbf83bba7fd4))
+- **ui**: show visible tooltips on storage usage spark bars ([eef4c51](https://github.com/rvben/vedetta/commit/eef4c51e38ee6eb587c5e825ca4765001f7403ef))
+- **ui**: label storage action buttons with camera context ([27f0e0d](https://github.com/rvben/vedetta/commit/27f0e0d1c2eb479af369f0bdcc64142c93804a8e))
+- **ui**: add disk capacity gauge and total to storage page ([7dacfc2](https://github.com/rvben/vedetta/commit/7dacfc2c7bbfd4e9a4d8685921ad22d09ec0a58e))
+- **ui**: add loading skeletons and end-of-list signal to events ([2285748](https://github.com/rvben/vedetta/commit/228574825fa7691f8666689fb529b28368a46509))
+- **ui**: color event confidence badge by score ([2d0f2ec](https://github.com/rvben/vedetta/commit/2d0f2ecec0d8b82d5325fb460423bb2a10a1445f))
+- **ui**: expose filter chip selected state via aria-pressed ([1b22b48](https://github.com/rvben/vedetta/commit/1b22b48fbf19502d9e677c6f7a013717f816836c))
+- **ui**: humanize camera names and event thumbnail alt text ([94fae87](https://github.com/rvben/vedetta/commit/94fae87b2b13e6c80dccade3a0f27c506c8c5555))
+- **api**: add displayName template helper for humanizing slugs ([d3b0b7f](https://github.com/rvben/vedetta/commit/d3b0b7f447a71e1ed8d33b07488318640d511e1e))
+- **ui**: ensure visible focus ring on all focusable controls ([c514f70](https://github.com/rvben/vedetta/commit/c514f701ac1b02e70bbeb3a623cd56646f88b329))
+- **ui**: reveal hover-only controls on touch devices ([1419d21](https://github.com/rvben/vedetta/commit/1419d21e77705d82c175fb58e65a27c6c37303a2))
+- **ui**: enlarge small controls to 44px on touch devices ([3c687a7](https://github.com/rvben/vedetta/commit/3c687a746c5044413271de7a85e73895cf752f00))
+- **ui**: minimap tap-to-recenter and drag-to-pan ([eae94cd](https://github.com/rvben/vedetta/commit/eae94cd76108cff5718ab04b6a3dd14a7d472881))
+- **ui**: keyboard control and aria values for timeline slider ([1b83db2](https://github.com/rvben/vedetta/commit/1b83db2dedf9096444fb4e2bc3b00a3850e0a8ca))
+- **ui**: viewport-aware timeline defaults + live-follow + LIVE wiring ([9e89184](https://github.com/rvben/vedetta/commit/9e89184faecc4693e92c56520eaf575f4641a524))
+- **ui**: pointer-event zoom/pan/tap gestures on timeline track ([2d98d5a](https://github.com/rvben/vedetta/commit/2d98d5a8712a6ea0440c6a07f8e48dc9a15d36b4))
+- **ui**: add timeline minimap and dynamic axis labels ([f2e30dd](https://github.com/rvben/vedetta/commit/f2e30dd29fdc3c3e9541c5cc627772cff33c8297))
+- **ui**: add timeline-window event, coverage, and seek helpers ([979b40c](https://github.com/rvben/vedetta/commit/979b40c0663dc7001b52b413003caf4ddf88c941))
+- **ui**: add timeline-window tick + snap-tolerance helpers ([68cab72](https://github.com/rvben/vedetta/commit/68cab722dfc97c196dbc6c9f836c5fd730c346bc))
+- **ui**: add timeline-window default/viewport/reset helpers ([ad0917a](https://github.com/rvben/vedetta/commit/ad0917a9381f7e781376f6f6d1829fdb1438d500))
+- **ui**: add timeline-window zoom/pan/follow helpers ([a351b2a](https://github.com/rvben/vedetta/commit/a351b2a06b00ce9cd6880012565deb3209bac3ca))
+- **ui**: add timeline-window math module (core mapping) ([54a148d](https://github.com/rvben/vedetta/commit/54a148d180ca65d80a3972a0c2b5e9eb1d0e5ef7))
+
+### Fixed
+
+- **ui**: use hyphens instead of en/em dashes in recordings and people labels ([d9ce148](https://github.com/rvben/vedetta/commit/d9ce148c5e20b6ef62f31e7098a3184b80493f82))
+- **ui**: suppress detection overlay and keep snapshot until live video has a frame ([d05cd3e](https://github.com/rvben/vedetta/commit/d05cd3ed664a755cdefdeab17f82e9158322c9f6))
+- **ui**: stack storage per-camera actions on mobile to stop overflow ([67ed307](https://github.com/rvben/vedetta/commit/67ed307170295470b8b55fdacde273bd40ad54ae))
+- **ui**: let vertical page scroll pass through the timeline minimap ([8406116](https://github.com/rvben/vedetta/commit/84061164a962bb5513e59594bddbcc408d2613f8))
+- **ui**: stop lone camera tile from stretching full width ([a621e5d](https://github.com/rvben/vedetta/commit/a621e5d112ce90613ee55969465a9d4e73a2c1bb))
+- **ui**: make recordings segment rows usable on narrow viewports ([abcfc58](https://github.com/rvben/vedetta/commit/abcfc586be12262930e8ccb8fe5603ff49452201))
+- **ui**: wrap page header on mobile and label page sections ([d6f231d](https://github.com/rvben/vedetta/commit/d6f231dac6ded078ad99ab4e131de29eb27dcbea))
+- **ui**: align settings mobile breakpoint and prevent horizontal overflow ([fa340ae](https://github.com/rvben/vedetta/commit/fa340aed2548c16ea2d3a34f32584f13d853c0c4))
+- **ui**: make storage per-camera table usable on narrow viewports ([3bf147e](https://github.com/rvben/vedetta/commit/3bf147e15e6919683631e104cf4174ab9d3f6cda))
+- **ui**: wrap events legend on narrow viewports ([1f4e7ab](https://github.com/rvben/vedetta/commit/1f4e7ab0c74e2d5e4cd1d7865184f879f325c15c))
+- **ui**: show human-readable durations in settings ([68b4494](https://github.com/rvben/vedetta/commit/68b449463b1918e4517921e8622eabce88bf86fa))
+- **ui**: make event-detail breadcrumb time match the metadata card ([6f1c8e5](https://github.com/rvben/vedetta/commit/6f1c8e5fdafff04aa9c0fe852740390f0ba30646))
+- **ui**: use defined tokens for setup config-readonly error styling ([eb26417](https://github.com/rvben/vedetta/commit/eb26417cef41cb211f8dca39b20ecdc7787a6a1c))
+- **ui**: keep object filter active during events infinite scroll ([cc03758](https://github.com/rvben/vedetta/commit/cc03758732dd4c765df991e83dc1c21fd604bf48))
+- **ui**: move event duration badge to top-left to stop overlap with label ([db0c611](https://github.com/rvben/vedetta/commit/db0c611bb04ae07eb628c96fc177aec2ea328be6))
+- **ui**: raise tertiary-text contrast to meet WCAG AA ([d9db85e](https://github.com/rvben/vedetta/commit/d9db85e71bcdb6f50692a376e380b6573ae9e37e))
+- **ui**: correct pan-start jump, playback-during-pan, and multi-pointer edge cases ([5b0925a](https://github.com/rvben/vedetta/commit/5b0925a776ca8aa2626f85ead45a678aa9fa4a44))
+- **ui**: hide timeline playhead on past dates each frame; simplify live-follow gate ([ab4a63b](https://github.com/rvben/vedetta/commit/ab4a63b025b37fc6dd9687eca96deb40f47e9e80))
+- **ui**: align live snapshot backdrop sizing with foreground transports ([f881b7c](https://github.com/rvben/vedetta/commit/f881b7c27a9121a2aa7e41fc5042557f416e78ee))
+
+### Performance
+
+- **ui**: lazy-load object/person thumbnails ([f6c115d](https://github.com/rvben/vedetta/commit/f6c115d355cf29bcf9c05687586d40e8c16d0f47))
+- **ui**: load settings sections concurrently ([09f68ad](https://github.com/rvben/vedetta/commit/09f68ad079a661929ce11e1f87261271038e999c))
+
 ## [0.7.4](https://github.com/rvben/vedetta/compare/v0.7.3...v0.7.4) - 2026-05-28
 
 ### Added
