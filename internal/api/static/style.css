@@ -5282,15 +5282,80 @@ kbd {
 }
 
 @media (max-width: 600px) {
-  /* Hide the Event clips (col 3) and Oldest (col 4) columns to fit the
-     camera table on narrow phones. Camera, Segments, Last 7d and
-     Actions remain visible. Desktop layout is not affected. */
-  .storage-table th:nth-child(3),
-  .storage-table th:nth-child(4),
+  /* Reflow the per-camera usage table into stacked cards so nothing
+     overflows the viewport on narrow phones. Desktop layout (> 600px)
+     is not affected. */
+
+  /* Make table elements blocklike so CSS can position each cell freely. */
+  .storage-table,
+  .storage-table tbody,
+  .storage-cam-row,
+  .storage-spark-row {
+    display: block;
+    width: 100%;
+  }
+
+  /* Column headers are redundant in card form; hide them. */
+  .storage-table thead {
+    display: none;
+  }
+
+  /* Each data row becomes a card with a flex layout:
+     - Camera name spans full width (order 1)
+     - Segments and Last 7d sit side-by-side on the next line (order 2)
+     - Actions wrap below on their own line (order 3) */
+  .storage-cam-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.5rem;
+    padding: 0.6rem 0;
+    border-bottom: none;
+  }
+
+  /* Camera name: full row, visually prominent label. */
+  .storage-cam-row td.storage-cam-name {
+    flex: 0 0 100%;
+    padding: 0 0 0.15rem;
+    font-weight: 600;
+  }
+
+  /* Hide Event clips (col 3) and Oldest (col 4) - not useful on mobile. */
   .storage-cam-row td:nth-child(3),
   .storage-cam-row td:nth-child(4) {
     display: none;
   }
+
+  /* Segments (col 2) and Last 7d (col 5): show with a data-label prefix
+     so the value is self-describing without the hidden thead. */
+  .storage-cam-row td:nth-child(2),
+  .storage-cam-row td:nth-child(5) {
+    flex: 0 0 auto;
+    padding: 0 0.5rem 0 0;
+    text-align: left;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+  }
+
+  .storage-cam-row td:nth-child(2)::before { content: "Segs: "; color: var(--text-tertiary); }
+  .storage-cam-row td:nth-child(5)::before { content: "7d: ";   color: var(--text-tertiary); }
+
+  /* Actions cell: occupy the full width so the three buttons can wrap
+     naturally without ever spilling past the viewport edge. */
+  .storage-cam-row td.storage-actions {
+    flex: 0 0 100%;
+    justify-content: flex-start;
+    padding: 0.35rem 0 0;
+  }
+
+  /* Spark row: single full-width cell, keep existing bottom border. */
+  .storage-spark-row td {
+    display: block;
+    padding: 0.25rem 0 0.75rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .storage-spark-row:last-child td { border-bottom: none; }
 }
 
 /* Add Camera flow */
