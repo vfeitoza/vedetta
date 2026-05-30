@@ -1014,8 +1014,20 @@ function startMSE() {
       currentStream = 'mse';
       mseReconnectAttempts = 0;
       resetDegradedBackoff();
-      // Remove snapshot fallback — live video is now playing.
-      if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+      // Keep the snapshot backdrop visible until the first decoded video frame
+      // arrives so the user sees the last-known image rather than a black void
+      // during the codec-to-first-frame window. loadeddata fires once the
+      // browser has decoded enough data to present the first frame.
+      var mseSnapshotCleared = false;
+      function clearMseSnapshotBackdrop() {
+        if (mseSnapshotCleared) return;
+        mseSnapshotCleared = true;
+        if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+      }
+      video.addEventListener('loadeddata', function onMseFirstFrame() {
+        video.removeEventListener('loadeddata', onMseFirstFrame);
+        clearMseSnapshotBackdrop();
+      }, { once: true });
       hideStreamConnecting();
       updateStreamButtons();
       updateMuteButton(codecStr.indexOf('mp4a') !== -1);
@@ -1033,7 +1045,7 @@ function startMSE() {
         if (currentStream === 'mse' && v && v.videoWidth === 0 && v.videoHeight === 0) {
           console.warn('MSE produced no video frames, falling back to WebRTC');
           cleanupMSE();
-          if (viewport) { viewport.style.backgroundImage = ''; viewport.classList.remove('live-snapshot-fallback'); }
+          clearMseSnapshotBackdrop();
           startWebRTC();
         }
       }, MSE_WATCHDOG_TIMEOUT_MS);
@@ -4519,6 +4531,34 @@ function drawBoxOverlay() {
   var canvas = boxOverlayState.canvas;
   var frame = boxOverlayState.frame;
   if (!ctx || !canvas) return;
+
+  // Suppress boxes while the live video has no decoded frames yet. This
+  // prevents boxes from floating over a black/connecting video on cold start.
+  // The guard targets the <video> element only: if it is visible (not hidden)
+  // but videoWidth is 0, the transport is still connecting and no frame has
+  // been decoded. Once the first real frame arrives videoWidth becomes non-zero
+  // and the overlay draws normally on every subsequent RAF tick.
+  // MJPEG/snapshot transports hide live-video, so the check does not affect
+  // them. Recording playback sets currentStream=null so SSE detections are
+  // already suppressed by the 3s staleness cutoff; this guard is belt-and-
+  // suspenders for the live connecting window only.
+  var liveVideo = boxOverlayState.video;
+  if (liveVideo && !liveVideo.classList.contains('hidden') && liveVideo.videoWidth === 0) {
+    var rect0 = boxOverlayRenderRect();
+    if (rect0) {
+      var dpr0 = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(rect0.parentW * dpr0) || canvas.height !== Math.round(rect0.parentH * dpr0)) {
+        canvas.width = Math.round(rect0.parentW * dpr0);
+        canvas.height = Math.round(rect0.parentH * dpr0);
+        canvas.style.width = rect0.parentW + 'px';
+        canvas.style.height = rect0.parentH + 'px';
+      }
+      ctx.setTransform(dpr0, 0, 0, dpr0, 0, 0);
+      ctx.clearRect(0, 0, rect0.parentW, rect0.parentH);
+    }
+    return;
+  }
+
   var rect = boxOverlayRenderRect();
   if (!rect) return;
 
