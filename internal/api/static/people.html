@@ -516,7 +516,7 @@
         var html = '';
         _unmatchedFaces.forEach(function(f, i) {
           var faceTime = new Date(f.timestamp).toLocaleString();
-          html += '<div class="unid-card" role="button" tabindex="0" data-action-click="openFaceModal(' + i + ')" aria-label="Identify face from ' + escapeAttr(f.camera || 'unknown camera') + ', ' + escapeAttr(faceTime) + '" title="' + escapeAttr((f.camera || '') + ' — ' + faceTime) + '">'
+          html += '<div class="unid-card" role="button" tabindex="0" data-action-click="openFaceModal(' + i + ')" aria-label="Identify face from ' + escapeAttr(f.camera || 'unknown camera') + ', ' + escapeAttr(faceTime) + '" title="' + escapeAttr((f.camera || '') + ' - ' + faceTime) + '">'
             + '<div class="face-thumb-tile" data-bg="/api/faces/' + f.id + '/crop"></div>'
             + '</div>';
         });
@@ -569,7 +569,7 @@
         var html = '';
         unidentified.forEach(function(ev) {
           var time = new Date(ev.timestamp).toLocaleString();
-          html += '<div class="unid-card" role="button" tabindex="0" data-event-id="' + escapeAttr(ev.id) + '" data-action-click="selectUnidentified(this, ' + jsStringArg(ev.id) + ')" aria-label="Identify person from ' + escapeAttr(ev.camera) + ', ' + escapeAttr(time) + '" title="' + escapeAttr(ev.camera) + ' — ' + escapeAttr(time) + '">'
+          html += '<div class="unid-card" role="button" tabindex="0" data-event-id="' + escapeAttr(ev.id) + '" data-action-click="selectUnidentified(this, ' + jsStringArg(ev.id) + ')" aria-label="Identify person from ' + escapeAttr(ev.camera) + ', ' + escapeAttr(time) + '" title="' + escapeAttr(ev.camera) + ' - ' + escapeAttr(time) + '">'
             + '<div class="face-thumb-tile" data-bg="/api/events/' + encodeURIComponent(ev.id) + '/detection-crop"></div>'
             + '<button class="unid-dismiss" data-action-click="event.stopPropagation();dismissAppearance(' + jsStringArg(ev.id) + ',this.parentElement)" aria-label="Ignore this appearance" title="Ignore">&times;</button>'
             + '</div>';

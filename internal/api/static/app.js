@@ -3300,7 +3300,7 @@ function renderRecordingsSummary(data, date) {
         cursorTime.textContent = timeStr;
         cursorTime.classList.remove('rec-coverage-cursor-time--gap');
       } else {
-        cursorTime.textContent = timeStr + ' – No recording';
+        cursorTime.textContent = timeStr + ' - No recording';
         cursorTime.classList.add('rec-coverage-cursor-time--gap');
       }
     });
@@ -3332,7 +3332,7 @@ function renderRecordingsSummary(data, date) {
     toggle.setAttribute('aria-expanded', 'false');
     toggle.innerHTML =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
-      cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '') + ' – ' + covStr;
+      cam.segments.length + ' segment' + (cam.segments.length !== 1 ? 's' : '') + ' - ' + covStr;
 
     var segList = document.createElement('div');
     segList.className = 'rec-segment-list hidden';
@@ -3350,7 +3350,7 @@ function renderRecordingsSummary(data, date) {
 
       var timeSpan = document.createElement('span');
       timeSpan.className = 'rec-seg-time';
-      timeSpan.textContent = startLocal + ' – ' + endLocal;
+      timeSpan.textContent = startLocal + ' - ' + endLocal;
 
       var durSpan = document.createElement('span');
       durSpan.className = 'rec-seg-dur';
