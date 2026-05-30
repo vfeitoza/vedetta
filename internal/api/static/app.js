@@ -3347,14 +3347,49 @@ function renderRecordingsSummary(data, date) {
 
       var row = document.createElement('div');
       row.className = 'rec-segment-row';
-      row.innerHTML =
-        '<span class="rec-seg-time">' + startLocal + ' – ' + endLocal + '</span>' +
-        '<span class="rec-seg-dur">' + durStr + '</span>' +
-        '<span class="rec-seg-size">' + formatBytesJS(seg.size_bytes) + '</span>' +
-        '<span class="rec-seg-actions">' +
-          '<a href="/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(seg.start_time) + '" class="btn btn-sm" title="Play ' + startLocal + '-' + endLocal + '" aria-label="Play ' + startLocal + '-' + endLocal + '">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg></a>' +
-        '</span>';
+
+      var timeSpan = document.createElement('span');
+      timeSpan.className = 'rec-seg-time';
+      timeSpan.textContent = startLocal + ' – ' + endLocal;
+
+      var durSpan = document.createElement('span');
+      durSpan.className = 'rec-seg-dur';
+      durSpan.textContent = durStr;
+
+      var sizeSpan = document.createElement('span');
+      sizeSpan.className = 'rec-seg-size';
+      sizeSpan.textContent = formatBytesJS(seg.size_bytes);
+
+      var actionsSpan = document.createElement('span');
+      actionsSpan.className = 'rec-seg-actions';
+
+      // Primary: play inline (button, no page navigation)
+      var playBtn = document.createElement('button');
+      playBtn.className = 'btn btn-sm';
+      playBtn.title = 'Play ' + startLocal + '-' + endLocal + ' inline';
+      playBtn.setAttribute('aria-label', 'Play ' + startLocal + '-' + endLocal + ' inline');
+      playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+      (function(camName, startIso, label) {
+        playBtn.addEventListener('click', function() {
+          openInlinePlayer(camName, startIso, label);
+        });
+      })(cam.name, seg.start_time, humanizeName(cam.name) + ' · ' + startLocal + '-' + endLocal);
+
+      // Secondary: open full camera page
+      var camLink = document.createElement('a');
+      camLink.href = '/camera.html?name=' + encodeURIComponent(cam.name) + '&t=' + encodeURIComponent(seg.start_time);
+      camLink.className = 'btn btn-sm btn-ghost';
+      camLink.title = 'Open in camera view';
+      camLink.setAttribute('aria-label', 'Open ' + startLocal + ' in camera view');
+      camLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+
+      actionsSpan.appendChild(playBtn);
+      actionsSpan.appendChild(camLink);
+
+      row.appendChild(timeSpan);
+      row.appendChild(durSpan);
+      row.appendChild(sizeSpan);
+      row.appendChild(actionsSpan);
       segList.appendChild(row);
     });
 
@@ -3369,6 +3404,139 @@ function renderRecordingsSummary(data, date) {
     card.appendChild(segList);
     cardsContainer.appendChild(card);
   });
+}
+
+// ─── Inline Recording Player ───
+var _inlinePlayerHls = null;
+var _inlinePlayerTrigger = null;
+
+function _mountInlinePlayerModal() {
+  if (document.getElementById('inline-player-modal')) return;
+  var html =
+    '<div class="inline-player-backdrop" id="inline-player-backdrop"></div>' +
+    '<div class="inline-player-modal" id="inline-player-modal" role="dialog" aria-modal="true" aria-labelledby="inline-player-cam-label">' +
+      '<div class="inline-player-header">' +
+        '<div class="inline-player-title">' +
+          '<span class="inline-player-cam" id="inline-player-cam-label"></span>' +
+          '<span class="inline-player-time" id="inline-player-time-label"></span>' +
+        '</div>' +
+        '<div class="inline-player-header-actions">' +
+          '<a id="inline-player-open-cam" class="btn btn-sm btn-ghost" title="Open in camera view" aria-label="Open in camera view">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
+            '<span style="margin-left:0.25rem;font-size:var(--text-xs)">Camera</span>' +
+          '</a>' +
+          '<button class="btn btn-icon btn-ghost" id="inline-player-close" aria-label="Close player">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="inline-player-body">' +
+        '<video id="inline-player-video" class="inline-player-video" controls playsinline></video>' +
+      '</div>' +
+    '</div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('inline-player-backdrop').addEventListener('click', closeInlinePlayer);
+  document.getElementById('inline-player-close').addEventListener('click', closeInlinePlayer);
+}
+
+function _cleanupInlinePlayerHls() {
+  if (_inlinePlayerHls) {
+    _inlinePlayerHls.destroy();
+    _inlinePlayerHls = null;
+  }
+  var video = document.getElementById('inline-player-video');
+  if (video) {
+    video.pause();
+    video.src = '';
+    video.load();
+    video.onerror = null;
+    video.onloadedmetadata = null;
+  }
+}
+
+function openInlinePlayer(cameraName, startIso, displayLabel) {
+  _mountInlinePlayerModal();
+
+  var url = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback.m3u8?start=' + encodeURIComponent(startIso);
+
+  // Update header labels
+  var parts = (displayLabel || '').split(' · ');
+  document.getElementById('inline-player-cam-label').textContent = parts[0] || humanizeName(cameraName);
+  document.getElementById('inline-player-time-label').textContent = parts[1] || '';
+  var camLink = document.getElementById('inline-player-open-cam');
+  if (camLink) camLink.href = '/camera.html?name=' + encodeURIComponent(cameraName) + '&t=' + encodeURIComponent(startIso);
+
+  _cleanupInlinePlayerHls();
+
+  var video = document.getElementById('inline-player-video');
+  if (!video) return;
+
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    var hls = new Hls({
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120,
+      maxBufferSize: 60 * 1000 * 1000,
+      maxBufferHole: 0.5,
+    });
+    _inlinePlayerHls = hls;
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      video.play().catch(function() {});
+    });
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response && data.response.code === 404) {
+          toast('No recording found for this time', 'error');
+        } else {
+          toast('Playback error: ' + data.details, 'error');
+        }
+        hls.destroy();
+        _inlinePlayerHls = null;
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari / iOS: native HLS
+    video.src = url;
+    video.autoplay = true;
+    video.onerror = function() {
+      video.onerror = null;
+      toast('No recording found for this time', 'error');
+    };
+    video.onloadedmetadata = function() {
+      video.play().catch(function() {});
+    };
+  } else {
+    toast('HLS playback not supported in this browser', 'error');
+    return;
+  }
+
+  var backdrop = document.getElementById('inline-player-backdrop');
+  var modal = document.getElementById('inline-player-modal');
+  backdrop.classList.add('open');
+  modal.classList.add('open');
+
+  // Focus the close button so keyboard users can immediately dismiss or tab into controls
+  _inlinePlayerTrigger = document.activeElement;
+  var closeBtn = document.getElementById('inline-player-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeInlinePlayer() {
+  var backdrop = document.getElementById('inline-player-backdrop');
+  var modal = document.getElementById('inline-player-modal');
+  if (!backdrop || !modal) return;
+
+  _cleanupInlinePlayerHls();
+
+  backdrop.classList.remove('open');
+  modal.classList.remove('open');
+
+  // Return focus to the trigger that opened the player
+  if (_inlinePlayerTrigger && typeof _inlinePlayerTrigger.focus === 'function') {
+    _inlinePlayerTrigger.focus();
+    _inlinePlayerTrigger = null;
+  }
 }
 
 // ─── Keyboard Shortcuts ───
@@ -3436,7 +3604,9 @@ document.addEventListener('keydown', function(e) {
       break;
     }
     case 'Escape':
-      if (el('add-camera-modal') && el('add-camera-modal').classList.contains('open')) {
+      if (el('inline-player-modal') && el('inline-player-modal').classList.contains('open')) {
+        closeInlinePlayer();
+      } else if (el('add-camera-modal') && el('add-camera-modal').classList.contains('open')) {
         if (typeof closeAddCameraModal === 'function') closeAddCameraModal();
       } else if (el('account-modal') && el('account-modal').classList.contains('open')) {
         closeAccountModal();
