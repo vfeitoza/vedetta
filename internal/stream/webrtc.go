@@ -147,6 +147,33 @@ func (p *peerState) classifyInbound(pkt *rtp.Packet) {
 	}
 }
 
+// clearParamSetMarker returns a packet whose RTP marker bit is cleared when pkt
+// is a parameter-set NAL (SPS type 7 / PPS type 8) that arrived with marker=1.
+//
+// Some cameras (notably Tapo) set marker=1 on every packet of an access unit,
+// including the SPS/PPS NALs that precede the IDR slice. Chrome's H.264
+// depacketizer treats marker=1 as "end of access unit" and assembles each into
+// a separate frame; the SPS/PPS frames carry no slice data so the decoder
+// silently rejects every keyframe and framesDecoded stays at 0. RFC 6184 §5.1
+// specifies the marker bit MUST be set only on the final RTP packet of an
+// access unit, and parameter-set NALs are never that. Clearing their marker bit
+// makes Chrome assemble SPS+PPS+IDR into a single frame.
+//
+// pkt is the single clone shared by all fan-out consumers, so this never
+// mutates it: when an adjustment is needed it returns a shallow copy (the
+// payload backing array is shared read-only), otherwise it returns pkt as-is.
+func clearParamSetMarker(pkt *rtp.Packet) *rtp.Packet {
+	if !pkt.Marker || len(pkt.Payload) == 0 {
+		return pkt
+	}
+	if nalType := pkt.Payload[0] & 0x1f; nalType != 7 && nalType != 8 {
+		return pkt
+	}
+	cp := *pkt
+	cp.Marker = false
+	return &cp
+}
+
 func (p *peerState) writeVideo(pkt *rtp.Packet) error {
 	p.mu.Lock()
 	needsParams := false
@@ -181,19 +208,9 @@ func (p *peerState) writeVideo(pkt *rtp.Packet) error {
 		nalType = pkt.Payload[0] & 0x1f
 	}
 
-	// Some cameras (notably Tapo) set marker=1 on every packet of an access
-	// unit, including the SPS and PPS NALs that precede the IDR slice.
-	// Chrome's H.264 depacketizer treats marker=1 as "end of access unit"
-	// and assembles each into a separate frame; the SPS/PPS frames have no
-	// slice data so the decoder silently rejects every keyframe and
-	// framesDecoded stays at 0. RFC 6184 §5.1 specifies the marker bit
-	// MUST be set only on the final RTP packet of an access unit, and
-	// parameter-set NALs are never the final NAL of a decodable access
-	// unit. Clearing their marker bit makes Chrome assemble SPS+PPS+IDR
-	// into a single frame and decoding starts working.
-	if (nalType == 7 || nalType == 8) && pkt.Marker {
-		pkt.Marker = false
-	}
+	// Clear the marker bit on parameter-set NALs for this peer's output. This
+	// must not mutate the shared fan-out clone, so it may return a copy.
+	pkt = clearParamSetMarker(pkt)
 
 	if needsParams {
 		if err := p.video.write(buildNALPacket(pkt, p.sps)); err != nil {
