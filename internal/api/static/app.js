@@ -4023,7 +4023,7 @@ function initGridSnapshotStates() {
     if (preview.dataset.snapInit) return;
     preview.dataset.snapInit = '1';
 
-    var name = img.alt;
+    var name = card.getAttribute('data-camera-name');
     if (!name) return;
 
     // Caption offline tiles immediately from the server-rendered timestamp so
@@ -4072,7 +4072,7 @@ function refreshGridSnapshots() {
         var preview = card.querySelector('.cam-preview');
         var img = card.querySelector('.cam-preview img');
         if (!img) return;
-        var name = img.alt;
+        var name = card.getAttribute('data-camera-name');
         var cam = statusMap[name];
         if (!cam) return;
 
