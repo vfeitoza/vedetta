@@ -42,6 +42,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.10](https://github.com/rvben/vedetta/compare/v0.7.9...v0.7.10) - 2026-06-02
+
+### Added
+
+- tier events as alert or detection so parked vehicles are low priority ([19a9d64](https://github.com/rvben/vedetta/commit/19a9d64be081a581a8efbcf29894d0bd7b94c728))
+
+### Fixed
+
+- address review findings on event tiering and re-ID ([0cccb68](https://github.com/rvben/vedetta/commit/0cccb68a55e36317b9953d2d0b8e7489fa2f98a8))
+- **detect**: assign only the best-matching known object and raise re-ID threshold ([a43df09](https://github.com/rvben/vedetta/commit/a43df09127ab1f67b0266a669d2af772976216a8))
+
 ## [0.7.9](https://github.com/rvben/vedetta/compare/v0.7.8...v0.7.9) - 2026-06-02
 
 ### Added
