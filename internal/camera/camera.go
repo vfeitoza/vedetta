@@ -104,6 +104,9 @@ type Camera struct {
 	motionActivity       chan<- MotionActivity
 	motionBucketTime     time.Time
 	motionBucketMax      float64
+	// lastDetectAt is when detection (YOLO) last ran. Accessed only on the
+	// detect goroutine; drives periodic re-confirmation of stationary objects.
+	lastDetectAt time.Time
 
 	mu               sync.RWMutex
 	rawFrame         []byte // RGB24 frame data, guarded by mu
@@ -636,11 +639,26 @@ func (c *Camera) processFrame(buf []byte, w, h int) {
 			break
 		}
 	}
+	// Run YOLO on qualifying motion, or periodically re-confirm a parked object
+	// even without motion. A purely motion-gated detector never re-detects a
+	// parked car during a long quiet window, so its track ages out and
+	// re-detects as a NEW track, firing a duplicate event; re-confirmation keeps
+	// it a single tracked object for its whole dwell (cf. Frigate's stationary
+	// interval). The cheap interval check short-circuits before the track scan.
+	now := time.Now()
+	runDetection := qualifiedMotion
+	if !runDetection && now.Sub(c.lastDetectAt) >= stationaryReconfirmInterval && c.tracker.HasStationaryConfirmed() {
+		runDetection = true
+	}
+
 	var detections []detect.Detection
-	if qualifiedMotion {
-		c.mu.Lock()
-		c.lastMotion = time.Now()
-		c.mu.Unlock()
+	if runDetection {
+		if qualifiedMotion {
+			c.mu.Lock()
+			c.lastMotion = now
+			c.mu.Unlock()
+		}
+		c.lastDetectAt = now
 		yoloStart := time.Now()
 		detections = c.detector.DetectRGB24(buf, w, h)
 		metrics.YOLOInferenceDuration.Observe(c.config.Name, time.Since(yoloStart))
@@ -923,6 +941,14 @@ func (c *Camera) emitEventEnd(ee EventEnd) {
 // be considered online. Picked to span ~50+ frame intervals at our slowest
 // detect FPS, so brief RTSP reconnects don't flap the online flag, while a
 // camera that has truly stopped delivering frames flips within a few seconds.
+// stationaryReconfirmInterval is how often the motion-gated detect loop re-runs
+// detection on a camera that has a confirmed stationary object, even without
+// qualifying motion. This keeps a parked object's track alive (one event for
+// its whole dwell) the way Frigate's stationary interval does, instead of
+// letting it age out during a quiet window and re-fire as a new event. It is
+// well under the stationary disappearance budget, so the track never expires.
+const stationaryReconfirmInterval = 30 * time.Second
+
 const onlineFreshness = 15 * time.Second
 
 // cachedSnapshotLoadTimeout bounds the cached-snapshot read so a stalled

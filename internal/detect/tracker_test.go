@@ -786,6 +786,42 @@ func TestTracker_ParkedVanThenLeavesDemotesAtProductionDefaults(t *testing.T) {
 	}
 }
 
+// TestTracker_HasStationaryConfirmed drives the motion-gated detect loop's
+// re-confirmation decision: the loop periodically re-runs detection on parked
+// objects (like Frigate's stationary interval) so their tracks do not age out
+// during quiet windows and re-fire as new events. The signal must be true only
+// when a confirmed track is currently classified as stationary.
+func TestTracker_HasStationaryConfirmed(t *testing.T) {
+	empty := NewTracker(30, 1)
+	if empty.HasStationaryConfirmed() {
+		t.Fatal("empty tracker must report no stationary confirmed tracks")
+	}
+
+	// A moving (confirmed) object must NOT count as stationary.
+	moving := NewTracker(30, 1)
+	for i := 0; i < 6; i++ {
+		moving.Update([]Detection{{Label: "person", Score: 0.9, Box: [4]int{100 + 20*i, 100, 200 + 20*i, 200}}})
+	}
+	if moving.HasStationaryConfirmed() {
+		t.Error("a moving confirmed object must not be reported as stationary")
+	}
+
+	// A parked van promotes to stationary and must be reported.
+	parked := NewTracker(30, 1)
+	a := [4]int{0, 840, 720, 1440}
+	b := [4]int{0, 900, 780, 1440}
+	for i := 0; i < 14; i++ {
+		box := a
+		if i%2 == 1 {
+			box = b
+		}
+		parked.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+	}
+	if !parked.HasStationaryConfirmed() {
+		t.Error("a parked, promoted vehicle must be reported as stationary confirmed")
+	}
+}
+
 // TestTracker_NewTracker_HasReasonableStationaryDefaults: the default
 // constructor (used by camera.go) must enable stationary preservation
 // with sensible values — otherwise the production fix is a no-op.

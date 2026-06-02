@@ -273,6 +273,20 @@ func (t *Tracker) effectiveMaxDisappeared(tr *track) int {
 	return t.maxDisappeared
 }
 
+// HasStationaryConfirmed reports whether any confirmed track is currently
+// classified as stationary. A motion-gated detect loop uses this to decide
+// whether to periodically re-run detection during quiet periods: re-confirming
+// a parked object keeps it a single tracked object (one event) for its whole
+// dwell instead of letting it age out and re-detect as a new track.
+func (t *Tracker) HasStationaryConfirmed() bool {
+	for _, tr := range t.tracks {
+		if tr.state == TrackConfirmed && tr.lastWasStationary {
+			return true
+		}
+	}
+	return false
+}
+
 // DeletedTracks returns tracks that were just marked deleted in the last Update call.
 func (t *Tracker) DeletedTracks() []TrackedObject {
 	var result []TrackedObject
