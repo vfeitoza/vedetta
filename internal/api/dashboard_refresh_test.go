@@ -102,3 +102,49 @@ func TestGridRefreshIsMotionAdaptive(t *testing.T) {
 			"(gridLastSnap) to gate idle cameras across ticks")
 	}
 }
+
+// gridFnBody returns the source of a top-level app.js function declaration,
+// bounded by the next top-level `function ` declaration.
+func gridFnBody(t *testing.T, js, fn string) string {
+	t.Helper()
+	marker := "function " + fn + "("
+	start := strings.Index(js, marker)
+	if start < 0 {
+		t.Fatalf("function %s not found in app.js", fn)
+	}
+	rest := js[start+len(marker):]
+	if end := strings.Index(rest, "\nfunction "); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// TestGridSnapshotUsesRawCameraName is the regression guard for the
+// "blank camera tiles after a restart" bug: the grid snapshot URL and the
+// /api/cameras status lookup must use the RAW camera name from the card's
+// data-camera-name attribute, never img.alt.
+//
+// img.alt is the display name plus " camera" (e.g. "Garage camera"), so
+// deriving the snapshot name from it requests /api/cameras/Garage%20camera/
+// snapshot (404) and looks up statusMap["Garage camera"] (miss), which makes
+// refreshGridSnapshots return for every tile. The grid then never recovers
+// after the warmup 503 that follows a restart, and every preview stays blank.
+func TestGridSnapshotUsesRawCameraName(t *testing.T) {
+	js := appJS(t)
+
+	imgAlt := regexp.MustCompile(`\bimg\.alt\b`)
+	for _, fn := range []string{"initGridSnapshotStates", "refreshGridSnapshots"} {
+		body := gridFnBody(t, js, fn)
+
+		if !strings.Contains(body, "data-camera-name") {
+			t.Fatalf("%s must resolve the camera name from the card's "+
+				"data-camera-name attribute (the raw name) so snapshot URLs and "+
+				"status lookups use the real camera name", fn)
+		}
+		if imgAlt.MatchString(body) {
+			t.Fatalf("%s must not derive the camera name from img.alt; img.alt is "+
+				"the display name plus \" camera\" (e.g. \"Garage camera\"), which "+
+				"404s the snapshot endpoint and misses the status map", fn)
+		}
+	}
+}
