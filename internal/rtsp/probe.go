@@ -46,16 +46,23 @@ func Probe(ctx context.Context, rawURL string) (ProbeResult, error) {
 		DialContext: netguard.Dialer(0).DialContext,
 	}
 
+	// Start() only initializes client state and spawns the internal run loop; it
+	// does not dial, so calling it synchronously here cannot block on the
+	// network. Doing so guarantees the client is fully initialized before any
+	// Close(), which closes the data race between Close() (timeout path) and a
+	// concurrent Start() in the probe goroutine. The dial and DESCRIBE happen on
+	// the goroutine below and stay bounded by ctx: on timeout the deferred
+	// Close() cancels the client, which interrupts an in-flight Describe.
+	if err := client.Start(); err != nil {
+		return result, err
+	}
+	defer client.Close()
+
 	done := make(chan error, 1)
 	var desc *description.Session
 	go func() {
-		if err := client.Start(); err != nil {
-			done <- err
-			return
-		}
 		d, _, err := client.Describe(u)
 		if err != nil {
-			client.Close()
 			done <- err
 			return
 		}
@@ -65,14 +72,12 @@ func Probe(ctx context.Context, rawURL string) (ProbeResult, error) {
 
 	select {
 	case <-ctx.Done():
-		client.Close()
 		return result, ctx.Err()
 	case err := <-done:
 		if err != nil {
 			return result, err
 		}
 	}
-	defer client.Close()
 
 	for _, media := range desc.Medias {
 		for _, forma := range media.Formats {
