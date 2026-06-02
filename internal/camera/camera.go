@@ -470,8 +470,13 @@ func (c *Camera) readFrames(ctx context.Context) {
 		c.detectConsumer = nil
 		c.mu.Unlock()
 	}()
-	defer source.RemoveConsumer(consumer)
+	// Unregister from the source before releasing decoder resources so the
+	// fan-out stops delivering to this consumer first. Close still fences any
+	// in-flight OnVideoRTP via the consumer's decMu, but removing first narrows
+	// the window. Deferred calls run LIFO, so Close is registered before
+	// RemoveConsumer to make RemoveConsumer run first.
 	defer consumer.Close()
+	defer source.RemoveConsumer(consumer)
 
 	// Attach snapshot consumer to the main (high-res) stream for event snapshots
 	c.startSnapshotConsumer(ctx)

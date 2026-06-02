@@ -27,6 +27,12 @@ type DetectConsumer struct {
 	height int
 	camera string
 
+	// decMu guards the lifecycle and use of the decoders against Close.
+	// OnVideoRTP runs on the RTSP fan-out goroutine while Close runs on the
+	// camera's readFrames goroutine. Without this, Close frees the OpenH264 C
+	// decoder (h264Dec) while OnVideoRTP is still using it - a use-after-free
+	// inside the C library that corrupts the Go heap.
+	decMu       sync.Mutex
 	h264Decoder *rtph264.Decoder
 	h264Dec     *H264Decoder
 	sps         []byte
@@ -121,8 +127,11 @@ func (dc *DetectConsumer) Frames() <-chan RawFrame {
 	return dc.frameCh
 }
 
-// Close releases decoder resources.
+// Close releases decoder resources. It blocks until any in-flight OnVideoRTP
+// decode finishes, so the OpenH264 C decoder is never freed while in use.
 func (dc *DetectConsumer) Close() {
+	dc.decMu.Lock()
+	defer dc.decMu.Unlock()
 	if dc.h264Dec != nil {
 		dc.h264Dec.Close()
 		dc.h264Dec = nil
@@ -132,6 +141,12 @@ func (dc *DetectConsumer) Close() {
 // OnVideoRTP processes a video RTP packet, decoding frames to RGB24 after the
 // first random-access unit has initialized decoder state.
 func (dc *DetectConsumer) OnVideoRTP(pkt *rtp.Packet) {
+	// Hold decMu for the whole call so Close cannot free the OpenH264 C decoder
+	// mid-decode. OnVideoRTP is single-goroutine in production (the RTSP fan-out
+	// goroutine), so this is uncontended except against Close at teardown.
+	dc.decMu.Lock()
+	defer dc.decMu.Unlock()
+
 	if dc.h264Decoder == nil || dc.h264Dec == nil {
 		return
 	}
