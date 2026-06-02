@@ -142,7 +142,8 @@ func (c OpenH264Config) ShouldAutoInstall() bool {
 type CameraConfig struct {
 	Name          string                    `yaml:"name"`
 	URL           string                    `yaml:"url"`
-	RecordURL     string                    `yaml:"record_url"` // Separate high-res stream for recording (optional, defaults to URL)
+	RecordURL     string                    `yaml:"record_url"`     // Separate high-res stream for recording (optional, defaults to URL)
+	RTSPTransport string                    `yaml:"rtsp_transport"` // RTSP lower transport: "tcp" (default), "udp", or "auto". UDP avoids the TCP-interleaving desync some cameras cause on high-bitrate streams.
 	Detect        DetectStreamConfig        `yaml:"detect"`
 	Record        StreamConfig              `yaml:"record"`
 	Zones         []Zone                    `yaml:"zones"`
@@ -577,6 +578,14 @@ func Load(path string) (*Config, error) {
 		}
 		if cam.URL == "" {
 			return nil, fmt.Errorf("camera %q: url is required", cam.Name)
+		}
+		switch cam.RTSPTransport {
+		case "":
+			cam.RTSPTransport = "tcp"
+		case "tcp", "udp", "auto":
+			// valid
+		default:
+			return nil, fmt.Errorf("camera %q: rtsp_transport must be tcp, udp, or auto (got %q)", cam.Name, cam.RTSPTransport)
 		}
 		if cam.Detect.Width == 0 {
 			cam.Detect.Width = 640

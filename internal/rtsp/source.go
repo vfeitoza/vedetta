@@ -20,6 +20,12 @@ import (
 // Source wraps a gortsplib RTSP client, providing reconnection and consumer fan-out.
 type Source struct {
 	url string
+	// transport selects the RTSP lower transport: "tcp", "udp", or "auto"
+	// (empty defaults to tcp). UDP carries RTP/RTCP on their own sockets, which
+	// avoids the TCP-interleaving desync some cameras trigger on high-bitrate
+	// streams when they emit oversized RTCP packets on the shared control
+	// connection.
+	transport string
 
 	mu         sync.RWMutex
 	consumers  []Consumer
@@ -80,9 +86,33 @@ func (s *Source) SimulateReconnectForTest() {
 	s.notifyDisconnect()
 }
 
-// NewSource creates a new RTSP source for the given URL.
+// NewSource creates a new RTSP source for the given URL using the default
+// (TCP) transport.
 func NewSource(url string) *Source {
-	return &Source{url: url, paramsReady: make(chan struct{})}
+	return NewSourceWithTransport(url, "")
+}
+
+// NewSourceWithTransport creates a new RTSP source with an explicit lower
+// transport ("tcp", "udp", or "auto"; empty defaults to tcp).
+func NewSourceWithTransport(url, transport string) *Source {
+	return &Source{url: url, transport: transport, paramsReady: make(chan struct{})}
+}
+
+// protocolFor maps a configured transport string to a gortsplib protocol.
+// "udp" and "tcp" pin the transport; "auto" (nil) lets gortsplib negotiate
+// (UDP first, TCP fallback). Empty or unrecognized values default to TCP,
+// preserving the historical behavior.
+func protocolFor(transport string) *gortsplib.Protocol {
+	switch transport {
+	case "udp":
+		p := gortsplib.ProtocolUDP
+		return &p
+	case "auto":
+		return nil
+	default: // "tcp" and anything unrecognized
+		p := gortsplib.ProtocolTCP
+		return &p
+	}
 }
 
 // signalParamsReadyLocked closes paramsReady the first time the video track has
@@ -277,11 +307,10 @@ func (s *Source) connectOnce(ctx context.Context) error {
 		return err
 	}
 
-	proto := gortsplib.ProtocolTCP
 	client := &gortsplib.Client{
 		Scheme:   u.Scheme,
 		Host:     u.Host,
-		Protocol: &proto,
+		Protocol: protocolFor(s.transport),
 	}
 
 	if err := client.Start(); err != nil {

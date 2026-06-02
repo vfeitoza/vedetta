@@ -470,7 +470,7 @@ func (c *Camera) readFrames(ctx context.Context) {
 	h := c.config.Detect.Height
 	fps := c.config.Detect.FPS
 
-	source := c.hub.GetOrCreate(c.config.URL)
+	source := c.hub.GetOrCreateWithTransport(c.config.URL, c.config.RTSPTransport)
 
 	// Wait for the source to connect and provide track info
 	var videoTrack *rtsp.TrackInfo
@@ -546,7 +546,7 @@ func (c *Camera) startSnapshotConsumer(ctx context.Context) {
 		return
 	}
 
-	mainSource := c.hub.GetOrCreate(recordURL)
+	mainSource := c.hub.GetOrCreateWithTransport(recordURL, c.config.RTSPTransport)
 
 	// Wait briefly for track info (main stream may already be connected for recording)
 	var videoTrack *rtsp.TrackInfo

@@ -7,8 +7,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bluenviron/gortsplib/v5"
 	"github.com/pion/rtp"
 )
+
+func TestProtocolFor(t *testing.T) {
+	tcp := gortsplib.ProtocolTCP
+	udp := gortsplib.ProtocolUDP
+	cases := []struct {
+		in   string
+		want *gortsplib.Protocol
+	}{
+		{"tcp", &tcp},
+		{"udp", &udp},
+		{"auto", nil}, // nil lets gortsplib negotiate (UDP first, TCP fallback)
+		{"", &tcp},    // unset preserves the historical forced-TCP behavior
+		{"bogus", &tcp},
+	}
+	for _, c := range cases {
+		got := protocolFor(c.in)
+		if c.want == nil {
+			if got != nil {
+				t.Errorf("protocolFor(%q) = %v, want nil (auto)", c.in, *got)
+			}
+			continue
+		}
+		if got == nil || *got != *c.want {
+			t.Errorf("protocolFor(%q) = %v, want %v", c.in, got, *c.want)
+		}
+	}
+}
 
 // mockConsumer records calls to OnVideoRTP, OnAudioRTP, OnDisconnect.
 type mockConsumer struct {

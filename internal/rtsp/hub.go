@@ -72,8 +72,18 @@ func NewHub(ctx context.Context) *Hub {
 	}
 }
 
-// GetOrCreate returns the Source for the given URL, creating and connecting it if needed.
+// GetOrCreate returns the Source for the given URL using the default (TCP)
+// transport, creating and connecting it if needed.
 func (h *Hub) GetOrCreate(url string) *Source {
+	return h.GetOrCreateWithTransport(url, "")
+}
+
+// GetOrCreateWithTransport returns the Source for the given URL, creating and
+// connecting it with the given lower transport ("tcp", "udp", or "auto"; empty
+// defaults to tcp) if it does not already exist. The transport is applied only
+// at creation; because the Hub shares one Source per URL, an existing Source
+// keeps the transport it was first created with.
+func (h *Hub) GetOrCreateWithTransport(url, transport string) *Source {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -81,7 +91,7 @@ func (h *Hub) GetOrCreate(url string) *Source {
 		return ms.source
 	}
 
-	src := NewSource(url)
+	src := NewSourceWithTransport(url, transport)
 	srcCtx, srcCancel := context.WithCancel(h.ctx)
 	for _, sink := range h.reconnectSinks[url] {
 		src.AddReconnectSink(sink)

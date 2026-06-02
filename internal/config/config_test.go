@@ -202,6 +202,51 @@ cameras:
 	}
 }
 
+func TestLoadRTSPTransport(t *testing.T) {
+	t.Run("defaults to tcp when unset", func(t *testing.T) {
+		cfg, err := Load(writeConfig(t, `
+cameras:
+  - name: front
+    url: rtsp://192.168.1.10/stream
+`))
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got := cfg.Cameras[0].RTSPTransport; got != "tcp" {
+			t.Errorf("rtsp_transport default = %q, want %q", got, "tcp")
+		}
+	})
+
+	for _, transport := range []string{"tcp", "udp", "auto"} {
+		t.Run("accepts "+transport, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, `
+cameras:
+  - name: front
+    url: rtsp://192.168.1.10/stream
+    rtsp_transport: `+transport+`
+`))
+			if err != nil {
+				t.Fatalf("Load() error for %q: %v", transport, err)
+			}
+			if got := cfg.Cameras[0].RTSPTransport; got != transport {
+				t.Errorf("rtsp_transport = %q, want %q", got, transport)
+			}
+		})
+	}
+
+	t.Run("rejects invalid transport", func(t *testing.T) {
+		_, err := Load(writeConfig(t, `
+cameras:
+  - name: front
+    url: rtsp://192.168.1.10/stream
+    rtsp_transport: quic
+`))
+		if err == nil {
+			t.Fatal("expected error for invalid rtsp_transport, got nil")
+		}
+	})
+}
+
 func TestLoadMultipleCameras(t *testing.T) {
 	path := writeConfig(t, `
 cameras:
