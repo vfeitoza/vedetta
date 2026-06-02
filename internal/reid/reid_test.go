@@ -70,6 +70,36 @@ func TestBestMatch_NoCandidates(t *testing.T) {
 	}
 }
 
+func TestBestMatch_PerCandidateThresholdPicksBestThatClearsOwnThreshold(t *testing.T) {
+	embedding := []float32{1, 0, 0}
+	candidates := []Candidate{
+		// Higher similarity (0.8) but its own stricter threshold rejects it.
+		{ID: 10, Centroid: []float32{0.8, 0.6, 0}, Threshold: 0.95},
+		// Lower similarity (0.6) but clears its own lenient threshold.
+		{ID: 20, Centroid: []float32{0.6, 0.8, 0}, Threshold: 0.5},
+	}
+	id, sim := BestMatch(embedding, candidates, 0.99)
+	if id != 20 {
+		t.Errorf("id = %d, want 20 (best among candidates clearing their own threshold)", id)
+	}
+	if sim < 0.59 || sim > 0.61 {
+		t.Errorf("sim = %v, want ~0.6", sim)
+	}
+}
+
+func TestBestMatch_ZeroCandidateThresholdUsesDefault(t *testing.T) {
+	embedding := []float32{1, 0, 0}
+	candidates := []Candidate{
+		{ID: 10, Centroid: []float32{0.8, 0.6, 0}}, // Threshold 0 -> use default; sim 0.8
+	}
+	if id, _ := BestMatch(embedding, candidates, 0.9); id != 0 {
+		t.Errorf("id = %d, want 0 (sim 0.8 below default 0.9)", id)
+	}
+	if id, _ := BestMatch(embedding, candidates, 0.7); id != 10 {
+		t.Errorf("id = %d, want 10 (sim 0.8 clears default 0.7)", id)
+	}
+}
+
 func TestBlendCentroid_EmptyOldReturnsNewUnchanged(t *testing.T) {
 	newEmb := []float32{0.5, 0.5}
 	got := BlendCentroid(nil, newEmb, 0.3)

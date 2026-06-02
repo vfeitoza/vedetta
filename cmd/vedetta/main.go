@@ -1499,36 +1499,48 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 		return nil
 	}
 
-	var matched []string
+	candidates := make([]reid.Candidate, 0, len(knownObjects))
 	for _, obj := range knownObjects {
 		centroid := detect.BytesToFloat32(obj.Centroid)
 		if len(centroid) == 0 {
 			continue
 		}
-		objThreshold := threshold
+		c := reid.Candidate{ID: obj.ID, Centroid: centroid}
 		if obj.MatchThreshold != nil {
-			objThreshold = *obj.MatchThreshold
+			c.Threshold = *obj.MatchThreshold
 		}
-		sim := detect.CosineSimilarity(embedding, centroid)
-		if sim >= objThreshold {
-			if _, err := db.SaveObjectSighting(storage.ObjectSighting{
-				EventID:    event.ID,
-				Camera:     event.CameraName,
-				ObjectID:   obj.ID,
-				Similarity: sim,
-				Timestamp:  event.Timestamp,
-			}); err != nil {
-				slog.Error("failed to save object sighting", "error", err)
-			} else {
-				matched = append(matched, obj.Name)
-				_ = db.UpdateEventObjectName(event.ID, obj.Name)
-				_ = db.UpdateEventSubLabel(event.ID, obj.Name)
-				slog.Info("object recognized", "object", obj.Name, "event", event.ID,
-					"similarity", fmt.Sprintf("%.3f", sim))
-			}
-		}
+		candidates = append(candidates, c)
 	}
-	return matched
+
+	// A detection is a single physical object, so assign at most the single
+	// best-matching known object (highest similarity that clears its
+	// threshold), not every object above the threshold. This prevents a
+	// look-alike vehicle from being labeled with a named object's identity.
+	bestID, sim := reid.BestMatch(embedding, candidates, threshold)
+	if bestID == 0 {
+		return nil
+	}
+	for _, obj := range knownObjects {
+		if obj.ID != bestID {
+			continue
+		}
+		if _, err := db.SaveObjectSighting(storage.ObjectSighting{
+			EventID:    event.ID,
+			Camera:     event.CameraName,
+			ObjectID:   obj.ID,
+			Similarity: sim,
+			Timestamp:  event.Timestamp,
+		}); err != nil {
+			slog.Error("failed to save object sighting", "error", err)
+			return nil
+		}
+		_ = db.UpdateEventObjectName(event.ID, obj.Name)
+		_ = db.UpdateEventSubLabel(event.ID, obj.Name)
+		slog.Info("object recognized", "object", obj.Name, "event", event.ID,
+			"similarity", fmt.Sprintf("%.3f", sim))
+		return []string{obj.Name}
+	}
+	return nil
 }
 
 func cooldownKey(event camera.Event) string {

@@ -391,7 +391,7 @@ func Defaults() *Config {
 	return &Config{
 		Detect: DetectConfig{
 			ScoreThreshold:       0.65,
-			ObjectMatchThreshold: 0.65,
+			ObjectMatchThreshold: 0.75,
 			Motion: MotionConfig{
 				PixelThreshold:  25,
 				MinArea:         200,

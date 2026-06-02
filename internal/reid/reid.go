@@ -15,12 +15,22 @@ type Candidate struct {
 	ID       int64
 	Centroid []float32
 	Ignore   bool
+	// Threshold is a per-candidate cosine-similarity minimum. When zero the
+	// caller's default threshold applies. A known object can set a stricter
+	// value to avoid being matched to look-alikes (e.g. one parked car vs.
+	// another of the same make/color).
+	Threshold float64
 }
 
-// BestMatch returns the ID and cosine similarity of the candidate most similar
-// to embedding, but only when that similarity meets threshold. Candidates that
-// are ignored or have an empty centroid are skipped. When nothing qualifies it
-// returns (0, 0).
+// BestMatch returns the ID and cosine similarity of the most-similar candidate
+// that clears its effective threshold (its own Threshold when set, otherwise
+// the default threshold). Candidates that are ignored or have an empty centroid
+// are skipped. When nothing qualifies it returns (0, 0).
+//
+// Selecting the best among those that pass (rather than gating the global best)
+// is what makes per-candidate thresholds correct: a high-similarity candidate
+// with a strict threshold can be rejected while a lower-similarity one with a
+// lenient threshold is chosen.
 func BestMatch(embedding []float32, candidates []Candidate, threshold float64) (int64, float64) {
 	var bestID int64
 	var bestSim float64
@@ -28,16 +38,17 @@ func BestMatch(embedding []float32, candidates []Candidate, threshold float64) (
 		if c.Ignore || len(c.Centroid) == 0 {
 			continue
 		}
+		effThreshold := threshold
+		if c.Threshold > 0 {
+			effThreshold = c.Threshold
+		}
 		sim := detect.CosineSimilarity(embedding, c.Centroid)
-		if sim > bestSim {
+		if sim >= effThreshold && sim > bestSim {
 			bestSim = sim
 			bestID = c.ID
 		}
 	}
-	if bestSim >= threshold {
-		return bestID, bestSim
-	}
-	return 0, 0
+	return bestID, bestSim
 }
 
 // BlendCentroid merges newEmbedding into old using an exponential running
