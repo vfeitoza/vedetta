@@ -41,22 +41,29 @@ func (s *Server) handleCameraGridPartial(w http.ResponseWriter, _ *http.Request)
 		Online      bool
 		HasMotion   bool
 		Stopped     bool
+		LastSeen    string // RFC3339, empty when no frame has ever been seen
 	}
 
 	cards := make([]cameraCard, 0, len(statuses))
 	for _, st := range statuses {
+		lastSeen := ""
+		if !st.LastSeen.IsZero() {
+			lastSeen = st.LastSeen.UTC().Format(time.RFC3339)
+		}
 		cards = append(cards, cameraCard{
 			Name:        st.Name,
 			DisplayName: displayName(st.Name),
 			Online:      st.Online,
 			HasMotion:   st.HasMotion,
 			Stopped:     st.Stopped,
+			LastSeen:    lastSeen,
 		})
 	}
 
 	tmpl := template.Must(template.New("grid").Parse(`{{range .}}<div class="cam-card{{if .Stopped}} cam-stopped{{end}}" data-camera-name="{{.Name}}" data-action-click="location.href='/camera.html?name={{.Name}}'" role="listitem" aria-label="{{.DisplayName}} camera">
   <div class="cam-preview">
     <img src="/api/cameras/{{.Name}}/snapshot" alt="{{.DisplayName}} camera" loading="lazy">
+    <span class="cam-last-seen" data-ts="{{.LastSeen}}"></span>
     <div class="cam-live-badge">
       {{if .Stopped}}<span class="cam-live-dot stopped"></span>STOPPED{{else}}<span class="cam-live-dot {{if .Online}}{{else}}offline{{end}}"></span>
       {{if .Online}}LIVE{{else}}OFFLINE{{end}}{{end}}

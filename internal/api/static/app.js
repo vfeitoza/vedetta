@@ -3990,6 +3990,23 @@ function ensureGridSnapshotRefresh() {
   startGridSnapshotRefresh();
 }
 
+// Render the "last seen" caption on a tile from its data-ts timestamp. The
+// caption is shown (via CSS) only for offline tiles; live tiles are cleared so
+// the caption hides. Pass tsStr to update the stored timestamp (e.g. from a
+// fresh /api/cameras poll), or null to reuse whatever the server rendered.
+function updateCamLastSeen(card, offline, tsStr) {
+  if (!card) return;
+  var lbl = card.querySelector('.cam-last-seen');
+  if (!lbl) return;
+  if (tsStr) lbl.dataset.ts = tsStr;
+  var ts = lbl.dataset.ts;
+  if (offline && ts) {
+    lbl.textContent = 'Last seen ' + formatTimeAgo(ts);
+  } else {
+    lbl.textContent = '';
+  }
+}
+
 // Set loading state on each tile and load its snapshot, transitioning to
 // a loaded or error state once the fetch completes.
 function initGridSnapshotStates() {
@@ -4008,6 +4025,10 @@ function initGridSnapshotStates() {
 
     var name = img.alt;
     if (!name) return;
+
+    // Caption offline tiles immediately from the server-rendered timestamp so
+    // there is no wait for the first refresh tick.
+    updateCamLastSeen(card, !!card.querySelector('.cam-live-dot.offline'), null);
 
     // Seed the per-camera clock so idle cameras wait a full GRID_IDLE_MS
     // and motion cameras refresh on the next tick instead of immediately
@@ -4063,6 +4084,9 @@ function refreshGridSnapshots() {
           var label = badge.lastChild;
           if (label) label.textContent = cam.online ? 'LIVE' : 'OFFLINE';
         }
+
+        // Keep the "last seen" caption in sync with the live online state.
+        updateCamLastSeen(card, !cam.online, cam.last_seen || null);
 
         // Refresh snapshot for online cameras, but only when due: cameras
         // reporting motion refresh every tick; idle cameras only every

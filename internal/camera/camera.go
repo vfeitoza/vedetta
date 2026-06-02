@@ -111,8 +111,14 @@ type Camera struct {
 	lastMotion       time.Time
 	lastFrameTime    time.Time
 	lastSnapshotSave time.Time
-	confirmedTracks  map[int]string // trackID → eventID
-	trackNames       map[int]string // trackID → display name (from re-ID match or click-to-name); guarded by mu
+	// cachedSnapshotTime is the mtime of the snapshot loaded from disk at
+	// startup. It dates the last-known frame for a camera that has not yet
+	// decoded a live frame this session (e.g. just after a restart) so the UI
+	// can show "last seen". It is deliberately separate from lastFrameTime so a
+	// stale disk frame never counts toward IsOnline.
+	cachedSnapshotTime time.Time
+	confirmedTracks    map[int]string // trackID → eventID
+	trackNames         map[int]string // trackID → display name (from re-ID match or click-to-name); guarded by mu
 
 	zones           []Zone
 	presenceTracker *PresenceTracker
@@ -137,10 +143,15 @@ type Camera struct {
 
 // CameraStatus represents the current status of a camera.
 type CameraStatus struct {
-	Name           string    `json:"name"`
-	Online         bool      `json:"online"`
-	HasMotion      bool      `json:"has_motion"`
-	LastFrame      time.Time `json:"last_frame"`
+	Name      string    `json:"name"`
+	Online    bool      `json:"online"`
+	HasMotion bool      `json:"has_motion"`
+	LastFrame time.Time `json:"last_frame"`
+	// LastSeen dates the last-known frame still available to display (live
+	// decode time, or the cached disk snapshot's mtime after a restart). Unlike
+	// LastFrame it is non-zero for an offline camera whose only frame came from
+	// disk, so the dashboard can caption offline tiles with "last seen".
+	LastSeen       time.Time `json:"last_seen"`
 	Degraded       bool      `json:"degraded"`
 	DegradedReason string    `json:"degraded_reason,omitempty"`
 	PTZ            bool      `json:"ptz"`
@@ -305,6 +316,18 @@ func (c *Camera) LastFrameTime() time.Time {
 	return c.lastFrameTime
 }
 
+// LastSnapshotTime returns the age of the last-known frame available to show:
+// the live decode time when one exists this session, otherwise the mtime of
+// the snapshot loaded from disk. Zero value means no frame is available at all.
+func (c *Camera) LastSnapshotTime() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.lastFrameTime.IsZero() {
+		return c.lastFrameTime
+	}
+	return c.cachedSnapshotTime
+}
+
 // LiveFrame returns the highest-quality recent decoded frame for downstream
 // processing (e.g. on-demand OSNet embedding from the live overlay). Prefers
 // the main-stream snapshot consumer's full-res frame; falls back to the
@@ -333,8 +356,9 @@ func (c *Camera) loadCachedSnapshot() {
 	}
 
 	type loaded struct {
-		rgb  []byte
-		w, h int
+		rgb   []byte
+		w, h  int
+		mtime time.Time
 	}
 	result := make(chan loaded, 1)
 	go func() {
@@ -343,6 +367,11 @@ func (c *Camera) loadCachedSnapshot() {
 			return
 		}
 		defer f.Close()
+
+		var mtime time.Time
+		if fi, statErr := f.Stat(); statErr == nil {
+			mtime = fi.ModTime()
+		}
 
 		img, err := jpeg.Decode(f)
 		if err != nil {
@@ -362,7 +391,7 @@ func (c *Camera) loadCachedSnapshot() {
 				rgb[off+2] = byte(b >> 8)
 			}
 		}
-		result <- loaded{rgb, w, h}
+		result <- loaded{rgb, w, h, mtime}
 	}()
 
 	select {
@@ -371,6 +400,7 @@ func (c *Camera) loadCachedSnapshot() {
 		c.rawFrame = res.rgb
 		c.frameW = res.w
 		c.frameH = res.h
+		c.cachedSnapshotTime = res.mtime
 		c.mu.Unlock()
 		slog.Info("loaded cached snapshot", "camera", c.config.Name)
 	case <-time.After(cachedSnapshotLoadTimeout):
@@ -935,11 +965,16 @@ func (c *Camera) Status() CameraStatus {
 	if c.detectConsumer != nil {
 		fps = c.detectConsumer.SourceFPS()
 	}
+	lastSeen := c.lastFrameTime
+	if lastSeen.IsZero() {
+		lastSeen = c.cachedSnapshotTime
+	}
 	return CameraStatus{
 		Name:           c.config.Name,
 		Online:         online,
 		HasMotion:      !c.lastMotion.IsZero() && time.Since(c.lastMotion) < 5*time.Second,
 		LastFrame:      c.lastFrameTime,
+		LastSeen:       lastSeen,
 		Degraded:       c.degradedReason != "",
 		DegradedReason: c.degradedReason,
 		SourceFPS:      fps,

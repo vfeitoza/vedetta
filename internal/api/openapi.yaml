@@ -2712,6 +2712,14 @@ components:
           type: boolean
         ptz:
           type: boolean
+        last_seen:
+          type: string
+          format: date-time
+          description: >-
+            Timestamp of the last-known frame still available to display (live
+            decode time, or the cached disk snapshot after a restart). Omitted
+            for a camera that has never produced a frame. Used by the dashboard
+            to caption offline tiles.
 
     CameraListEnvelope:
       type: object

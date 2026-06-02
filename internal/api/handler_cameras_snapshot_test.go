@@ -69,6 +69,10 @@ func TestGetCameraSnapshot_OnlineWithFrame_SetsNoCacheHeaders(t *testing.T) {
 		t.Errorf("Expires = %q, want 0", got)
 	}
 
+	if got := w.Header().Get("X-Vedetta-Camera-State"); got != "live" {
+		t.Errorf("X-Vedetta-Camera-State = %q, want live", got)
+	}
+
 	wantLM := ts.UTC().Format(http.TimeFormat)
 	if got := w.Header().Get("Last-Modified"); got != wantLM {
 		t.Errorf("Last-Modified = %q, want %q", got, wantLM)
@@ -98,9 +102,45 @@ func TestGetCameraSnapshot_OnlineWithoutFrame_Returns503(t *testing.T) {
 	}
 }
 
-func TestGetCameraSnapshot_Offline_Returns503WithOfflineState(t *testing.T) {
+// An offline camera that still has a last-known frame (live decode while it
+// was up, or a snapshot loaded from disk after a restart) serves that frame
+// labelled "stale" rather than the generic placeholder. The dashboard dims it
+// and shows a "last seen" caption.
+func TestGetCameraSnapshot_OfflineWithCachedFrame_ServesStaleFrame(t *testing.T) {
 	ts := time.Date(2026, 5, 11, 14, 30, 0, 0, time.UTC)
 	srv, _ := snapshotTestServer(t, "front", false, true, ts)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/front/snapshot", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (stale frame served), got %d (body=%s)", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Errorf("Content-Type = %q, want image/jpeg", got)
+	}
+	if got := w.Header().Get("X-Vedetta-Camera-State"); got != "stale" {
+		t.Errorf("X-Vedetta-Camera-State = %q, want stale", got)
+	}
+	wantLM := ts.UTC().Format(http.TimeFormat)
+	if got := w.Header().Get("Last-Modified"); got != wantLM {
+		t.Errorf("Last-Modified = %q, want %q", got, wantLM)
+	}
+	if w.Body.Len() == 0 {
+		t.Error("response body is empty; expected the last-known JPEG frame")
+	}
+	cc := w.Header().Get("Cache-Control")
+	if !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want to contain no-store", cc)
+	}
+}
+
+// An offline camera with no frame at all (never connected, no cached snapshot)
+// has nothing to show, so the endpoint still returns 503 and the dashboard
+// renders the placeholder glyph.
+func TestGetCameraSnapshot_OfflineWithoutFrame_Returns503Offline(t *testing.T) {
+	srv, _ := snapshotTestServer(t, "front", false, false, time.Time{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/cameras/front/snapshot", nil)
 	w := httptest.NewRecorder()

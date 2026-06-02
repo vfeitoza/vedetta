@@ -23,11 +23,19 @@ func (s *Server) ListCameras(w http.ResponseWriter, _ *http.Request) {
 		Online    bool   `json:"online"`
 		HasMotion bool   `json:"has_motion"`
 		PTZ       bool   `json:"ptz"`
+		// LastSeen lets the dashboard caption offline tiles with "last seen".
+		// Omitted for a camera that has never produced a frame so the UI does
+		// not render a zero timestamp as a nonsense age.
+		LastSeen string `json:"last_seen,omitempty"`
 	}
 	result := make([]cameraInfo, len(statuses))
 	for i, st := range statuses {
 		_, hasPTZ := s.ptzClients[st.Name]
-		result[i] = cameraInfo{Name: st.Name, Online: st.Online, HasMotion: st.HasMotion, PTZ: hasPTZ}
+		info := cameraInfo{Name: st.Name, Online: st.Online, HasMotion: st.HasMotion, PTZ: hasPTZ}
+		if !st.LastSeen.IsZero() {
+			info.LastSeen = st.LastSeen.UTC().Format(time.RFC3339)
+		}
+		result[i] = info
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":    result,
@@ -140,20 +148,30 @@ func (s *Server) GetCameraSnapshot(w http.ResponseWriter, r *http.Request, name 
 	// cached error response would otherwise stick around indefinitely.
 	setSnapshotNoCacheHeaders(w)
 
-	if !cam.IsOnline() {
-		w.Header().Set("X-Vedetta-Camera-State", "offline")
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "camera offline"})
-		return
-	}
+	online := cam.IsOnline()
 
+	// Serve the last-known frame even when the camera is offline: it survives in
+	// memory (last live decode) or is loaded from disk at startup. The dashboard
+	// dims a "stale" frame and captions it "last seen", which is far better than
+	// the generic placeholder. Only a camera with no frame at all (never
+	// connected, no cached snapshot) falls through to 503.
 	img := cam.LiveFrame()
 	if img == nil {
-		w.Header().Set("X-Vedetta-Camera-State", "warming-up")
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no frame yet"})
+		state := "warming-up"
+		if !online {
+			state = "offline"
+		}
+		w.Header().Set("X-Vedetta-Camera-State", state)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no frame available"})
 		return
 	}
 
-	if ts := cam.LastFrameTime(); !ts.IsZero() {
+	state := "live"
+	if !online {
+		state = "stale"
+	}
+	w.Header().Set("X-Vedetta-Camera-State", state)
+	if ts := cam.LastSnapshotTime(); !ts.IsZero() {
 		w.Header().Set("Last-Modified", ts.UTC().Format(http.TimeFormat))
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
