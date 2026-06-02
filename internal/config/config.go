@@ -115,6 +115,14 @@ type LoggingConfig struct {
 	// Headers are attached to every OTLP log export request. The common use is a
 	// tenant header for a multi-tenant backend, e.g. X-Scope-OrgID for Loki.
 	Headers map[string]string `yaml:"headers"`
+
+	// File, when set, makes vedetta write its own logs to this path with
+	// built-in size-based rotation instead of stdout. Leave empty (the default)
+	// to log to stdout, which the process supervisor captures. MaxSizeMB and
+	// MaxBackups bound on-disk growth so the log can never grow without bound.
+	File       string `yaml:"file"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	MaxBackups int    `yaml:"max_backups"`
 }
 
 // OpenH264Config controls OpenH264 codec auto-install behavior.
@@ -445,6 +453,8 @@ func Defaults() *Config {
 		Logging: LoggingConfig{
 			Insecure:    true,
 			ServiceName: "vedetta",
+			MaxSizeMB:   50,
+			MaxBackups:  5,
 		},
 	}
 }

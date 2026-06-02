@@ -210,3 +210,15 @@ logging:
   # backend needs none.
   # headers:
   #   X-Scope-OrgID: vedetta
+
+  # Local log file with built-in size-based rotation. When set, vedetta writes
+  # its own logs here instead of stdout and rotates them so they never grow
+  # unbounded. Leave empty (the default) to log to stdout, which the process
+  # supervisor (launchd / container runtime) captures. When set under launchd,
+  # point this at a path distinct from the plist's StandardOutPath so the two
+  # writers do not fight over the same file.
+  file: ""
+  # Rotate when the active file reaches this size (megabytes). Default 50.
+  max_size_mb: 50
+  # Keep this many rotated files (file.1 .. file.N). Default 5.
+  max_backups: 5

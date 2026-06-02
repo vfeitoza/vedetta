@@ -90,6 +90,13 @@ type subsystems struct {
 }
 
 func main() {
+	// The out-of-process liveness supervisor re-execs this binary with a hidden
+	// subcommand; handle it before anything else so it stays tiny and never
+	// touches config, the database, or the network.
+	if len(os.Args) > 1 && os.Args[1] == watchdog.SupervisorArg {
+		os.Exit(watchdog.RunSupervisorChild())
+	}
+
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 && os.Args[1] == "discover" {
 		runDiscover()
@@ -133,8 +140,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	// When a log file is configured, route slog through a size-rotating writer so
+	// vedetta's own logs can never grow without bound. The default (empty File)
+	// keeps logging to stdout, which the supervisor / container runtime captures.
+	if cfg.Logging.File != "" {
+		rw, rerr := logging.NewRotatingWriter(cfg.Logging.File,
+			int64(cfg.Logging.MaxSizeMB)*1024*1024, cfg.Logging.MaxBackups)
+		if rerr != nil {
+			slog.Error("failed to open log file, continuing on stdout", "file", cfg.Logging.File, "error", rerr)
+		} else {
+			defer rw.Close()
+			baseHandler = slog.NewTextHandler(rw, &slog.HandlerOptions{Level: slog.LevelInfo})
+			slog.SetDefault(slog.New(baseHandler))
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Out-of-process liveness backstop. The in-process watchdog below cannot
+	// recover a runtime wedge (heap corruption that freezes the scheduler stops
+	// every goroutine, including its os.Exit). A child process has its own
+	// runtime, so it survives the wedge and force-kills us, letting launchd
+	// KeepAlive restart the process within SupervisorTimeout instead of leaving
+	// it spinning indefinitely.
+	stopSupervisor := watchdog.SuperviseSelf(ctx, watchdog.SupervisorHeartbeatInterval, watchdog.SupervisorTimeout)
+	defer stopSupervisor()
 
 	logProvider := wireLogging(ctx, cfg, baseHandler)
 	defer func() {
