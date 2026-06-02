@@ -348,7 +348,11 @@ func (s *Source) connectOnce(ctx context.Context) error {
 	s.connected = true
 	s.mu.Unlock()
 
-	slog.Info("RTSP connected", "url", SanitizeURL(s.url))
+	transportLabel := s.transport
+	if transportLabel == "" {
+		transportLabel = "tcp"
+	}
+	slog.Info("RTSP connected", "url", SanitizeURL(s.url), "transport", transportLabel)
 
 	// Wait blocks until the client encounters a fatal error or is closed
 	waitDone := make(chan error, 1)
