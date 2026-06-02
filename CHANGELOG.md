@@ -38,6 +38,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.6](https://github.com/rvben/vedetta/compare/v0.7.5...v0.7.6) - 2026-06-02
+
+### Added
+
+- **api**: expose camera last-seen and serve stale snapshots when offline ([9a82689](https://github.com/rvben/vedetta/commit/9a82689369d457ccc99e47d5a5dbecfaa569c94e))
+- harden against runtime wedges with a supervisor and log rotation ([4b4662b](https://github.com/rvben/vedetta/commit/4b4662ba45cb922230df96f5e4de285d8877f9e2))
+
+### Fixed
+
+- **stream**: stop webrtc from mutating the shared fan-out packet ([83d5ea5](https://github.com/rvben/vedetta/commit/83d5ea5537822f72eeed1e7958deb3e6b1ab7d46))
+- **media**: prevent use-after-free of the OpenH264 decoder on teardown ([3dd8972](https://github.com/rvben/vedetta/commit/3dd897201dad2aeacd2948bee4f14153c8441799))
+
 ## [0.7.5](https://github.com/rvben/vedetta/compare/v0.7.4...v0.7.5) - 2026-05-30
 
 ### Added
