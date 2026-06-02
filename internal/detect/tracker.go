@@ -66,23 +66,28 @@ type Tracker struct {
 }
 
 // Default stationarity tuning. Sized for a 5 fps detect loop with YOLO
-// gated behind motion: in production a parked car only generates matched
-// updates while motion is actively qualifying nearby, so we need a low
-// enough hit threshold to promote inside the brief motion-active window
-// at arrival (typically 1–3s of qualified motion as the car settles).
+// gated behind motion: a parked car only generates matched updates while
+// motion is qualifying nearby, so promotion accumulates across the matched
+// frames of the car's lifetime (nil frames preserve the streak) rather than
+// requiring an uninterrupted run of detections.
 //
-// 10 hits ≈ 2s of continuous high-IoU matches. Combined with the 0.3
-// drift ratio that catches a person walking 3 px/frame within 11 frames,
-// this gives reliable promotion of stationary objects while still
-// rejecting realistic slow walkers.
+// Stationarity is judged by centroid stability, not bounding-box overlap.
+// YOLO's box for a large vehicle wobbles in size frame to frame (it includes
+// or omits part of the body as lighting and occlusion change), which drops
+// the per-frame IoU of a perfectly still van to ~0.84. The IoU floor
+// (defaultStationaryIoU) therefore only rejects gross position jumps to a
+// different object; the 0.3 drift ratio is the real discriminator, resetting
+// the streak once the centroid creeps past 0.3 x max(box dim) from the streak
+// anchor. That catches a person walking 3 px/frame within 11 frames while
+// tolerating box-size wobble on a stationary vehicle.
 //
-// stationaryMaxDisappeared = 50 × maxDisappeared keeps the parked-car
-// identity alive for ~5 minutes at 5 fps with maxDisappeared=30, which
-// covers any plausible motion-quiet window (wind, brief obstructions,
+// 10 matched hits promotes; stationaryMaxDisappeared = 50 x maxDisappeared
+// keeps the parked-car identity alive for ~5 minutes at 5 fps (maxDisappeared
+// =30), covering plausible motion-quiet windows (wind, brief obstructions,
 // short YOLO stalls).
 const (
 	defaultStationaryThresholdHits = 10
-	defaultStationaryIoU           = 0.85
+	defaultStationaryIoU           = 0.5
 	defaultStationaryDriftRatio    = 0.3
 	defaultStationaryMaxMultiplier = 50
 )

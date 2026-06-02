@@ -593,18 +593,122 @@ func TestTracker_StationaryPromotion_UnderRealisticMotionGating(t *testing.T) {
 	}
 }
 
+// TestTracker_ParkedVanWithRealisticBoxWobbleStaysStationary reproduces the
+// production false-positive: a parked van at the front door fires a fresh
+// "car" event every few minutes. The van is genuinely stationary (its
+// centroid barely moves) but YOLO's bounding box wobbles in SIZE frame to
+// frame. Two real production boxes for the same parked van,
+// [0,840,720,1440] and [0,900,780,1440], have IoU ~0.837 with centroids only
+// ~42 px apart on a 720 px box (well inside the 0.3 x dim drift cap).
+//
+// A strict per-frame IoU gate (the former 0.85) treats that size wobble as
+// motion and resets the promotion streak, so the van never promotes, decays
+// at the short non-stationary timeout during the next motion-gated quiet
+// window, and re-detects as a NEW TrackID, firing a duplicate event for a
+// vehicle that never moved. The fix keeps IoU only as a coarse 0.5
+// same-object floor and lets the cumulative drift guard judge stationarity,
+// so box-size wobble no longer blocks promotion.
+//
+// Contract: a stationary object keeps ONE TrackID across a long gap.
+func TestTracker_ParkedVanWithRealisticBoxWobbleStaysStationary(t *testing.T) {
+	tr := NewTracker(30, 3) // production defaults
+
+	// Two real production boxes for the same parked van; IoU(a,b) ≈ 0.837.
+	a := [4]int{0, 840, 720, 1440}
+	b := [4]int{0, 900, 780, 1440}
+
+	var vanID int
+	// 20 frames of the van while motion qualifies, YOLO alternating between
+	// the two box estimates (realistic size wobble).
+	for i := 0; i < 20; i++ {
+		box := a
+		if i%2 == 1 {
+			box = b
+		}
+		objs := tr.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+		if len(objs) == 1 {
+			vanID = objs[0].TrackID
+		}
+	}
+	if vanID == 0 {
+		t.Fatal("van never confirmed")
+	}
+
+	// Motion-gated quiet window: 60 nil updates (> non-stationary
+	// maxDisappeared=30). A promoted-stationary track survives this.
+	for i := 0; i < 60; i++ {
+		tr.Update(nil)
+	}
+
+	// Van re-detected in place. It MUST reuse the same TrackID — otherwise the
+	// camera fires a duplicate "car" event for a van that never moved.
+	objs := tr.Update([]Detection{{Label: "car", Score: 0.9, Box: a}})
+	if len(objs) != 1 {
+		t.Fatalf("re-detection: expected 1 track, got %d", len(objs))
+	}
+	if objs[0].TrackID != vanID {
+		t.Errorf("parked van got a NEW TrackID %d after a quiet gap (was %d) — "+
+			"realistic box-size wobble defeated stationary promotion, so the "+
+			"camera fires a duplicate event for a van that never moved",
+			objs[0].TrackID, vanID)
+	}
+}
+
+// TestTracker_ParkedVanPromotesAcrossMotionGatedGaps mirrors the real
+// production cadence: a parked van is only re-detected when nearby motion
+// qualifies YOLO, so matched frames arrive in short bursts separated by nil
+// gaps. The stationary streak must accumulate across those gaps (nil frames
+// preserve it) and promote, even though YOLO's box wobbles in size between
+// bursts. Once promoted, the van must survive a long quiet window with one ID.
+func TestTracker_ParkedVanPromotesAcrossMotionGatedGaps(t *testing.T) {
+	tr := NewTracker(30, 3) // production defaults
+	a := [4]int{0, 840, 720, 1440}
+	b := [4]int{0, 900, 780, 1440}
+
+	var vanID int
+	// 12 matched detections (> threshold 10), each followed by a 5-frame nil
+	// gap (well under maxDisappeared=30), with the box alternating to mimic
+	// YOLO size wobble.
+	for i := 0; i < 12; i++ {
+		box := a
+		if i%2 == 1 {
+			box = b
+		}
+		objs := tr.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+		if len(objs) == 1 {
+			vanID = objs[0].TrackID
+		}
+		for j := 0; j < 5; j++ {
+			tr.Update(nil)
+		}
+	}
+	if vanID == 0 {
+		t.Fatal("van never confirmed")
+	}
+
+	// Long quiet window beyond the non-stationary timeout.
+	for i := 0; i < 80; i++ {
+		tr.Update(nil)
+	}
+	objs := tr.Update([]Detection{{Label: "car", Score: 0.9, Box: b}})
+	if len(objs) != 1 || objs[0].TrackID != vanID {
+		t.Errorf("parked van must keep TrackID %d across motion-gated gaps, got %v", vanID, objs)
+	}
+}
+
 // TestTracker_FastDriveBy_NotPromoted: a car driving past the camera
-// (not parking) should NOT be promoted to stationary. With ~25 px/frame
-// motion the per-frame IoU drops below 0.85, so the streak resets every
-// frame. When the car exits the frame, its track must decay at the
-// short timeout — otherwise we'd hold a 5-min ghost wherever it last
-// appeared.
+// (not parking) must NOT be promoted to stationary. At ~25 px/frame the
+// per-frame IoU (~0.6) still clears the coarse 0.5 same-object floor, so the
+// cumulative drift guard is what rejects it: the centroid leaves the
+// 0.3 x box-dim window within a couple of frames and resets the streak every
+// time. When the car exits the frame its track must decay at the short
+// timeout, not linger as a 5-minute ghost where it last appeared.
 func TestTracker_FastDriveBy_NotPromoted(t *testing.T) {
 	tr := NewTracker(30, 1)
 
-	// 20 frames moving at 25 px/frame on a 100 px box. IoU between
-	// consecutive boxes ≈ 0.6 — matcher follows the same track but the
-	// stationary streak never builds.
+	// 20 frames moving at 25 px/frame on a 100 px box. IoU between consecutive
+	// boxes (~0.6) clears the 0.5 floor so the matcher follows the same track,
+	// but cumulative drift keeps the stationary streak from ever building.
 	for i := 0; i < 20; i++ {
 		d := []Detection{{Label: "car", Score: 0.9, Box: [4]int{100 + 25*i, 100, 200 + 25*i, 200}}}
 		tr.Update(d)
@@ -617,6 +721,68 @@ func TestTracker_FastDriveBy_NotPromoted(t *testing.T) {
 	objs := tr.Update(nil)
 	if len(objs) != 0 {
 		t.Errorf("drive-by car must not linger as stationary; got %d alive after default decay", len(objs))
+	}
+}
+
+// TestTracker_WalkerNotPromotedAtProductionDefaults verifies, with the real
+// production constructor (IoU floor 0.5, threshold 10, drift ratio 0.3), that
+// a person walking at a normal pace is rejected by the cumulative drift guard
+// rather than the IoU floor. A walker's per-frame IoU stays well above 0.5,
+// so the floor never rejects it; the centroid creeps past 0.3 x box dim from
+// the anchor within a few frames and resets the streak before it reaches the
+// 10-hit promotion threshold.
+func TestTracker_WalkerNotPromotedAtProductionDefaults(t *testing.T) {
+	tr := NewTracker(30, 1)
+
+	// 10 px/frame on a 100 px box: per-frame IoU ~0.82 (> 0.5 floor), but the
+	// centroid drifts past 0.3 x 100 = 30 px from the anchor within ~4 frames.
+	for i := 0; i < 20; i++ {
+		d := []Detection{{Label: "person", Score: 0.9, Box: [4]int{100 + 10*i, 100, 200 + 10*i, 200}}}
+		tr.Update(d)
+	}
+	for i := 0; i < 31; i++ { // exceed the non-stationary maxDisappeared
+		tr.Update(nil)
+	}
+	if objs := tr.Update(nil); len(objs) != 0 {
+		t.Errorf("a normal-pace walker must not be promoted at production defaults; got %d still alive", len(objs))
+	}
+}
+
+// TestTracker_ParkedVanThenLeavesDemotesAtProductionDefaults: a van parks
+// (promotes under production defaults), then drives off. Once it moves, the
+// cumulative drift guard resets the streak and clears the stationary flag, so
+// when it leaves the frame the track decays at the short non-stationary
+// timeout instead of lingering for ~5 minutes and blocking a different
+// vehicle that later parks in the same spot.
+func TestTracker_ParkedVanThenLeavesDemotesAtProductionDefaults(t *testing.T) {
+	tr := NewTracker(30, 1)
+	a := [4]int{0, 840, 720, 1440}
+	b := [4]int{0, 900, 780, 1440}
+
+	// Park: 14 wobbling frames promote the van to stationary (threshold 10).
+	for i := 0; i < 14; i++ {
+		box := a
+		if i%2 == 1 {
+			box = b
+		}
+		tr.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+	}
+
+	// Drive off: each step shifts the centroid past the 0.3 x dim drift cap so
+	// the streak resets and the track demotes, while consecutive boxes still
+	// overlap enough for the matcher to keep following the same TrackID.
+	for i := 1; i <= 3; i++ {
+		mv := [4]int{a[0] + 300*i, a[1], a[2] + 300*i, a[3]}
+		tr.Update([]Detection{{Label: "car", Score: 0.9, Box: mv}})
+	}
+
+	// Out of frame: a demoted track must decay at maxDisappeared=30, not the
+	// ~5-minute stationary budget.
+	for i := 0; i < 31; i++ {
+		tr.Update(nil)
+	}
+	if objs := tr.Update(nil); len(objs) != 0 {
+		t.Errorf("van that parked then drove off must demote and decay at the short timeout; got %d still alive", len(objs))
 	}
 }
 
