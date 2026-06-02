@@ -40,6 +40,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.8](https://github.com/rvben/vedetta/compare/v0.7.7...v0.7.8) - 2026-06-02
+
+### Fixed
+
+- **web**: use the raw camera name for dashboard snapshot refresh ([4c5c1d0](https://github.com/rvben/vedetta/commit/4c5c1d049f8d370d94c53a0a36a3f2d484a57f6f))
+
 ## [0.7.7](https://github.com/rvben/vedetta/compare/v0.7.6...v0.7.7) - 2026-06-02
 
 ### Fixed
