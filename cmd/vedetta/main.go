@@ -505,6 +505,17 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 	// Create RTSP Hub — central connection manager
 	sub.hub = rtsp.NewHub(ctx)
 
+	// Register each camera's RTSP transport before any consumer opens a stream.
+	// The Hub shares one Source per URL, so the recorder, live-stream consumers,
+	// and the detect loop must all create it with the configured transport
+	// regardless of which connects first.
+	for _, cam := range cfg.Cameras {
+		sub.hub.RegisterTransport(cam.URL, cam.RTSPTransport)
+		if cam.RecordURL != "" {
+			sub.hub.RegisterTransport(cam.RecordURL, cam.RTSPTransport)
+		}
+	}
+
 	snapshotFallbackRoot := snapshot.DefaultFallbackRoot()
 	sub.snapshotSaver = snapshot.NewSaver(cfg.Events.SnapshotPath, snapshotFallbackRoot, cfg.Events.SnapshotQuality)
 

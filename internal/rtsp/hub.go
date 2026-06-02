@@ -54,6 +54,14 @@ type Hub struct {
 	// after Remove re-wires the same sinks, keeping the counters monotonic. One
 	// URL can map to several counters because multiple cameras may share it.
 	reconnectSinks map[string][]*atomic.Int64
+
+	// transports maps an RTSP URL to its configured lower transport ("udp" or
+	// "auto"). Registration is independent of source creation: the Hub shares
+	// one Source per URL and any subsystem (recording, streaming, detect) may
+	// open it first, so the transport cannot live on the first caller. Whoever
+	// creates the Source consults this registry. Empty/"tcp" URLs are absent
+	// and fall back to the default transport.
+	transports map[string]string
 }
 
 type managedSource struct {
@@ -67,9 +75,23 @@ func NewHub(ctx context.Context) *Hub {
 	return &Hub{
 		sources:        make(map[string]*managedSource),
 		reconnectSinks: make(map[string][]*atomic.Int64),
+		transports:     make(map[string]string),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+}
+
+// RegisterTransport records the lower transport ("udp" or "auto") to use for a
+// URL. Call before any consumer opens the stream; the Source created later (by
+// whichever subsystem connects first) reads this registry. "tcp" and empty are
+// the default and need no registration.
+func (h *Hub) RegisterTransport(url, transport string) {
+	if transport == "" || transport == "tcp" {
+		return
+	}
+	h.mu.Lock()
+	h.transports[url] = transport
+	h.mu.Unlock()
 }
 
 // GetOrCreate returns the Source for the given URL using the default (TCP)
@@ -89,6 +111,13 @@ func (h *Hub) GetOrCreateWithTransport(url, transport string) *Source {
 
 	if ms, ok := h.sources[url]; ok {
 		return ms.source
+	}
+
+	// An explicit transport wins; otherwise fall back to the per-URL registry so
+	// a plain GetOrCreate (recorder, stream consumer) still uses the camera's
+	// configured transport regardless of which subsystem opens the stream first.
+	if transport == "" {
+		transport = h.transports[url]
 	}
 
 	src := NewSourceWithTransport(url, transport)

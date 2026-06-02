@@ -18,6 +18,23 @@ func canceledHub(t *testing.T) *Hub {
 	return hub
 }
 
+// A transport registered before the source exists must be applied when the
+// source is later created by ANY subsystem. The Hub shares one Source per URL,
+// and the recorder or a stream consumer may open it first via plain
+// GetOrCreate; the per-camera transport must still take effect.
+func TestHubRegisterTransport_AppliesToSourceCreatedLater(t *testing.T) {
+	hub := canceledHub(t)
+	url := "rtsp://test:554/main"
+
+	hub.RegisterTransport(url, "udp")
+
+	// Plain GetOrCreate simulates the recorder opening the stream first.
+	src := hub.GetOrCreate(url)
+	if src.transport != "udp" {
+		t.Errorf("source transport = %q, want %q (registered transport must apply regardless of which consumer creates the source)", src.transport, "udp")
+	}
+}
+
 // A reconnect sink registered before the source exists must be wired up when the
 // source is later created, so the per-camera counter starts accumulating from
 // the first drop regardless of which subsystem opens the stream.
