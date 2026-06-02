@@ -1367,6 +1367,59 @@ func TestCameraStoppedState(t *testing.T) {
 	}
 }
 
+// TestEventCategoryRoundTripsAcrossReadPaths guards every event read path
+// against column drift: scanEvents-fed queries (QueryEventsFiltered,
+// QueryEventsForDate, RecentUnmatchedEventsByLabel) would crash on a missing
+// column, and GetEventByID has its own scan that must include category too.
+func TestEventCategoryRoundTripsAcrossReadPaths(t *testing.T) {
+	db := newTestDB(t)
+	ts := time.Now().UTC().Round(0)
+
+	ev := makeEvent("evt-cat-1", "front_door", "car", 0.9, ts)
+	ev.Category = "detection"
+	ev.SnapshotAvailable = true // RecentUnmatchedEventsByLabel requires this
+	if err := db.SaveEvent(ev); err != nil {
+		t.Fatalf("SaveEvent: %v", err)
+	}
+
+	if got, err := db.GetEventByID("evt-cat-1"); err != nil || got == nil {
+		t.Fatalf("GetEventByID: %v (got %v)", err, got)
+	} else if got.Category != "detection" {
+		t.Errorf("GetEventByID category = %q, want detection", got.Category)
+	}
+
+	list, err := db.QueryEventsFiltered(EventFilters{Camera: "front_door"}, 10, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("QueryEventsFiltered: %v (n=%d)", err, len(list))
+	}
+	if list[0].Category != "detection" {
+		t.Errorf("QueryEventsFiltered category = %q, want detection", list[0].Category)
+	}
+
+	if l, _ := db.QueryEventsFiltered(EventFilters{Category: "detection"}, 10, 0); len(l) != 1 {
+		t.Errorf("category=detection filter: got %d, want 1", len(l))
+	}
+	if l, _ := db.QueryEventsFiltered(EventFilters{Category: "alert"}, 10, 0); len(l) != 0 {
+		t.Errorf("category=alert filter: got %d, want 0", len(l))
+	}
+
+	unmatched, err := db.RecentUnmatchedEventsByLabel("car", 10)
+	if err != nil {
+		t.Fatalf("RecentUnmatchedEventsByLabel: %v", err)
+	}
+	if len(unmatched) != 1 || unmatched[0].Category != "detection" {
+		t.Fatalf("RecentUnmatchedEventsByLabel: got %d events; category preserved = %v", len(unmatched), len(unmatched) == 1 && unmatched[0].Category == "detection")
+	}
+
+	byDate, err := db.QueryEventsForDate("front_door", ts)
+	if err != nil {
+		t.Fatalf("QueryEventsForDate: %v", err)
+	}
+	if len(byDate) != 1 || byDate[0].Category != "detection" {
+		t.Errorf("QueryEventsForDate: got %d events, want 1 detection", len(byDate))
+	}
+}
+
 func TestPushSubscriptionsTable(t *testing.T) {
 	db := newTestDB(t)
 

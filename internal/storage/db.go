@@ -458,16 +458,17 @@ func (d *DB) CountEventsToday() (int, error) {
 // GetEventByID returns a single event by ID, or nil if not found.
 func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 	row := d.db.QueryRow(`
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category
 		FROM events WHERE id = ?`, id)
 
 	var e camera.Event
 	var endTime sql.NullTime
 	var snapshot, clip, zoneName, objectName, subLabel sql.NullString
+	var category string
 	var snapshotAvailable, clipAvailable bool
 	err := row.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 		&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-		&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName, &subLabel,
+		&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName, &subLabel, &category,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -484,6 +485,7 @@ func (d *DB) GetEventByID(id string) (*camera.Event, error) {
 	e.ClipAvailable = clipAvailable
 	e.ObjectName = objectName.String
 	e.SubLabel = subLabel.String
+	e.Category = category
 	e.ZoneName = zoneName.String
 	return &e, nil
 }

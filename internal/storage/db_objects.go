@@ -112,7 +112,7 @@ func (d *DB) UpdateSubLabelsForPerson(personID int64, name string) error {
 func (d *DB) RecentUnmatchedEventsByLabel(label string, limit int) ([]camera.Event, error) {
 	rows, err := d.db.Query(`
 		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time,
-			snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
+			snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category
 		FROM events
 		WHERE label = ? AND snapshot_available = 1
 			AND (object_name IS NULL OR object_name = '')

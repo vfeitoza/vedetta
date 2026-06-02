@@ -612,7 +612,10 @@ func (s *Server) rematchRecentEvents(objectID int64) {
 	centroid := detect.BytesToFloat32(obj.Centroid)
 	threshold := s.ObjectMatchThreshold
 	if threshold <= 0 {
-		threshold = 0.65
+		threshold = 0.75
+	}
+	if obj.MatchThreshold != nil {
+		threshold = *obj.MatchThreshold
 	}
 
 	events, err := s.db.RecentUnmatchedEventsByLabel(obj.Label, 200)

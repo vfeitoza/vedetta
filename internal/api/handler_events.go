@@ -337,8 +337,12 @@ func (s *Server) IdentifyEvent(w http.ResponseWriter, r *http.Request, id string
 		if len(centroid) == 0 {
 			continue
 		}
+		threshold := s.ObjectMatchThreshold
+		if obj.MatchThreshold != nil {
+			threshold = *obj.MatchThreshold
+		}
 		sim := detect.CosineSimilarity(embedding, centroid)
-		if sim >= s.ObjectMatchThreshold {
+		if sim >= threshold {
 			sighting := storage.ObjectSighting{
 				EventID:    eventID,
 				Camera:     event.CameraName,

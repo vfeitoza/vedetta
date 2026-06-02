@@ -921,7 +921,10 @@ func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
 		mqttSpan.End()
 	}
 
-	if notifier != nil {
+	// Detections are the low-priority tier (e.g. a parked vehicle): recorded,
+	// shown on the dashboard, and published over MQTT, but they do not raise a
+	// push notification. Alerts do.
+	if notifier != nil && ev.Category != camera.CategoryDetection {
 		notifier.Enqueue(ev)
 	}
 }
