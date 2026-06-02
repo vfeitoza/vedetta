@@ -39,6 +39,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.7](https://github.com/rvben/vedetta/compare/v0.7.6...v0.7.7) - 2026-06-02
+
+### Fixed
+
+- **rtsp**: resolve data race between probe timeout Close and client Start ([be58400](https://github.com/rvben/vedetta/commit/be58400d901f2b91bc2fb9476b8e7b7ff393620f))
+
 ## [0.7.6](https://github.com/rvben/vedetta/compare/v0.7.5...v0.7.6) - 2026-06-02
 
 ### Added
