@@ -41,6 +41,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.9](https://github.com/rvben/vedetta/compare/v0.7.8...v0.7.9) - 2026-06-02
+
+### Added
+
+- **rtsp**: log the negotiated transport on connect ([94ee3ea](https://github.com/rvben/vedetta/commit/94ee3eaf4a08f6925f77e4c55d30a1b88d4f04ce))
+- **camera**: re-confirm stationary objects to keep parked cars as one event ([e09f1d1](https://github.com/rvben/vedetta/commit/e09f1d1b72c8c7e8e79c2416381d029011f778aa))
+- **rtsp**: add per-camera RTSP transport (tcp/udp/auto) ([ebfba56](https://github.com/rvben/vedetta/commit/ebfba56e4d6099f510baba3ba8cd77d1fed2c069))
+
+### Fixed
+
+- **rtsp**: apply per-camera transport regardless of which consumer connects first ([e683b5a](https://github.com/rvben/vedetta/commit/e683b5a467be9db358f6b6edd9102deef7dc5b0f))
+- **detect**: keep parked vehicles as one track to stop duplicate events ([ef335d8](https://github.com/rvben/vedetta/commit/ef335d87c8fdf16d80e12db778d202d55b6ee3cf))
+
 ## [0.7.8](https://github.com/rvben/vedetta/compare/v0.7.7...v0.7.8) - 2026-06-02
 
 ### Fixed
