@@ -38,8 +38,39 @@ type Event struct {
 	ZoneName          string      `json:"zone_name,omitempty"`
 	ObjectName        string      `json:"object_name,omitempty"`
 	SubLabel          string      `json:"sub_label,omitempty"`
+	Category          string      `json:"category,omitempty"` // "alert" (notify) or "detection" (low priority)
 	SnapshotImage     *image.RGBA `json:"-"` // clean frame for disk/embeddings
 	AnnotatedImage    *image.RGBA `json:"-"` // annotated frame for MQTT display
+}
+
+// Event categories set review/notification priority: alerts are noteworthy
+// (people, animals, and vehicles that are actually traveling); detections are
+// low-priority (a parked/stationary vehicle, including one re-detected after a
+// restart). Consumers (MQTT/Home Assistant, the dashboard) use this to avoid
+// alert fatigue without ever hiding an event.
+const (
+	CategoryAlert     = "alert"
+	CategoryDetection = "detection"
+)
+
+// stationaryTierLabels are the labels whose events drop to the detection tier
+// while the object has not moved. Motor vehicles dominate the parked-object
+// case; people and animals are always alerts because a stationary person is
+// security-relevant.
+var stationaryTierLabels = map[string]bool{
+	"car":        true,
+	"truck":      true,
+	"bus":        true,
+	"motorcycle": true,
+}
+
+// eventCategory classifies an event by review/notification priority. A vehicle
+// that has not moved (parked) is a detection; everything else is an alert.
+func eventCategory(label string, moved bool) string {
+	if stationaryTierLabels[label] && !moved {
+		return CategoryDetection
+	}
+	return CategoryAlert
 }
 
 // EventEnd signals that a tracked object has left the frame.
@@ -801,6 +832,7 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 				Box:               box,
 				Timestamp:         time.Now(),
 				ZoneName:          zoneName,
+				Category:          eventCategory(obj.Label, obj.Moved),
 				SnapshotAvailable: false,
 				ClipAvailable:     false,
 			}

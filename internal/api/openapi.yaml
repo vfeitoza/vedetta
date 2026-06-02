@@ -3067,6 +3067,10 @@ components:
           type: string
         sub_label:
           type: string
+        category:
+          type: string
+          enum: [alert, detection]
+          description: Review/notification priority. "detection" is low priority (e.g. a stationary/parked vehicle); everything else is "alert".
 
     EventListEnvelope:
       type: object

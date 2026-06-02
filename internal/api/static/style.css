@@ -952,6 +952,24 @@ input, select { font-family: inherit; }
   text-overflow: ellipsis;
 }
 
+/* Low-priority "detection" tier (e.g. a parked vehicle). Muted so it reads as
+   background activity next to full-color alert badges. Bottom-left to avoid the
+   object badge (top-right) and label badge (top-left). */
+.event-detection-badge {
+  position: absolute;
+  bottom: 0.375rem;
+  left: 0.375rem;
+  padding: 0.1875rem 0.5rem;
+  background: rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
 .event-card-footer {
   padding: 0.5rem 0.75rem;
   display: flex;

@@ -68,6 +68,11 @@
           <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot dog"></span>Dog</button>
           <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot cat"></span>Cat</button>
         </div>
+        <div class="chip-bar" id="category-chips" role="toolbar" aria-label="Priority">
+          <button class="chip active" data-filter="category" data-value="" data-action-click="toggleChip(this, 'category')" aria-pressed="true">All priorities</button>
+          <button class="chip" data-filter="category" data-value="alert" data-action-click="toggleChip(this, 'category')" aria-pressed="false" title="People, animals, and vehicles that are moving">Alerts</button>
+          <button class="chip" data-filter="category" data-value="detection" data-action-click="toggleChip(this, 'category')" aria-pressed="false" title="Low priority, e.g. a parked vehicle">Detections</button>
+        </div>
         <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Cameras">
           <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')" aria-pressed="true">All Cameras</button>
         </div>
@@ -127,11 +132,13 @@
       var labelChip = document.querySelector('.chip[data-filter="label"].active');
       var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
       var objectChip = document.querySelector('.chip[data-filter="object"].active');
+      var categoryChip = document.querySelector('.chip[data-filter="category"].active');
       var search = (document.getElementById('event-search') || {}).value || '';
       return !!(
         (labelChip && labelChip.dataset.value) ||
         (cameraChip && cameraChip.dataset.value) ||
         (objectChip && objectChip.dataset.value) ||
+        (categoryChip && categoryChip.dataset.value) ||
         search.trim()
       );
     }
@@ -165,6 +172,11 @@
         c.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
       document.querySelectorAll('.chip[data-filter="object"]').forEach(function(c) {
+        var active = !c.dataset.value;
+        c.classList.toggle('active', active);
+        c.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('.chip[data-filter="category"]').forEach(function(c) {
         var active = !c.dataset.value;
         c.classList.toggle('active', active);
         c.setAttribute('aria-pressed', active ? 'true' : 'false');

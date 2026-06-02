@@ -786,6 +786,48 @@ func TestTracker_ParkedVanThenLeavesDemotesAtProductionDefaults(t *testing.T) {
 	}
 }
 
+// TestTracker_MovedFlag drives event categorization: a vehicle that only ever
+// sits still (a parked car, including one re-detected after a restart) must
+// report Moved=false so it can be categorized as a low-priority "detection",
+// while an object that travels across the scene reports Moved=true ("alert").
+// The signal latches on cumulative displacement from where the track was first
+// seen, so it tolerates box wobble but catches real travel.
+func TestTracker_MovedFlag(t *testing.T) {
+	// Parked car: only box-size jitter (~42px centroid shift on a 720px box).
+	parked := NewTracker(30, 1)
+	a := [4]int{0, 840, 720, 1440}
+	b := [4]int{0, 900, 780, 1440}
+	var po TrackedObject
+	for i := 0; i < 10; i++ {
+		box := a
+		if i%2 == 1 {
+			box = b
+		}
+		objs := parked.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+		if len(objs) == 1 {
+			po = objs[0]
+		}
+	}
+	if po.Moved {
+		t.Error("a parked car (only jitter) must report Moved=false")
+	}
+
+	// Moving car: travels across the frame (60px/frame on a 200px box, boxes
+	// still overlap so the matcher follows one track).
+	moving := NewTracker(30, 1)
+	var mo TrackedObject
+	for i := 0; i < 8; i++ {
+		box := [4]int{100 + 60*i, 100, 300 + 60*i, 300}
+		objs := moving.Update([]Detection{{Label: "car", Score: 0.9, Box: box}})
+		if len(objs) == 1 {
+			mo = objs[0]
+		}
+	}
+	if !mo.Moved {
+		t.Error("a car that traveled across the scene must report Moved=true")
+	}
+}
+
 // TestTracker_HasStationaryConfirmed drives the motion-gated detect loop's
 // re-confirmation decision: the loop periodically re-runs detection on parked
 // objects (like Frigate's stationary interval) so their tracks do not age out

@@ -77,12 +77,16 @@ func (d *DB) SaveEvent(event camera.Event) error {
 	if event.ZoneName != "" {
 		zoneName = &event.ZoneName
 	}
+	category := event.Category
+	if category == "" {
+		category = camera.CategoryAlert
+	}
 	_, err := d.db.Exec(`
-		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.CameraName, event.Label, event.Score,
 		event.Box[0], event.Box[1], event.Box[2], event.Box[3],
-		utc(event.Timestamp), endTime, event.SnapshotPath, event.SnapshotAvailable, event.ClipPath, event.ClipAvailable, zoneName, nullString(event.ObjectName), nullString(event.SubLabel),
+		utc(event.Timestamp), endTime, event.SnapshotPath, event.SnapshotAvailable, event.ClipPath, event.ClipAvailable, zoneName, nullString(event.ObjectName), nullString(event.SubLabel), category,
 	)
 	return err
 }
@@ -150,11 +154,12 @@ func (d *DB) UpdateEventMediaAvailability(eventID string, snapshotAvailable, cli
 
 // EventFilters narrows event queries. Empty fields are ignored.
 type EventFilters struct {
-	Camera string
-	Label  string
-	Zone   string
-	Object string
-	Search string // free-text LIKE across camera, label, object_name, sub_label
+	Camera   string
+	Label    string
+	Zone     string
+	Object   string
+	Category string // "alert" or "detection"; empty matches all
+	Search   string // free-text LIKE across camera, label, object_name, sub_label
 }
 
 // QueryEvents returns events matching the given filters.
@@ -165,7 +170,7 @@ func (d *DB) QueryEvents(cameraName, label string, limit, offset int) ([]camera.
 // QueryEventsFiltered returns events matching all given filters.
 func (d *DB) QueryEventsFiltered(f EventFilters, limit, offset int) ([]camera.Event, error) {
 	where, args := eventFilterClause(f)
-	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label FROM events" + where + " ORDER BY timestamp DESC"
+	query := "SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category FROM events" + where + " ORDER BY timestamp DESC"
 
 	if limit > 0 {
 		query += " LIMIT ?"
@@ -211,6 +216,10 @@ func eventFilterClause(f EventFilters) (string, []any) {
 	if f.Object != "" {
 		clauses = append(clauses, "(object_name = ? OR sub_label = ?)")
 		args = append(args, f.Object, f.Object)
+	}
+	if f.Category != "" {
+		clauses = append(clauses, "category = ?")
+		args = append(args, f.Category)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		like := "%" + q + "%"
@@ -287,7 +296,7 @@ const (
 		ORDER BY start_time`
 
 	sqlEventsForDateByCamera = `
-		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label
+		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category
 		FROM events
 		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
 		ORDER BY timestamp`
@@ -1061,10 +1070,11 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 		var e camera.Event
 		var endTime sql.NullTime
 		var snapshot, clip, zoneName, objectName, subLabel sql.NullString
+		var category string
 		var snapshotAvailable, clipAvailable bool
 		err := rows.Scan(&e.ID, &e.CameraName, &e.Label, &e.Score,
 			&e.Box[0], &e.Box[1], &e.Box[2], &e.Box[3],
-			&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName, &subLabel,
+			&e.Timestamp, &endTime, &snapshot, &snapshotAvailable, &clip, &clipAvailable, &zoneName, &objectName, &subLabel, &category,
 		)
 		if err != nil {
 			return nil, err
@@ -1079,6 +1089,7 @@ func scanEvents(rows *sql.Rows) ([]camera.Event, error) {
 		e.ZoneName = zoneName.String
 		e.ObjectName = objectName.String
 		e.SubLabel = subLabel.String
+		e.Category = category
 		events = append(events, e)
 	}
 	return events, rows.Err()
@@ -1363,7 +1374,7 @@ func (d *DB) Raw() *sql.DB {
 // pref/mute/cooldown work for users who aren't subscribed.
 
 // eventSelectCols is the fixed column list matched by scanEvents.
-const eventSelectCols = "id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label"
+const eventSelectCols = "id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category"
 
 // clipPredicate matches events that have at least one media file attached.
 const clipPredicate = "(clip_path != '' OR snapshot_path != '')"

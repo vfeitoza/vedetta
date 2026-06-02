@@ -11,7 +11,7 @@ import (
 // currentSchemaVersion is the schema version this build expects. It is stored
 // in SQLite's PRAGMA user_version. A database reporting a lower version is
 // upgraded by migrate; databases created before versioning report 0.
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 // baselineSchema creates every table and index for a fresh database. It is
 // idempotent (CREATE ... IF NOT EXISTS) and a cheap no-op for existing DBs.
@@ -34,6 +34,7 @@ const baselineSchema = `
 		zone_name TEXT,
 		object_name TEXT,
 		sub_label TEXT,
+		category TEXT NOT NULL DEFAULT 'alert',
 		recompressed INTEGER NOT NULL DEFAULT 0,
 		recompressed_at DATETIME,
 		recompress_failures INTEGER NOT NULL DEFAULT 0,
@@ -297,6 +298,16 @@ func migrate(db *sql.DB) error {
 		}
 		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_clip_recompress ON events(camera, end_time)`); err != nil {
 			return fmt.Errorf("create idx_events_clip_recompress: %w", err)
+		}
+	}
+
+	// Version 4: events carry a review/notification category ("alert" or
+	// "detection"). Existing rows default to "alert" so no historical event is
+	// reclassified or hidden.
+	if version < 4 {
+		if err := ensureColumn(db, "events", "category",
+			"ALTER TABLE events ADD COLUMN category TEXT NOT NULL DEFAULT 'alert'"); err != nil {
+			return fmt.Errorf("backfill column events.category: %w", err)
 		}
 	}
 

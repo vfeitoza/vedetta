@@ -22,6 +22,12 @@ type TrackedObject struct {
 	Box        [4]int // x1, y1, x2, y2
 	State      string
 	FramesSeen int
+	// Moved reports whether the centroid has ever traveled more than
+	// defaultMovedRatio of the box size from where the track was first seen.
+	// It stays false for an object that has only sat still (a parked vehicle),
+	// which lets the camera categorize its events as low-priority detections
+	// rather than alerts.
+	Moved bool
 }
 
 // track is the internal state for a single tracked object.
@@ -35,6 +41,13 @@ type track struct {
 	hits        int
 	disappeared int
 	state       TrackState
+
+	// birthBox is the box at track creation; moved latches true once the
+	// centroid travels past defaultMovedRatio * max(box dim) from it. Used to
+	// distinguish an object that arrived/traveled from one that has only ever
+	// sat still.
+	birthBox [4]int
+	moved    bool
 
 	// Stationarity bookkeeping. A track is stationary while
 	// stationaryHits >= Tracker.stationaryThreshold AND its centroid hasn't
@@ -90,6 +103,12 @@ const (
 	defaultStationaryIoU           = 0.5
 	defaultStationaryDriftRatio    = 0.3
 	defaultStationaryMaxMultiplier = 50
+	// defaultMovedRatio is the cumulative centroid travel (as a fraction of the
+	// box's larger dimension) from where a track was first seen, above which the
+	// object counts as having "moved". Sized above realistic box-size wobble on
+	// a parked vehicle (~0.06) and below the displacement of an object actually
+	// traveling through the scene.
+	defaultMovedRatio = 0.15
 )
 
 // NewTracker creates a tracker with the given decay parameters and the
@@ -253,6 +272,12 @@ func (t *Tracker) applyMatch(tr *track, d Detection) {
 	tr.lastWasStationary = tr.stationaryHits >= t.stationaryThreshold
 
 	tr.box = d.Box
+	if !tr.moved {
+		boxDim := math.Max(float64(d.Box[2]-d.Box[0]), float64(d.Box[3]-d.Box[1]))
+		if boxDim > 0 && centroidDistance(tr.birthBox, d.Box) > defaultMovedRatio*boxDim {
+			tr.moved = true
+		}
+	}
 	tr.prevBox = d.Box
 	tr.score = d.Score
 	tr.label = d.Label
@@ -307,14 +332,15 @@ func (t *Tracker) DeletedTracks() []TrackedObject {
 
 func (t *Tracker) newTrack(d Detection) *track {
 	tr := &track{
-		id:      t.nextID,
-		label:   d.Label,
-		box:     d.Box,
-		prevBox: d.Box,
-		score:   d.Score,
-		age:     1,
-		hits:    1,
-		state:   TrackTentative,
+		id:       t.nextID,
+		label:    d.Label,
+		box:      d.Box,
+		prevBox:  d.Box,
+		birthBox: d.Box,
+		score:    d.Score,
+		age:      1,
+		hits:     1,
+		state:    TrackTentative,
 	}
 	t.nextID++
 	if tr.hits >= t.minHits {
@@ -334,6 +360,7 @@ func (t *Tracker) confirmedObjects() []TrackedObject {
 				Box:        tr.box,
 				State:      string(tr.state),
 				FramesSeen: tr.hits,
+				Moved:      tr.moved,
 			})
 		}
 	}

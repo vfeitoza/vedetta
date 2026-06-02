@@ -124,6 +124,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	cameraFilter := r.URL.Query().Get("camera")
 	labelFilter := r.URL.Query().Get("label")
 	objectFilter := r.URL.Query().Get("object")
+	categoryFilter := r.URL.Query().Get("category")
 	searchTerm := r.URL.Query().Get("q")
 	embed := r.URL.Query().Get("embed") == "1"
 	limit := 50
@@ -140,10 +141,11 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	}
 
 	filters := storage.EventFilters{
-		Camera: cameraFilter,
-		Label:  labelFilter,
-		Object: objectFilter,
-		Search: searchTerm,
+		Camera:   cameraFilter,
+		Label:    labelFilter,
+		Object:   objectFilter,
+		Category: categoryFilter,
+		Search:   searchTerm,
 	}
 	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {
@@ -172,6 +174,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`<span class="event-score-badge{{if lt .Score 0.5}} low{{else if lt .Score 0.7}} mid{{end}}" title="Detection confidence: {{scorePercent .Score}}">{{scorePercent .Score}}</span>` +
 			`{{with eventDuration .}}<span class="event-duration-badge" title="Event duration: {{.}}">{{.}}</span>{{end}}` +
 			`{{if .SubLabel}}<span class="event-object-badge" title="Identified: {{.SubLabel}}">{{.SubLabel}}</span>{{end}}` +
+			`{{if eq .Category "detection"}}<span class="event-detection-badge" title="Low-priority detection (e.g. a stationary vehicle)">detection</span>{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
 			`<span class="event-camera-name">{{displayName .CameraName}}</span>` +
@@ -200,6 +203,9 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		}
 		if objectFilter != "" {
 			params.Set("object", objectFilter)
+		}
+		if categoryFilter != "" {
+			params.Set("category", categoryFilter)
 		}
 		if searchTerm != "" {
 			params.Set("q", searchTerm)

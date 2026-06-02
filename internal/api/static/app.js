@@ -5262,6 +5262,7 @@ function loadMoreEvents() {
   var labelChip = document.querySelector('.chip[data-filter="label"].active');
   var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
   var objectChip = document.querySelector('.chip[data-filter="object"].active');
+  var categoryChip = document.querySelector('.chip[data-filter="category"].active');
 
   var url = '/partials/events-gallery?limit=50&offset=' + eventsOffset;
   if (labelChip && labelChip.dataset.value) {
@@ -5272,6 +5273,9 @@ function loadMoreEvents() {
   }
   if (objectChip && objectChip.dataset.value) {
     url += '&object=' + encodeURIComponent(objectChip.dataset.value);
+  }
+  if (categoryChip && categoryChip.dataset.value) {
+    url += '&category=' + encodeURIComponent(categoryChip.dataset.value);
   }
 
   fetch(url)
@@ -5357,6 +5361,7 @@ function reloadEventsWithSearch() {
   var labelChip = document.querySelector('.chip[data-filter="label"].active');
   var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
   var objectChip = document.querySelector('.chip[data-filter="object"].active');
+  var categoryChip = document.querySelector('.chip[data-filter="category"].active');
   var searchInput = el('event-search');
 
   var url = '/partials/events-gallery?limit=50';
@@ -5368,6 +5373,9 @@ function reloadEventsWithSearch() {
   }
   if (objectChip && objectChip.dataset.value) {
     url += '&object=' + encodeURIComponent(objectChip.dataset.value);
+  }
+  if (categoryChip && categoryChip.dataset.value) {
+    url += '&category=' + encodeURIComponent(categoryChip.dataset.value);
   }
   if (searchInput && searchInput.value.trim()) {
     url += '&q=' + encodeURIComponent(searchInput.value.trim());
