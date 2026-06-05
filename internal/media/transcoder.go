@@ -159,10 +159,17 @@ func readSourceResolution(path string) (width, height int, err error) {
 
 // TranscodeResult holds the outcome of a TranscodeSegment call.
 type TranscodeResult struct {
-	OriginalSize int64
-	NewSize      int64
-	Skipped      bool // true when resolution check determined transcoding isn't worth it
+	OriginalSize int64 `json:"original_size"`
+	NewSize      int64 `json:"new_size"`
+	Skipped      bool  `json:"skipped"` // true when resolution check determined transcoding isn't worth it
 }
+
+// TranscodeResultMarker prefixes the single JSON line that the `vedetta
+// transcode` subcommand writes to stdout. The recompressor runs that subcommand
+// as a throwaway child process and scans its stdout for this marker, so the
+// result is recovered reliably even if the OpenH264 C library writes diagnostic
+// lines to stdout alongside it.
+const TranscodeResultMarker = "VEDETTA_TRANSCODE_RESULT:"
 
 // TranscodeSegment re-encodes the video track of the fMP4 at path to (targetW, targetH),
 // copying audio verbatim. Writes output to path+".tmp", verifies it, then atomically

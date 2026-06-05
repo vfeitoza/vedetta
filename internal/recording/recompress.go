@@ -25,7 +25,9 @@ type Recompressor struct {
 	cameras []config.CameraConfig
 	db      *storage.DB
 
-	// transcodeFn performs the actual transcoding. Defaults to media.TranscodeSegment.
+	// transcodeFn performs the actual transcoding. Defaults to
+	// outOfProcessTranscode, which runs the OpenH264 encode path in an isolated
+	// child process so a heap-corruption crash there cannot take down the NVR.
 	transcodeFn func(path string, targetW, targetH int) (media.TranscodeResult, error)
 
 	// inUseFn reports whether a segment file is currently HLS-served and must
@@ -49,7 +51,7 @@ type Recompressor struct {
 // NewRecompressor creates a Recompressor with the given config and camera list.
 // lock is the shared segmentOpMu from the owning Recorder and must not be nil.
 func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB, lock *sync.Mutex) *Recompressor {
-	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: media.TranscodeSegment, inUseFn: media.HLSPathInUse}
+	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: outOfProcessTranscode, inUseFn: media.HLSPathInUse}
 }
 
 // RecompressorStats holds runtime counters for the recompression job.

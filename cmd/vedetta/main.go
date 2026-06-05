@@ -108,6 +108,15 @@ func main() {
 		return
 	}
 
+	// Hidden subcommand: the recompressor re-execs this binary to transcode a
+	// single segment in an isolated child process, so an OpenH264 heap-corruption
+	// crash dies with the child instead of the NVR. Kept tiny: no config, DB, or
+	// network.
+	if len(os.Args) > 1 && os.Args[1] == "transcode" {
+		runTranscode(os.Args[2:])
+		return
+	}
+
 	if len(os.Args) > 2 && os.Args[1] == "auth" && os.Args[2] == "hash-password" {
 		runHashPassword(os.Args[3:])
 		return
