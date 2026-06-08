@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,6 +35,11 @@ type Recompressor struct {
 	// not be recompressed. Defaults to media.HLSPathInUse.
 	inUseFn func(path string) bool
 
+	// statFn reports a path's existence during revalidation. Defaults to
+	// os.Stat; injectable so tests can exercise the missing-file and transient
+	// stat-error branches deterministically.
+	statFn func(path string) (os.FileInfo, error)
+
 	// lock is the shared segment-operation mutex from the owning Recorder.
 	// processOne holds it across the transcode+DB-update pair so that
 	// retention cleanup and emergency delete cannot race with an in-flight
@@ -51,7 +57,7 @@ type Recompressor struct {
 // NewRecompressor creates a Recompressor with the given config and camera list.
 // lock is the shared segmentOpMu from the owning Recorder and must not be nil.
 func NewRecompressor(cfg config.TieredStorageConfig, cameras []config.CameraConfig, db *storage.DB, lock *sync.Mutex) *Recompressor {
-	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: outOfProcessTranscode, inUseFn: media.HLSPathInUse}
+	return &Recompressor{cfg: cfg, cameras: cameras, db: db, lock: lock, transcodeFn: outOfProcessTranscode, inUseFn: media.HLSPathInUse, statFn: os.Stat}
 }
 
 // RecompressorStats holds runtime counters for the recompression job.
@@ -409,7 +415,29 @@ func (r *Recompressor) revalidate(t *recompressTarget) bool {
 			slog.Warn("recompression: revalidate segment failed", "id", t.segID, "error", err)
 			return false
 		}
-		return seg != nil && !seg.Recompressed
+		if seg == nil || seg.Recompressed {
+			return false
+		}
+		// Missing-file check: retention or a manual delete may have removed the
+		// file after selection, leaving an orphaned row. Without this the segment
+		// is reselected every cycle, fails transcode with ENOENT, and - because
+		// the failure cap is reset on every startup - retries forever. Delete the
+		// dead row so it stops being a candidate. Act only on a definitive
+		// does-not-exist error, so a transient mount / I/O blip never destroys
+		// metadata whose file is still there.
+		if _, statErr := r.statFn(seg.Path); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				if derr := r.db.DeleteSegmentByID(seg.ID); derr != nil {
+					slog.Warn("recompression: failed to delete orphaned segment row", "id", seg.ID, "path", seg.Path, "error", derr)
+				} else {
+					slog.Info("recompression: deleted orphaned segment row (file missing)", "id", seg.ID, "path", seg.Path)
+				}
+			} else {
+				slog.Warn("recompression: segment stat failed, skipping", "id", seg.ID, "path", seg.Path, "error", statErr)
+			}
+			return false
+		}
+		return true
 	case kindClip:
 		st, ok, err := r.db.GetClipRecompressState(t.eventID)
 		if err != nil {

@@ -74,6 +74,93 @@ func TestRecompressionJob_SkipsAlreadyRecompressed(t *testing.T) {
 	}
 }
 
+// saveSegmentForTest stores one eligible segment and returns its assigned ID.
+func saveSegmentForTest(t *testing.T, db *storage.DB, path string) int64 {
+	t.Helper()
+	seg := storage.SegmentRecord{
+		Camera:    "cam1",
+		Path:      path,
+		StartTime: time.Now().Add(-48 * time.Hour),
+		EndTime:   time.Now().Add(-47 * time.Hour),
+		SizeBytes: 1000,
+	}
+	if err := db.SaveSegment(seg); err != nil {
+		t.Fatalf("SaveSegment: %v", err)
+	}
+	all, err := db.GetAllSegments("cam1")
+	if err != nil || len(all) == 0 {
+		t.Fatalf("expected saved segment, err=%v", err)
+	}
+	return all[0].ID
+}
+
+// TestRevalidateSegment_DeletesOrphanRowWhenFileMissing proves a segment whose
+// file no longer exists is dropped from the DB and not revalidated, so it stops
+// being reselected and failing transcode forever (the failure cap is reset on
+// every startup, so a missing file would otherwise retry indefinitely).
+func TestRevalidateSegment_DeletesOrphanRowWhenFileMissing(t *testing.T) {
+	r, db := newTestRecompressor(t)
+	id := saveSegmentForTest(t, db, "/does/not/exist/seg.mp4")
+	r.statFn = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+
+	target := &recompressTarget{kind: kindSegment, segID: id, camera: "cam1", path: "/does/not/exist/seg.mp4"}
+	if r.revalidate(target) {
+		t.Fatal("revalidate must return false for a segment whose file is missing")
+	}
+	seg, err := db.GetSegmentByID(id)
+	if err != nil {
+		t.Fatalf("GetSegmentByID: %v", err)
+	}
+	if seg != nil {
+		t.Fatal("orphaned segment row was not deleted")
+	}
+}
+
+// TestRevalidateSegment_KeepsRowOnTransientStatError proves a non-ENOENT stat
+// error (e.g. a temporarily unmounted volume) skips the segment WITHOUT deleting
+// its metadata, so a transient I/O blip can never destroy recording records.
+func TestRevalidateSegment_KeepsRowOnTransientStatError(t *testing.T) {
+	r, db := newTestRecompressor(t)
+	id := saveSegmentForTest(t, db, "/mnt/ssd/seg.mp4")
+	r.statFn = func(string) (os.FileInfo, error) { return nil, errors.New("input/output error") }
+
+	target := &recompressTarget{kind: kindSegment, segID: id, camera: "cam1", path: "/mnt/ssd/seg.mp4"}
+	if r.revalidate(target) {
+		t.Fatal("revalidate must return false (skip) on a stat error")
+	}
+	seg, err := db.GetSegmentByID(id)
+	if err != nil {
+		t.Fatalf("GetSegmentByID: %v", err)
+	}
+	if seg == nil {
+		t.Fatal("segment row was wrongly deleted on a transient (non-ENOENT) stat error")
+	}
+}
+
+// TestRevalidateSegment_KeepsRowWhenFilePresent proves an eligible segment whose
+// file exists revalidates true and is left intact (no regression).
+func TestRevalidateSegment_KeepsRowWhenFilePresent(t *testing.T) {
+	r, db := newTestRecompressor(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "present.mp4")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id := saveSegmentForTest(t, db, path)
+
+	target := &recompressTarget{kind: kindSegment, segID: id, camera: "cam1", path: path}
+	if !r.revalidate(target) {
+		t.Fatal("revalidate must return true for an eligible segment whose file exists")
+	}
+	seg, err := db.GetSegmentByID(id)
+	if err != nil {
+		t.Fatalf("GetSegmentByID: %v", err)
+	}
+	if seg == nil {
+		t.Fatal("present segment row was wrongly deleted")
+	}
+}
+
 func TestRecompressionJob_RespectsScheduleWindow(t *testing.T) {
 	inside := time.Date(2026, 1, 1, 3, 0, 0, 0, time.Local)
 	outside := time.Date(2026, 1, 1, 10, 0, 0, 0, time.Local)
