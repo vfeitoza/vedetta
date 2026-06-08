@@ -280,7 +280,9 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 
 	if c.initSegment == nil || spsChanged {
 		firstInit := c.initSegment == nil
-		initSeg, err := buildFMP4Init(c.videoSPS, c.videoPPS, c.aacConfigForInit(), c.audioTimeScale)
+		// Clamp an over-declared H.264 level so iOS native HLS does not size a
+		// huge decode buffer and stall for seconds before playback starts.
+		initSeg, err := buildFMP4Init(clampSPSLevel(c.videoSPS), c.videoPPS, c.aacConfigForInit(), c.audioTimeScale)
 		if err != nil {
 			slog.Error("HLS init build failed", "stream", c.label, "error", err)
 			return
