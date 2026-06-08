@@ -644,6 +644,91 @@ func (m *HLSManager) createOrCurrentLocked(rtspURL string) *hlsConsumer {
 	return c
 }
 
+// SetWarmURLs reconciles the kept-warm URL set to exactly desired: it warms
+// newly-desired URLs, drops no-longer-desired ones (detaching their consumers),
+// and refreshes any whose source was recreated by a stop/start. Keeping a
+// consumer warm leaves its segment ring populated so the first viewer's
+// playlist is served instantly. No-op without a hub or after Close.
+func (m *HLSManager) SetWarmURLs(desired []string) {
+	select {
+	case <-m.ctx.Done():
+		return
+	default:
+	}
+	if m.hub == nil {
+		return
+	}
+
+	want := make(map[string]struct{}, len(desired))
+	for _, u := range desired {
+		want[u] = struct{}{}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Add new, or refresh those whose source was recreated.
+	for u := range want {
+		if cancel, warm := m.warm[u]; warm {
+			if c, ok := m.consumers[u]; ok && c.source != m.hub.Get(u) {
+				cancel()
+				m.startWarmLocked(u)
+			}
+			continue
+		}
+		m.startWarmLocked(u)
+	}
+
+	// Remove those no longer desired.
+	for u, cancel := range m.warm {
+		if _, ok := want[u]; ok {
+			continue
+		}
+		cancel()
+		delete(m.warm, u)
+		if c, ok := m.consumers[u]; ok {
+			if c.source != nil {
+				c.source.RemoveConsumer(c)
+			}
+			delete(m.consumers, u)
+		}
+	}
+}
+
+// startWarmLocked registers a fresh supervisor context for url and spawns its
+// warmLoop. Caller holds m.mu. Spawning under the lock is safe: warmLoop does
+// its blocking and locking work asynchronously, never synchronously here.
+func (m *HLSManager) startWarmLocked(url string) {
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.warm[url] = cancel
+	go m.warmLoop(ctx, url)
+}
+
+// warmLoop waits until the source has video parameters, then creates the warm
+// consumer. WaitForVideoParams gates on SPS/PPS presence - required because
+// cameras that advertise parameter sets only in-band have no SDP SPS until the
+// first keyframe is sniffed, and a consumer built before then has no decoder.
+func (m *HLSManager) warmLoop(ctx context.Context, url string) {
+	source := m.hub.GetOrCreate(url)
+	if !source.WaitForVideoParams(ctx) {
+		return
+	}
+	m.getOrCreateWarm(url)
+}
+
+// getOrCreateWarm creates or refreshes the warm consumer for url, but only if
+// url is still in the warm set. The membership check is under m.mu, serialized
+// with SetWarmURLs's remove branch, so a URL unwarmed while warmLoop waited for
+// params is not resurrected.
+func (m *HLSManager) getOrCreateWarm(url string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.warm[url]; !ok {
+		return
+	}
+	m.createOrCurrentLocked(url)
+}
+
 // Playlist serves the live media playlist, lazily starting the consumer.
 func (m *HLSManager) Playlist(rtspURL string) (string, bool) {
 	c := m.getOrCreate(rtspURL)
