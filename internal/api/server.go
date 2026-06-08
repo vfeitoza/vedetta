@@ -515,6 +515,45 @@ func (s *Server) TransitionToFull(authChecker *auth.Checker) {
 	s.activeHandler.set(s.withTracing(requestLogMiddleware(s.readyMiddleware(authMiddleware(s, apiBodyLimitMiddleware(newMux))))))
 }
 
+// warmReconcileInterval is how often the server reconciles which cameras' live
+// HLS sub-streams are kept warm. Short enough that a runtime stop/start heals
+// promptly, cheap enough to run unconditionally.
+const warmReconcileInterval = 5 * time.Second
+
+// startWarmHLSReconcile keeps each running camera's live-HLS sub-stream consumer
+// warm so the first viewer (notably iOS native HLS) gets a ready playlist
+// instead of the multi-second cold start. Bounded by both the app context and
+// the HLS manager lifetime, so it stops at shutdown regardless of which startup
+// path set s.ctx (the setup-transition path runs SetSubsystems before
+// SetContext).
+func (s *Server) startWarmHLSReconcile() {
+	if s.hub == nil || s.cameras == nil || s.hls == nil {
+		return
+	}
+	go func() {
+		s.reconcileWarmHLS()
+		t := time.NewTicker(warmReconcileInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.hls.Done():
+				return
+			case <-t.C:
+				s.reconcileWarmHLS()
+			}
+		}
+	}()
+}
+
+func (s *Server) reconcileWarmHLS() {
+	if s.hls == nil || s.cameras == nil {
+		return
+	}
+	s.hls.SetWarmURLs(s.cameras.RunningCameraDetectURLs())
+}
+
 func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Recorder, hub *rtsp.Hub, faceRecognizer *detect.FaceRecognizer, objectEmbedder *detect.ObjectEmbedder, snapshotPath string, faceCropDir string, cameraConfigs []config.CameraConfig, ptzClients map[string]*camera.PTZClient, webrtcCfg config.WebRTCConfig) {
 	s.cameras = cameras
 	s.recorder = recorder
@@ -537,6 +576,10 @@ func (s *Server) SetSubsystems(cameras *camera.Manager, recorder *recording.Reco
 	s.ptzClients = ptzClients
 	s.ready.Store(true)
 	slog.Info("API server ready (all subsystems initialized)")
+
+	// Keep each running camera's live-HLS sub-stream consumer warm so the
+	// first viewer gets a ready playlist instead of the cold-start delay.
+	s.startWarmHLSReconcile()
 }
 
 // readyMiddleware serves static files immediately but returns 503 for API/partial
