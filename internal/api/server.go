@@ -530,13 +530,20 @@ func (s *Server) startWarmHLSReconcile() {
 	if s.hub == nil || s.cameras == nil || s.hls == nil {
 		return
 	}
+	// s.ctx is nil in the setup-mode transition path: NewSetupMode does not set
+	// it and that path calls SetSubsystems before SetContext. Fall back to a
+	// background context; the loop still stops at shutdown via s.hls.Done().
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	go func() {
 		s.reconcileWarmHLS()
 		t := time.NewTicker(warmReconcileInterval)
 		defer t.Stop()
 		for {
 			select {
-			case <-s.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-s.hls.Done():
 				return
