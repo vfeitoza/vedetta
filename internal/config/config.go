@@ -32,6 +32,23 @@ type Config struct {
 	WebRTC        WebRTCConfig        `yaml:"webrtc"`
 	Tracing       TracingConfig       `yaml:"tracing"`
 	Logging       LoggingConfig       `yaml:"logging"`
+	Runtime       RuntimeConfig       `yaml:"runtime"`
+}
+
+// RuntimeConfig holds process-level safety limits.
+type RuntimeConfig struct {
+	// MemoryGuard enables the graceful memory-pressure self-restart. When the
+	// process's Go-runtime memory footprint stays above the limit for a
+	// sustained window, vedetta shuts down cleanly and lets the supervisor
+	// restart it, instead of being SIGKILLed by the OS OOM killer (macOS jetsam,
+	// Linux oom-killer) - which abandons in-flight recordings. Enabled by
+	// default.
+	MemoryGuard bool `yaml:"memory_guard"`
+
+	// MemoryLimitMB is the footprint ceiling in megabytes. 0 (the default) means
+	// auto: 60% of total system RAM. An explicit positive value overrides the
+	// auto calculation. Ignored when MemoryGuard is false.
+	MemoryLimitMB int `yaml:"memory_limit_mb"`
 }
 
 // NotificationsConfig controls web push notification delivery.
@@ -456,6 +473,10 @@ func Defaults() *Config {
 			ServiceName: "vedetta",
 			MaxSizeMB:   50,
 			MaxBackups:  5,
+		},
+		Runtime: RuntimeConfig{
+			MemoryGuard:   true,
+			MemoryLimitMB: 0, // 0 = auto (60% of system RAM)
 		},
 	}
 }

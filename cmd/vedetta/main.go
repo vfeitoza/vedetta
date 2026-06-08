@@ -49,6 +49,13 @@ import (
 // heartbeat before the watchdog terminates it for a supervisor restart.
 const livenessTimeout = 2 * time.Minute
 
+// memoryGuardHardExitGrace is how long the memory guard waits for the graceful
+// shutdown it requested (via a self-SIGTERM) to finish before forcing the
+// process to exit. Kept short because the runaway that trips the guard keeps
+// allocating (~10 GB/min) during shutdown: the backstop must force the restart
+// well before that continued growth reaches the OS OOM-kill point.
+const memoryGuardHardExitGrace = 15 * time.Second
+
 // emitWaitTimeout bounds how long finalizeEvent will wait for an event's emit
 // goroutine (create publish) to finish before publishing the event-end. In
 // practice the emit goroutine completes long before an event ends, so this only
@@ -210,6 +217,48 @@ func main() {
 			}
 		}
 	}()
+
+	// Memory-pressure guard: a runaway leak would otherwise grow until the OS
+	// OOM killer (macOS jetsam, Linux oom-killer) SIGKILLs us - uncatchable, so
+	// in-flight recordings are abandoned and only an external alert notices.
+	// This trips first, at a footprint ceiling well below real memory pressure,
+	// and requests the same graceful shutdown an operator SIGTERM does, so the
+	// supervisor restarts the process cleanly. A hard exit backstops the rare
+	// case where teardown itself is wedged.
+	if cfg.Runtime.MemoryGuard {
+		systemRAM, _ := watchdog.SystemMemoryBytes()
+		memLimit := watchdog.ResolveMemoryLimit(cfg.Runtime.MemoryGuard, cfg.Runtime.MemoryLimitMB, systemRAM)
+		if memLimit > 0 {
+			// Write the trip-time heap profile alongside the log so a recurrence
+			// leaves an analyzable artifact (go tool pprof) next to the evidence.
+			profileDir := ""
+			if cfg.Logging.File != "" {
+				profileDir = filepath.Dir(cfg.Logging.File)
+			}
+			mg := watchdog.NewMemoryGuard(memLimit, func(footprint, limit uint64) {
+				// Capture a heap profile before restarting: the runaway is still
+				// holding the memory now, so this profile pins the allocation sites
+				// retaining it - the missing piece for a precise fix.
+				profile, perr := watchdog.WriteHeapProfile(profileDir, time.Now().Unix())
+				if perr != nil {
+					slog.Error("memory guard: heap profile capture failed", "error", perr)
+				}
+				slog.Error("memory guard tripped, restarting for supervisor before OOM kill",
+					"footprint_mb", footprint/(1024*1024),
+					"limit_mb", limit/(1024*1024),
+					"heap_profile", profile)
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				time.AfterFunc(memoryGuardHardExitGrace, func() {
+					slog.Error("graceful shutdown stalled after memory guard trip, forcing exit")
+					os.Exit(1)
+				})
+			})
+			go mg.Run(ctx)
+			slog.Info("memory guard enabled", "limit_mb", memLimit/(1024*1024))
+		} else {
+			slog.Warn("memory guard enabled but limit unresolved; set runtime.memory_limit_mb to enable it")
+		}
+	}
 
 	if setupMode {
 		slog.Info("no config file found, starting in setup mode", "config", *configPath)

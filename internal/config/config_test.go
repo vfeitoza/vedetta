@@ -1076,6 +1076,56 @@ func TestLoggingDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestRuntimeMemoryGuardDefaults(t *testing.T) {
+	cfg := Defaults()
+	if !cfg.Runtime.MemoryGuard {
+		t.Error("memory guard must be enabled by default")
+	}
+	if cfg.Runtime.MemoryLimitMB != 0 {
+		t.Errorf("default memory_limit_mb = %d, want 0 (auto)", cfg.Runtime.MemoryLimitMB)
+	}
+}
+
+func TestRuntimeConfigYAMLParsing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n" +
+		"runtime:\n" +
+		"  memory_guard: false\n" +
+		"  memory_limit_mb: 8192\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Runtime.MemoryGuard {
+		t.Error("memory_guard: false in YAML must disable the guard")
+	}
+	if cfg.Runtime.MemoryLimitMB != 8192 {
+		t.Errorf("memory_limit_mb = %d, want 8192", cfg.Runtime.MemoryLimitMB)
+	}
+}
+
+// TestRuntimeConfigDefaultsWhenAbsent proves an omitted runtime section keeps
+// the protective defaults rather than zeroing the guard off.
+func TestRuntimeConfigDefaultsWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	yml := "auth:\n  users:\n    - username: a\n      password_hash: x\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !cfg.Runtime.MemoryGuard {
+		t.Error("memory guard must stay enabled when the runtime section is absent")
+	}
+}
+
 func TestOpenH264ConfigYAMLParsing(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -226,3 +226,16 @@ logging:
   max_size_mb: 50
   # Keep this many rotated files (file.1 .. file.N). Default 5.
   max_backups: 5
+
+# Process-level safety limits.
+runtime:
+  # Graceful memory-pressure self-restart. When the process's Go-runtime memory
+  # footprint stays above the limit for ~2 minutes, vedetta shuts down cleanly
+  # (finalizing in-flight recordings) and lets the supervisor restart it, instead
+  # of being SIGKILLed by the OS out-of-memory killer (macOS jetsam, Linux
+  # oom-killer) - which abandons recordings and is only visible as a ServiceDown
+  # alert. Enabled by default.
+  memory_guard: true
+  # Footprint ceiling in megabytes. 0 (the default) means auto: 60% of total
+  # system RAM. Set a positive value to override (e.g. 6144 for a fixed 6 GB cap).
+  memory_limit_mb: 0
