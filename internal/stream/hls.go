@@ -62,6 +62,12 @@ type hlsSegment struct {
 type hlsConsumer struct {
 	mu sync.Mutex
 
+	// source is the RTSP source this consumer is attached to. Recorded so a
+	// stop/start that destroys and recreates the source (the only such path,
+	// via hub.Remove in StopCamera) is detectable by pointer comparison, and so
+	// detach works via this ref even after hub.Remove has unmapped the URL.
+	source *rtsp.Source
+
 	videoSPS    []byte
 	videoPPS    []byte
 	h264Decoder *rtph264.Decoder
@@ -591,13 +597,28 @@ func (m *HLSManager) reapIdle(now time.Time) {
 func (m *HLSManager) getOrCreate(rtspURL string) *hlsConsumer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if c, ok := m.consumers[rtspURL]; ok {
-		c.touch()
-		return c
-	}
+	return m.createOrCurrentLocked(rtspURL)
+}
+
+// createOrCurrentLocked returns the consumer for rtspURL, creating it if absent
+// and rebuilding it if the hub's source for the URL was replaced. The caller
+// must hold m.mu and m.hub must be non-nil.
+func (m *HLSManager) createOrCurrentLocked(rtspURL string) *hlsConsumer {
 	source := m.hub.GetOrCreate(rtspURL)
+	if c, ok := m.consumers[rtspURL]; ok {
+		if c.source == source {
+			c.touch()
+			return c
+		}
+		// Stale: the source was destroyed and recreated by a camera stop/start.
+		if c.source != nil {
+			c.source.RemoveConsumer(c)
+		}
+		delete(m.consumers, rtspURL)
+	}
 	video, audio := source.VideoTrack(), source.AudioTrack()
 	c := newHLSConsumer(video, audio)
+	c.source = source
 	c.label = rtsp.SanitizeURL(rtspURL)
 	audioCodec, audioRate := "none", 0
 	if audio != nil {
