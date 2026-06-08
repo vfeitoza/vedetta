@@ -224,6 +224,32 @@ func (c *hlsConsumer) aacConfigForInit() *mpeg4audio.AudioSpecificConfig {
 	return nil
 }
 
+// dropSEINALs returns the access unit with all SEI NAL units (type 6) removed.
+// SEI is supplemental and never required to decode; some cameras inject
+// proprietary user-data SEI that strict decoders (iOS VideoToolbox) reject.
+// Returns a new slice when anything is dropped so the caller's backing array is
+// never mutated.
+func dropSEINALs(au [][]byte) [][]byte {
+	hasSEI := false
+	for _, nalu := range au {
+		if len(nalu) > 0 && h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeSEI {
+			hasSEI = true
+			break
+		}
+	}
+	if !hasSEI {
+		return au
+	}
+	out := make([][]byte, 0, len(au))
+	for _, nalu := range au {
+		if len(nalu) > 0 && h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeSEI {
+			continue
+		}
+		out = append(out, nalu)
+	}
+	return out
+}
+
 func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 	if c.h264Decoder == nil {
 		return
@@ -303,6 +329,16 @@ func (c *hlsConsumer) OnVideoRTP(pkt *rtp.Packet) {
 		// Seed the timer with the current parameter sets so DTS extraction
 		// works for cameras that advertise SPS/PPS only in the SDP.
 		c.vtimer.setParameterSets(c.videoSPS, c.videoPPS)
+	}
+	// Strip SEI before muxing: cameras inject proprietary user-data SEI (e.g.
+	// TP-Link's "TPLINKMARKERBOX") that strict iOS VideoToolbox rejects as bad
+	// data (kVTVideoDecoderBadDataErr -8969), collapsing live HLS to a
+	// keyframe-only slideshow, while lenient decoders (browser MSE, VLC) ignore
+	// it. SEI is supplemental and never required to decode, so dropping it is
+	// safe and fixes playback for any camera that emits junk SEI.
+	au = dropSEINALs(au)
+	if len(au) == 0 {
+		return
 	}
 	// The timer holds the newest AU in flight and hands back the previous
 	// one finalized with its decode-order duration and PTS-DTS offset.
