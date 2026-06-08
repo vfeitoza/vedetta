@@ -203,3 +203,35 @@ func TestCloseSignalsDoneAndStopsWarming(t *testing.T) {
 		t.Fatal("SetWarmURLs after Close must not create consumers")
 	}
 }
+
+// A public HLS request that arrives before the source has video params creates
+// a decoder-less consumer that drops every packet. Because warm consumers are
+// exempt from idle reaping, the warm supervisor must rebuild it with a working
+// decoder once params arrive - otherwise that camera's live HLS is poisoned for
+// the process lifetime.
+func TestWarmRebuildsConsumerPoisonedBeforeParams(t *testing.T) {
+	hub := rtsp.NewHub(context.Background())
+	const url = "rtsp://192.0.2.46:554/sub"
+	src := rtsp.NewSource(url) // no video track yet
+	hub.SetSourceForTest(url, src)
+
+	m := NewHLSManager(hub)
+	defer m.Close()
+
+	m.SetWarmURLs([]string{url}) // supervisor blocks on params
+
+	// Public request before any params: creates a decoder-less consumer.
+	poisoned := m.getOrCreate(url)
+	if poisoned == nil || poisoned.h264Decoder != nil {
+		t.Fatal("precondition: a consumer built before params must have no decoder")
+	}
+
+	// Params arrive; the warm supervisor must rebuild with a working decoder.
+	src.SetVideoTrack(h264Params())
+	waitFor(t, time.Second, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		c, ok := m.consumers[url]
+		return ok && c != poisoned && c.h264Decoder != nil
+	})
+}

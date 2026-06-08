@@ -726,6 +726,17 @@ func (m *HLSManager) getOrCreateWarm(url string) {
 	if _, ok := m.warm[url]; !ok {
 		return
 	}
+	// The supervisor only reaches here after WaitForVideoParams confirmed the
+	// source has parameter sets. If a public request created a consumer before
+	// params were available, it has no decoder and silently drops every packet;
+	// since warm consumers are exempt from idle reaping it would stay poisoned
+	// forever. Drop it so createOrCurrentLocked rebuilds it with a decoder.
+	if c, ok := m.consumers[url]; ok && c.h264Decoder == nil {
+		if c.source != nil {
+			c.source.RemoveConsumer(c)
+		}
+		delete(m.consumers, url)
+	}
 	m.createOrCurrentLocked(url)
 }
 
