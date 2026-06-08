@@ -101,6 +101,25 @@ func (m *Manager) ListCameras() []string {
 	return append([]string(nil), m.order...)
 }
 
+// RunningCameraDetectURLs returns the DetectURL of every currently-running
+// (not stopped) camera, in config order. A camera is running iff it has an
+// active cancel func, mirroring CameraStatuses. Used to keep each running
+// camera's live-HLS sub-stream consumer warm.
+func (m *Manager) RunningCameraDetectURLs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	urls := make([]string, 0, len(m.order))
+	for _, name := range m.order {
+		if _, running := m.cancelFuncs[name]; !running {
+			continue
+		}
+		if cam, ok := m.cameras[name]; ok {
+			urls = append(urls, cam.DetectURL())
+		}
+	}
+	return urls
+}
+
 // CameraStatuses returns the status of all managed cameras in config-file order.
 func (m *Manager) CameraStatuses() []CameraStatus {
 	m.mu.RLock()
