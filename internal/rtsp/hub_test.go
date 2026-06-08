@@ -208,6 +208,22 @@ func TestHubGet_ReturnsExisting(t *testing.T) {
 	}
 }
 
+func TestSetSourceForTestRegistersWithoutDial(t *testing.T) {
+	hub := NewHub(context.Background())
+	const url = "rtsp://192.0.2.10:554/sub"
+	src := NewSource(url)
+
+	hub.SetSourceForTest(url, src)
+
+	if got := hub.Get(url); got != src {
+		t.Fatalf("SetSourceForTest did not register the source: got %p want %p", got, src)
+	}
+	// GetOrCreate must return the same seeded source, not dial a new one.
+	if got := hub.GetOrCreate(url); got != src {
+		t.Fatalf("GetOrCreate returned a different source than the seeded one: got %p want %p", got, src)
+	}
+}
+
 func TestHubClose_ClearsAllSources(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

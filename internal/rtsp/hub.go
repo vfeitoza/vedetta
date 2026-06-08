@@ -183,6 +183,15 @@ func (h *Hub) Remove(url string) {
 	}
 }
 
+// SetSourceForTest inserts a pre-built Source for url without dialing it, so
+// tests can drive consumers against a seeded source instead of a live camera.
+// The cancel is a no-op because the test owns the source's lifetime. Test-only.
+func (h *Hub) SetSourceForTest(url string, src *Source) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sources[url] = &managedSource{source: src, cancel: func() {}}
+}
+
 // Close disconnects all sources and shuts down the hub.
 func (h *Hub) Close() {
 	h.cancel()
