@@ -178,3 +178,28 @@ func TestSetWarmURLsNilHubNoop(t *testing.T) {
 		t.Fatal("SetWarmURLs must be a no-op without a hub")
 	}
 }
+
+func TestCloseSignalsDoneAndStopsWarming(t *testing.T) {
+	hub := rtsp.NewHub(context.Background())
+	const url = "rtsp://192.0.2.50:554/sub"
+	src := rtsp.NewSource(url) // no params: any supervisor would block on WaitForVideoParams
+	hub.SetSourceForTest(url, src)
+
+	m := NewHLSManager(hub)
+	m.SetWarmURLs([]string{url}) // spawns a supervisor that blocks on params
+
+	m.Close()
+
+	// Done must be closed after Close (so the reconcile loop exits).
+	select {
+	case <-m.Done():
+	default:
+		t.Fatal("Done() must be closed after Close()")
+	}
+
+	// SetWarmURLs after Close must be an inert no-op.
+	m.SetWarmURLs([]string{url})
+	if consumerCount(m) != 0 {
+		t.Fatal("SetWarmURLs after Close must not create consumers")
+	}
+}
