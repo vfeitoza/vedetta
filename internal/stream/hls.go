@@ -550,20 +550,31 @@ type HLSManager struct {
 	hub       *rtsp.Hub
 	mu        sync.Mutex
 	consumers map[string]*hlsConsumer
+	warm      map[string]context.CancelFunc // URLs kept warm -> their supervisor cancel
+	ctx       context.Context               // manager lifetime; cancelled by Close
+	cancel    context.CancelFunc
 	stop      chan struct{}
 	stopOnce  sync.Once
 }
 
 // NewHLSManager creates the manager and starts the idle-reaper janitor.
 func NewHLSManager(hub *rtsp.Hub) *HLSManager {
+	ctx, cancel := context.WithCancel(context.Background())
 	m := &HLSManager{
 		hub:       hub,
 		consumers: make(map[string]*hlsConsumer),
+		warm:      make(map[string]context.CancelFunc),
+		ctx:       ctx,
+		cancel:    cancel,
 		stop:      make(chan struct{}),
 	}
 	go m.janitor()
 	return m
 }
+
+// Done is closed when the manager is closed, so external loops (the warm
+// reconcile loop) stop at shutdown regardless of their own context.
+func (m *HLSManager) Done() <-chan struct{} { return m.ctx.Done() }
 
 func (m *HLSManager) janitor() {
 	ticker := time.NewTicker(hlsIdleTimeout / 3)
@@ -582,13 +593,14 @@ func (m *HLSManager) reapIdle(now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for url, c := range m.consumers {
+		if _, warm := m.warm[url]; warm {
+			continue
+		}
 		if !c.idle(now) {
 			continue
 		}
-		if m.hub != nil {
-			if source := m.hub.Get(url); source != nil {
-				source.RemoveConsumer(c)
-			}
+		if c.source != nil {
+			c.source.RemoveConsumer(c)
 		}
 		delete(m.consumers, url)
 	}
@@ -662,14 +674,17 @@ func (m *HLSManager) Segment(rtspURL string, id uint64) ([]byte, bool) {
 // Close stops the janitor and detaches every consumer from its source.
 func (m *HLSManager) Close() {
 	m.stopOnce.Do(func() { close(m.stop) })
+	m.cancel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for url, c := range m.consumers {
-		if m.hub != nil {
-			if source := m.hub.Get(url); source != nil {
-				source.RemoveConsumer(c)
-			}
+		if c.source != nil {
+			c.source.RemoveConsumer(c)
 		}
 		delete(m.consumers, url)
+	}
+	for u, cancel := range m.warm {
+		cancel()
+		delete(m.warm, u)
 	}
 }

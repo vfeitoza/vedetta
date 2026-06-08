@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rvben/vedetta/internal/rtsp"
 )
@@ -61,5 +62,37 @@ func TestGetOrCreateReusesThenRebuildsOnSourceChange(t *testing.T) {
 	}
 	if consumerCount(m) != 1 {
 		t.Fatalf("stale consumer must be dropped, not accumulated: count=%d", consumerCount(m))
+	}
+}
+
+func TestReapIdleSkipsWarmButReapsOthers(t *testing.T) {
+	m := NewHLSManager(nil) // nil hub is fine: reapIdle no longer dereferences the hub
+	defer m.Close()
+
+	const warmURL = "rtsp://192.0.2.30:554/sub"
+	const coldURL = "rtsp://192.0.2.31:554/sub"
+	cwarm := newHLSConsumer(nil, nil)
+	ccold := newHLSConsumer(nil, nil)
+	old := time.Now().Add(-time.Hour).UnixNano()
+	cwarm.lastAccess.Store(old)
+	ccold.lastAccess.Store(old)
+
+	m.mu.Lock()
+	m.consumers[warmURL] = cwarm
+	m.consumers[coldURL] = ccold
+	m.warm[warmURL] = func() {}
+	m.mu.Unlock()
+
+	m.reapIdle(time.Now())
+
+	m.mu.Lock()
+	_, warmStill := m.consumers[warmURL]
+	_, coldStill := m.consumers[coldURL]
+	m.mu.Unlock()
+	if !warmStill {
+		t.Error("a warm consumer must never be reaped, even when idle")
+	}
+	if coldStill {
+		t.Error("a non-warm idle consumer must still be reaped")
 	}
 }
