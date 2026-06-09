@@ -39,8 +39,8 @@ type Event struct {
 	ObjectName        string      `json:"object_name,omitempty"`
 	SubLabel          string      `json:"sub_label,omitempty"`
 	Category          string      `json:"category,omitempty"` // "alert" (notify) or "detection" (low priority)
-	SnapshotImage     *image.RGBA `json:"-"` // clean frame for disk/embeddings
-	AnnotatedImage    *image.RGBA `json:"-"` // annotated frame for MQTT display
+	SnapshotImage     *image.RGBA `json:"-"`                  // clean frame for disk/embeddings
+	AnnotatedImage    *image.RGBA `json:"-"`                  // annotated frame for MQTT display
 }
 
 // Event categories set review/notification priority: alerts are noteworthy
@@ -712,66 +712,14 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 
 	c.broadcastDetections(tracked, w, h)
 
-	// Collect all current detections for annotation
-	allDetections := make([]detect.Detection, len(tracked))
-	for i, obj := range tracked {
-		allDetections[i] = detect.Detection{
-			Label: obj.Label,
-			Score: obj.Score,
-			Box:   obj.Box,
-		}
-	}
-
-	// Generate one annotated frame with ALL bounding boxes (reused for all new events).
-	// Prefer the full-resolution main stream frame; fall back to the detection frame.
+	// Snapshots for new events are captured lazily, at most once per frame, and
+	// only when a track actually qualifies for an event (see the event-emit loop
+	// below). Capturing eagerly for any unconfirmed track would copy the
+	// full-resolution frame on every frame for a track that never emits an event
+	// - an object outside every zone, or one whose event is repeatedly dropped -
+	// ramping the heap until the memory guard restarts the process.
 	var cleanFrame *image.RGBA     // clean snapshot for disk (embeddings, crops)
 	var annotatedFrame *image.RGBA // annotated snapshot for display (MQTT)
-	if c.eventSnapDir != "" {
-		hasNewTrack := false
-		for _, obj := range tracked {
-			if _, active := c.confirmedTracks[obj.TrackID]; !active {
-				hasNewTrack = true
-				break
-			}
-		}
-		if hasNewTrack {
-			var fullRes *image.RGBA
-			if sc := c.snapConsumer; sc != nil {
-				fullRes = sc.LastFrame()
-			}
-			if fullRes != nil {
-				// Clean copy for disk storage (no annotations)
-				cleanFrame = image.NewRGBA(fullRes.Bounds())
-				copy(cleanFrame.Pix, fullRes.Pix)
-				// Annotated copy for display
-				annotatedFrame = image.NewRGBA(fullRes.Bounds())
-				copy(annotatedFrame.Pix, fullRes.Pix)
-				// Scale detection boxes from detect resolution to full resolution
-				frameW := annotatedFrame.Bounds().Dx()
-				frameH := annotatedFrame.Bounds().Dy()
-				scaled := make([]detect.Detection, len(allDetections))
-				for i, d := range allDetections {
-					scaled[i] = detect.Detection{
-						Label: d.Label,
-						Score: d.Score,
-						Box: [4]int{
-							d.Box[0] * frameW / w,
-							d.Box[1] * frameH / h,
-							d.Box[2] * frameW / w,
-							d.Box[3] * frameH / h,
-						},
-					}
-				}
-				snapshot.DrawDetectionsInPlace(annotatedFrame, scaled)
-			} else {
-				// No full-res frame available, use detection frame
-				cleanFrame = rawToRGBA(buf, w, h)
-				annotatedFrame = image.NewRGBA(cleanFrame.Bounds())
-				copy(annotatedFrame.Pix, cleanFrame.Pix)
-				snapshot.DrawDetectionsInPlace(annotatedFrame, allDetections)
-			}
-		}
-	}
 
 	// Zone matching: tag each tracked object with matching zones and update presence
 	c.mu.RLock()
@@ -812,6 +760,12 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 			// If zones are configured, only emit events for objects in at least one zone
 			if len(zones) > 0 && len(trackZones[obj.TrackID]) == 0 {
 				continue
+			}
+
+			// This track qualifies for an event: capture the shared full-resolution
+			// snapshot once, reused by every new event in this frame.
+			if c.eventSnapDir != "" && cleanFrame == nil {
+				cleanFrame, annotatedFrame = c.captureEventSnapshot(tracked, buf, w, h)
 			}
 
 			eventID := fmt.Sprintf("%s-t%d-%d", c.config.Name, obj.TrackID, time.Now().UnixMilli())
@@ -929,6 +883,62 @@ func (c *Camera) runTrackingPipeline(detections []detect.Detection, buf []byte, 
 		delete(c.trackNames, obj.TrackID)
 		c.mu.Unlock()
 	}
+}
+
+// captureEventSnapshot builds the clean and annotated full-resolution snapshots
+// shared by every new event in a frame. It prefers the full-resolution main-stream
+// frame and falls back to the detection frame when none is available; the
+// annotated copy is drawn with every current detection scaled to the snapshot
+// resolution. Callers invoke it lazily - only once a track actually qualifies for
+// an event - so a track that never emits one (outside every zone, or its event
+// repeatedly dropped) never triggers a full-resolution copy.
+func (c *Camera) captureEventSnapshot(tracked []detect.TrackedObject, buf []byte, w, h int) (clean, annotated *image.RGBA) {
+	allDetections := make([]detect.Detection, len(tracked))
+	for i, obj := range tracked {
+		allDetections[i] = detect.Detection{
+			Label: obj.Label,
+			Score: obj.Score,
+			Box:   obj.Box,
+		}
+	}
+
+	var fullRes *image.RGBA
+	if sc := c.snapConsumer; sc != nil {
+		fullRes = sc.LastFrame()
+	}
+	if fullRes != nil {
+		// Clean copy for disk storage (no annotations)
+		clean = image.NewRGBA(fullRes.Bounds())
+		copy(clean.Pix, fullRes.Pix)
+		// Annotated copy for display
+		annotated = image.NewRGBA(fullRes.Bounds())
+		copy(annotated.Pix, fullRes.Pix)
+		// Scale detection boxes from detect resolution to full resolution
+		frameW := annotated.Bounds().Dx()
+		frameH := annotated.Bounds().Dy()
+		scaled := make([]detect.Detection, len(allDetections))
+		for i, d := range allDetections {
+			scaled[i] = detect.Detection{
+				Label: d.Label,
+				Score: d.Score,
+				Box: [4]int{
+					d.Box[0] * frameW / w,
+					d.Box[1] * frameH / h,
+					d.Box[2] * frameW / w,
+					d.Box[3] * frameH / h,
+				},
+			}
+		}
+		snapshot.DrawDetectionsInPlace(annotated, scaled)
+		return clean, annotated
+	}
+
+	// No full-res frame available, use the detection frame.
+	clean = rawToRGBA(buf, w, h)
+	annotated = image.NewRGBA(clean.Bounds())
+	copy(annotated.Pix, clean.Pix)
+	snapshot.DrawDetectionsInPlace(annotated, allDetections)
+	return clean, annotated
 }
 
 // confirmTrack records a newly confirmed track and emits its start event. The
