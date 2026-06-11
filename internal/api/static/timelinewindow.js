@@ -115,8 +115,13 @@ TimelineWindow.niceTicks = function (start, end, targetCount) {
   return ticks;
 };
 
+// 4px worth of seconds, floored at 5s so deep zoom still snaps, capped at
+// MAX_SNAP_SEC so a coarse zoom (where 4px can be minutes) never teleports a
+// deliberate click far from where the user aimed.
+TimelineWindow.MAX_SNAP_SEC = 15;
+
 TimelineWindow.snapTolerance = function (span, trackWidthPx) {
-  return clamp(Math.round(span / trackWidthPx * 4), 5, 120);
+  return clamp(Math.round(span / trackWidthPx * 4), 5, TimelineWindow.MAX_SNAP_SEC);
 };
 
 // rawEvents: [{ startSec, endSec }] (endSec may be null/<=startSec).

@@ -174,9 +174,12 @@ test('niceTicks returns tick multiples, boundary-inclusive', () => {
   assert.deepEqual(TLW.niceTicks(50500, 61300, 5), [54000, 57600, 61200]);
 });
 
-test('snapTolerance: 4px of time, floored 5s, capped 120s', () => {
-  // wide span, narrow track -> capped at 120
-  assert.equal(TLW.snapTolerance(86400, 340), 120);
+test('snapTolerance: 4px of time, floored 5s, capped 15s', () => {
+  // wide span, narrow track -> capped at 15: a coarse zoom must never
+  // teleport a deliberate click minutes away to an event start
+  assert.equal(TLW.snapTolerance(86400, 340), 15);
+  // full-day window on a typical desktop track -> still capped at 15
+  assert.equal(TLW.snapTolerance(86400, 1400), 15);
   // tight span, wide track -> floored at 5
   assert.equal(TLW.snapTolerance(1800, 1000), 7); // round(1800/1000*4)=7
   assert.equal(TLW.snapTolerance(600, 1000), 5);  // round(2.4)=2 -> floor 5
