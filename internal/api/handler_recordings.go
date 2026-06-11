@@ -11,8 +11,42 @@ import (
 	"os"
 	"time"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
 	"github.com/rvben/vedetta/internal/media"
 )
+
+// resolveTZ maps an optional IANA timezone name to a *time.Location,
+// falling back to UTC for nil, empty, or unknown names.
+func resolveTZ(tz *string) *time.Location {
+	if tz == nil || *tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(*tz)
+	if err != nil {
+		slog.Debug("unknown timezone, falling back to UTC", "tz", *tz)
+		return time.UTC
+	}
+	return loc
+}
+
+// dayBoundsInTZ returns the [start, end) instants of the requested calendar
+// day in the given timezone. When date is nil, the current day in that
+// timezone is used. AddDate keeps the bounds correct across DST transitions
+// (23/25-hour days).
+func dayBoundsInTZ(date *openapi_types.Date, tz *string) (time.Time, time.Time) {
+	loc := resolveTZ(tz)
+	var y int
+	var m time.Month
+	var d int
+	if date != nil {
+		y, m, d = date.Date()
+	} else {
+		y, m, d = time.Now().In(loc).Date()
+	}
+	start := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	return start, start.AddDate(0, 0, 1)
+}
 
 func (s *Server) ListSegments(w http.ResponseWriter, r *http.Request, camera string, params ListSegmentsParams) {
 	cam := s.cameras.GetCamera(camera)
@@ -21,12 +55,8 @@ func (s *Server) ListSegments(w http.ResponseWriter, r *http.Request, camera str
 		return
 	}
 
-	date := time.Now().UTC()
-	if params.Date != nil {
-		date = params.Date.Time
-	}
-
-	segments, err := s.db.GetSegmentsForDate(camera, date)
+	dayStart, dayEnd := dayBoundsInTZ(params.Date, params.Tz)
+	segments, err := s.db.GetSegmentsOverlapping(camera, dayStart, dayEnd)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
@@ -66,18 +96,14 @@ func (s *Server) GetCameraTimeline(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
-	date := time.Now().UTC()
-	if params.Date != nil {
-		date = params.Date.Time
-	}
-
-	segments, err := s.db.GetSegmentsForDate(name, date)
+	dayStart, dayEnd := dayBoundsInTZ(params.Date, params.Tz)
+	segments, err := s.db.GetSegmentsOverlapping(name, dayStart, dayEnd)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 
-	events, err := s.db.QueryEventsForDate(name, date)
+	events, err := s.db.QueryEventsInRange(name, dayStart, dayEnd)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
@@ -120,7 +146,7 @@ func (s *Server) GetCameraTimeline(w http.ResponseWriter, r *http.Request, name 
 		})
 	}
 
-	activity, err := s.db.GetMotionActivity(name, date)
+	activity, err := s.db.GetMotionActivityInRange(name, dayStart, dayEnd)
 	if err != nil {
 		slog.Error("failed to get motion activity", "camera", name, "error", err)
 		activity = nil
@@ -304,7 +330,9 @@ func (s *Server) GetRecordingsCalendar(w http.ResponseWriter, r *http.Request, p
 		cameraFilter = *params.Camera
 	}
 
-	year, month := time.Now().Year(), int(time.Now().Month())
+	loc := resolveTZ(params.Tz)
+	now := time.Now().In(loc)
+	year, month := now.Year(), int(now.Month())
 	if params.Month != nil {
 		if parsed, err := time.Parse("2006-01", *params.Month); err == nil {
 			year = parsed.Year()
@@ -312,7 +340,7 @@ func (s *Server) GetRecordingsCalendar(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 
-	days, err := s.db.GetRecordingDays(cameraFilter, year, month)
+	days, err := s.db.GetRecordingDays(cameraFilter, year, month, loc)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
@@ -325,13 +353,10 @@ func (s *Server) GetRecordingsCalendar(w http.ResponseWriter, r *http.Request, p
 }
 
 func (s *Server) GetRecordingsSummary(w http.ResponseWriter, r *http.Request, params GetRecordingsSummaryParams) {
-	date := time.Now().UTC()
-	if params.Date != nil {
-		date = params.Date.Time
-	}
+	dayStart, dayEnd := dayBoundsInTZ(params.Date, params.Tz)
 
-	// Get all segments for the date across all cameras.
-	segments, err := s.db.GetSegmentsForDate("", date)
+	// Get all segments overlapping the day across all cameras.
+	segments, err := s.db.GetSegmentsOverlapping("", dayStart, dayEnd)
 	if err != nil {
 		s.serverError(w, r, err)
 		return

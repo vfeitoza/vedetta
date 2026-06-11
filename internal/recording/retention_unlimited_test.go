@@ -105,7 +105,7 @@ func TestRunCleanup_RetainDaysZeroKeepsMotionActivity(t *testing.T) {
 
 	rec.runCleanupLocked()
 
-	got, err := db.GetMotionActivity("cam1", bucket)
+	got, err := db.GetMotionActivityInRange("cam1", bucket.Add(-time.Hour), bucket.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestRunCleanup_RetainDaysPositiveDeletesOldMotionActivity(t *testing.T) {
 
 	rec.runCleanupLocked()
 
-	got, err := db.GetMotionActivity("cam1", bucket)
+	got, err := db.GetMotionActivityInRange("cam1", bucket.Add(-time.Hour), bucket.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

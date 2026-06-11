@@ -582,20 +582,6 @@ func (r *Recorder) TriggerRecompression(ctx context.Context) error {
 	return nil
 }
 
-// ListSegmentsForDate returns segments for a camera on a specific date.
-func (r *Recorder) ListSegmentsForDate(cameraName string, date time.Time) []storage.SegmentRecord {
-	segments, err := r.db.GetSegmentsForDate(cameraName, date)
-	if err != nil {
-		slog.Error("failed to query segments for date",
-			"camera", cameraName,
-			"date", date,
-			"error", err,
-		)
-		return nil
-	}
-	return segments
-}
-
 // buildCameraRetention constructs a map from camera name to retain_days for
 // cameras that have an explicit per-camera override set.
 func buildCameraRetention(cams []config.CameraConfig) map[string]int {

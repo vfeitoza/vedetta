@@ -49,8 +49,9 @@ func TestHotQueriesUseIndexes(t *testing.T) {
 		args    []any
 		mustNot string // a full-scan signature that must be absent
 	}{
-		{"segments by camera+date", sqlSegmentsForDateByCamera, []any{"cam", "a", "b"}, "SCAN segments"},
-		{"events by camera+date", sqlEventsForDateByCamera, []any{"cam", "a", "b"}, "SCAN events"},
+		{"segments overlapping by camera", sqlSegmentsOverlappingByCamera, []any{"cam", "a", "b"}, "SCAN segments"},
+		{"segments overlapping all cameras", sqlSegmentsOverlappingAll, []any{"a", "b"}, "SCAN segments"},
+		{"events in range by camera", sqlEventsInRangeByCamera, []any{"cam", "a", "b"}, "SCAN events"},
 		{"segments ending before", sqlSegmentsEndingBefore, []any{"a"}, "SCAN segments"},
 	}
 	for _, tc := range cases {

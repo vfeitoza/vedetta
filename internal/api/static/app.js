@@ -52,6 +52,18 @@ function pathSegment(value) {
   return encodeURIComponent(String(value));
 }
 
+// "&tz=Europe/Amsterdam" - the browser's IANA timezone as a query-string
+// suffix for date-scoped endpoints, so the server resolves day boundaries on
+// the user's calendar instead of UTC. Empty string when unavailable.
+function tzQuerySuffix() {
+  try {
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz ? '&tz=' + encodeURIComponent(tz) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 function formatTimeAgo(dateStr) {
   const d = new Date(dateStr);
   const s = Math.floor((Date.now() - d) / 1000);
@@ -2556,7 +2568,7 @@ function fetchTimelineData(trigger) {
     String(timelineDate.getMonth() + 1).padStart(2, '0') + '-' +
     String(timelineDate.getDate()).padStart(2, '0');
 
-  fetch('/api/cameras/' + encodeURIComponent(name) + '/timeline?date=' + dateStr)
+  fetch('/api/cameras/' + encodeURIComponent(name) + '/timeline?date=' + dateStr + tzQuerySuffix())
     .then(function(resp) {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();
@@ -2580,12 +2592,24 @@ function fetchTimelineData(trigger) {
 
 // Build the per-day timeline model (coverage, motion scores, merged blocks,
 // event intervals) WITHOUT drawing. Runs before defaultWindow() so latest
-// activity is known, and before every render. Local-timezone handling matches
-// the original: minute indices come from getHours()/getMinutes() of each Date.
+// activity is known, and before every render. Seconds-of-day come from local
+// getHours()/getMinutes() (matching the click-to-Date mapping in
+// commitSeekToSecond); instants outside the displayed local day - segments
+// legitimately cross midnight - are clamped to the day's edges.
 function prepareTimelineModel(activity, events, segments) {
   var hasCoverage = new Uint8Array(1440);
   var isToday = timelineDate && timelineDate.toDateString() === new Date().toDateString();
   var nowMin = isToday ? new Date().getHours() * 60 + new Date().getMinutes() : 1440;
+
+  var baseDate = timelineDate || new Date();
+  var dayStartMs = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate()).getTime();
+  var dayEndMs = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + 1).getTime();
+  function secOfDay(d) {
+    var t = d.getTime();
+    if (t <= dayStartMs) return 0;
+    if (t >= dayEndMs) return 86400;
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  }
 
   var blocks = [];
   if (segments) {
@@ -2594,16 +2618,14 @@ function prepareTimelineModel(activity, events, segments) {
       return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
     });
     segments.forEach(function(seg) {
-      var start = new Date(seg.start_time);
-      var end = new Date(seg.end_time);
-      var startMin = start.getHours() * 60 + start.getMinutes();
-      var endMin = end.getHours() * 60 + end.getMinutes();
-      if (endMin > nowMin) endMin = nowMin;
+      var startSec = secOfDay(new Date(seg.start_time));
+      var endSec = secOfDay(new Date(seg.end_time));
+      if (endSec <= startSec) return;
+
+      var startMin = Math.floor(startSec / 60);
+      var endMin = Math.min(Math.floor(endSec / 60), nowMin);
       for (var m = startMin; m <= endMin && m < 1440; m++) hasCoverage[m] = 1;
 
-      var startSec = start.getHours() * 3600 + start.getMinutes() * 60 + start.getSeconds();
-      var endSec = end.getHours() * 3600 + end.getMinutes() * 60 + end.getSeconds();
-      if (endSec <= startSec) return;
       if (blocks.length > 0 && startSec - blocks[blocks.length - 1].end <= 60) {
         if (endSec > blocks[blocks.length - 1].end) blocks[blocks.length - 1].end = endSec;
       } else {
@@ -2616,6 +2638,7 @@ function prepareTimelineModel(activity, events, segments) {
   if (activity) {
     activity.forEach(function(a) {
       var d = new Date(a.t);
+      if (d.getTime() < dayStartMs || d.getTime() >= dayEndMs) return;
       var minute = d.getHours() * 60 + d.getMinutes();
       if (minute >= 0 && minute < 1440) scores[minute] = a.s;
     });
@@ -2624,13 +2647,8 @@ function prepareTimelineModel(activity, events, segments) {
   var rawEvents = [];
   if (events) {
     events.forEach(function(evt) {
-      var startTs = new Date(evt.timestamp);
-      var startSec = startTs.getHours() * 3600 + startTs.getMinutes() * 60 + startTs.getSeconds();
-      var endSec = null;
-      if (evt.end_time) {
-        var endTs = new Date(evt.end_time);
-        endSec = endTs.getHours() * 3600 + endTs.getMinutes() * 60 + endTs.getSeconds();
-      }
+      var startSec = secOfDay(new Date(evt.timestamp));
+      var endSec = evt.end_time ? secOfDay(new Date(evt.end_time)) : null;
       rawEvents.push({ startSec: startSec, endSec: endSec });
     });
   }
@@ -3105,7 +3123,7 @@ function renderCalendar() {
   }
 
   var monthStr = year + '-' + String(month + 1).padStart(2, '0');
-  var url = '/api/recordings/calendar?month=' + monthStr;
+  var url = '/api/recordings/calendar?month=' + monthStr + tzQuerySuffix();
 
   fetch(url)
     .then(function(resp) { return resp.json(); })
@@ -3164,7 +3182,7 @@ function loadRecordingsSummary(date) {
   if (summary) summary.innerHTML = '';
   if (cards) cards.innerHTML = '<div class="loading-state">Loading...</div>';
 
-  fetch('/api/recordings/summary?date=' + dateStr)
+  fetch('/api/recordings/summary?date=' + dateStr + tzQuerySuffix())
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
       renderRecordingsSummary(data, date);

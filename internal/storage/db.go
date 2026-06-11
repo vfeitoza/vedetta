@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -289,13 +290,19 @@ func utc(t time.Time) time.Time {
 // hold the exact SQL the corresponding methods run so the query-plan tests can
 // assert index usage against the production statement.
 const (
-	sqlSegmentsForDateByCamera = `
+	sqlSegmentsOverlappingByCamera = `
 		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
 		FROM segments
-		WHERE camera = ? AND start_time >= ? AND start_time < ?
+		WHERE camera = ? AND start_time < ? AND end_time > ?
 		ORDER BY start_time`
 
-	sqlEventsForDateByCamera = `
+	sqlSegmentsOverlappingAll = `
+		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
+		FROM segments
+		WHERE start_time < ? AND end_time > ?
+		ORDER BY start_time`
+
+	sqlEventsInRangeByCamera = `
 		SELECT id, camera, label, score, box_x1, box_y1, box_x2, box_y2, timestamp, end_time, snapshot_path, snapshot_available, clip_path, clip_available, zone_name, object_name, sub_label, category
 		FROM events
 		WHERE camera = ? AND timestamp >= ? AND timestamp < ?
@@ -330,12 +337,10 @@ func (d *DB) SaveMotionActivity(camera string, bucket time.Time, score float64) 
 	return err
 }
 
-// GetMotionActivity returns all motion buckets for a camera on the same UTC day as the given date.
-func (d *DB) GetMotionActivity(camera string, date time.Time) ([]MotionBucket, error) {
-	dayStart := date.UTC().Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24 * time.Hour)
+// GetMotionActivityInRange returns motion buckets for a camera within [start, end).
+func (d *DB) GetMotionActivityInRange(camera string, start, end time.Time) ([]MotionBucket, error) {
 	rows, err := d.db.Query("SELECT bucket, score FROM motion_activity WHERE camera = ? AND bucket >= ? AND bucket < ? ORDER BY bucket",
-		camera, utc(dayStart), utc(dayEnd))
+		camera, utc(start), utc(end))
 	if err != nil {
 		return nil, err
 	}
@@ -359,21 +364,7 @@ func (d *DB) DeleteMotionActivityBefore(cutoff time.Time) error {
 
 // QuerySegments returns segments for a camera that overlap the given time range.
 func (d *DB) QuerySegments(cameraName string, from, to time.Time) ([]SegmentRecord, error) {
-	rows, err := d.db.Query(`
-		SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
-		FROM segments
-		WHERE camera = ?
-		  AND start_time < ?
-		  AND end_time > ?
-		ORDER BY start_time`,
-		cameraName, utc(to), utc(from),
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	return scanSegments(rows)
+	return d.GetSegmentsOverlapping(cameraName, from, to)
 }
 
 // DeleteSegment removes a segment record by path.
@@ -500,24 +491,17 @@ func (d *DB) TotalStorageBytes() (int64, error) {
 	return total.Int64, nil
 }
 
-// GetSegmentsForDate returns segments for a camera where start_time falls on the given date.
-// If cameraName is empty, returns segments for all cameras.
-func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRecord, error) {
-	dayStart := date.UTC().Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24 * time.Hour)
-
+// GetSegmentsOverlapping returns segments that overlap the [start, end) range.
+// A segment overlaps when it intersects the range at all, so a segment that
+// began before the range but runs into it is included. If cameraName is empty,
+// returns segments for all cameras.
+func (d *DB) GetSegmentsOverlapping(cameraName string, start, end time.Time) ([]SegmentRecord, error) {
 	var rows *sql.Rows
 	var err error
 	if cameraName != "" {
-		rows, err = d.db.Query(sqlSegmentsForDateByCamera, cameraName, utc(dayStart), utc(dayEnd))
+		rows, err = d.db.Query(sqlSegmentsOverlappingByCamera, cameraName, utc(end), utc(start))
 	} else {
-		rows, err = d.db.Query(`
-			SELECT id, camera, path, start_time, end_time, size_bytes, recompressed, recompressed_at, recompress_failures
-			FROM segments
-			WHERE start_time >= ? AND start_time < ?
-			ORDER BY start_time`,
-			utc(dayStart), utc(dayEnd),
-		)
+		rows, err = d.db.Query(sqlSegmentsOverlappingAll, utc(end), utc(start))
 	}
 	if err != nil {
 		return nil, err
@@ -527,12 +511,9 @@ func (d *DB) GetSegmentsForDate(cameraName string, date time.Time) ([]SegmentRec
 	return scanSegments(rows)
 }
 
-// QueryEventsForDate returns events for a camera on a given date (UTC day).
-func (d *DB) QueryEventsForDate(cameraName string, date time.Time) ([]camera.Event, error) {
-	dayStart := date.UTC().Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24 * time.Hour)
-
-	rows, err := d.db.Query(sqlEventsForDateByCamera, cameraName, utc(dayStart), utc(dayEnd))
+// QueryEventsInRange returns events for a camera with timestamp within [start, end).
+func (d *DB) QueryEventsInRange(cameraName string, start, end time.Time) ([]camera.Event, error) {
+	rows, err := d.db.Query(sqlEventsInRangeByCamera, cameraName, utc(start), utc(end))
 	if err != nil {
 		return nil, err
 	}
@@ -999,41 +980,50 @@ func (d *DB) BackfillClipSizes(batch int) (int, error) {
 	return len(todo), nil
 }
 
-// GetRecordingDays returns sorted day numbers that have segments for the given camera and month.
-// If camera is empty, returns days across all cameras.
-func (d *DB) GetRecordingDays(camera string, year int, month int) ([]int, error) {
-	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+// GetRecordingDays returns sorted day numbers (in loc) that have recording
+// coverage for the given camera and month. The month is defined by year/month
+// interpreted in loc, so days line up with the calendar the user sees. A day
+// counts when any segment overlaps it, including segments spanning midnight.
+// If camera is empty, days across all cameras are returned.
+func (d *DB) GetRecordingDays(camera string, year int, month int, loc *time.Location) ([]int, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, loc)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
-	var rows *sql.Rows
-	var err error
-	if camera != "" {
-		rows, err = d.db.Query(`
-			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
-			FROM segments
-			WHERE camera = ? AND start_time >= ? AND start_time < ?
-			ORDER BY day`, camera, utc(monthStart), utc(monthEnd))
-	} else {
-		rows, err = d.db.Query(`
-			SELECT DISTINCT CAST(substr(start_time, 9, 2) AS INTEGER) AS day
-			FROM segments
-			WHERE start_time >= ? AND start_time < ?
-			ORDER BY day`, utc(monthStart), utc(monthEnd))
-	}
+	segments, err := d.GetSegmentsOverlapping(camera, monthStart, monthEnd)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 
-	var days []int
-	for rows.Next() {
-		var day int
-		if err := rows.Scan(&day); err != nil {
-			return nil, err
+	covered := make(map[int]bool)
+	for _, seg := range segments {
+		start := seg.StartTime
+		if start.Before(monthStart) {
+			start = monthStart
 		}
+		end := seg.EndTime
+		if end.After(monthEnd) {
+			end = monthEnd
+		}
+		// Mark every local day the segment touches. Day-by-day via AddDate
+		// stays correct across DST transitions (23/25-hour days).
+		day := time.Date(start.In(loc).Year(), start.In(loc).Month(), start.In(loc).Day(), 0, 0, 0, 0, loc)
+		for day.Before(end) {
+			if !day.Before(monthStart) {
+				covered[day.Day()] = true
+			}
+			day = day.AddDate(0, 0, 1)
+		}
+	}
+
+	days := make([]int, 0, len(covered))
+	for day := range covered {
 		days = append(days, day)
 	}
-	return days, rows.Err()
+	sort.Ints(days)
+	return days, nil
 }
 
 // GetAdjacentEvents returns the previous and next event IDs relative to the given event,

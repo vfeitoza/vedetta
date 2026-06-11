@@ -1299,6 +1299,11 @@ paths:
           schema:
             type: string
             format: date
+        - name: tz
+          in: query
+          description: "IANA timezone defining the day boundaries (e.g. Europe/Amsterdam); defaults to UTC"
+          schema:
+            type: string
       responses:
         "200":
           description: Segment list
@@ -1328,6 +1333,11 @@ paths:
           description: "Month in YYYY-MM format"
           schema:
             type: string
+        - name: tz
+          in: query
+          description: "IANA timezone defining the month boundaries (e.g. Europe/Amsterdam); defaults to UTC"
+          schema:
+            type: string
       responses:
         "200":
           description: Calendar days
@@ -1347,6 +1357,11 @@ paths:
           schema:
             type: string
             format: date
+        - name: tz
+          in: query
+          description: "IANA timezone defining the day boundaries (e.g. Europe/Amsterdam); defaults to UTC"
+          schema:
+            type: string
       responses:
         "200":
           description: Recording summary
@@ -1452,6 +1467,11 @@ paths:
           schema:
             type: string
             format: date
+        - name: tz
+          in: query
+          description: "IANA timezone defining the day boundaries (e.g. Europe/Amsterdam); defaults to UTC"
+          schema:
+            type: string
       responses:
         "200":
           description: Timeline data

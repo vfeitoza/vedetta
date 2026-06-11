@@ -72,41 +72,43 @@ func TestQuerySegments_GoStringFormat(t *testing.T) {
 	}
 }
 
-func TestGetSegmentsForDate_GoStringFormat(t *testing.T) {
+func TestGetSegmentsOverlapping_GoStringFormat(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 
 	insertSegmentRaw(t, db, "cam1", "/seg1.mp4", now.Add(-2*time.Hour), now.Add(-1*time.Hour), 1000)
 	insertSegmentRaw(t, db, "cam1", "/seg2.mp4", now.Add(-1*time.Hour), now, 2000)
 
-	segs, err := db.GetSegmentsForDate("cam1", now)
+	segs, err := db.GetSegmentsOverlapping("cam1", now.Add(-24*time.Hour), now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(segs) != 2 {
-		t.Errorf("GetSegmentsForDate: got %d segments, want 2", len(segs))
+		t.Errorf("GetSegmentsOverlapping: got %d segments, want 2", len(segs))
 	}
 }
 
 func TestGetRecordingDays_GoStringFormat(t *testing.T) {
 	db := newTestDB(t)
-	now := time.Now().UTC()
+	// Fixed mid-day instant: the test exercises raw timestamp-format
+	// compatibility, not day-boundary logic.
+	ts := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	insertSegmentRaw(t, db, "cam1", "/seg.mp4", now.Add(-1*time.Hour), now, 1000)
+	insertSegmentRaw(t, db, "cam1", "/seg.mp4", ts.Add(-1*time.Hour), ts, 1000)
 
-	days, err := db.GetRecordingDays("cam1", now.Year(), int(now.Month()))
+	days, err := db.GetRecordingDays("cam1", ts.Year(), int(ts.Month()), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(days) != 1 {
 		t.Errorf("GetRecordingDays: got %d days, want 1", len(days))
 	}
-	if len(days) > 0 && days[0] != now.Day() {
-		t.Errorf("GetRecordingDays: got day %d, want %d", days[0], now.Day())
+	if len(days) > 0 && days[0] != ts.Day() {
+		t.Errorf("GetRecordingDays: got day %d, want %d", days[0], ts.Day())
 	}
 }
 
-func TestGetMotionActivity_GoStringFormat(t *testing.T) {
+func TestGetMotionActivityInRange_GoStringFormat(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 	bucket := now.Truncate(time.Minute)
@@ -114,12 +116,12 @@ func TestGetMotionActivity_GoStringFormat(t *testing.T) {
 	insertMotionRaw(t, db, "cam1", bucket, 0.5)
 	insertMotionRaw(t, db, "cam1", bucket.Add(-1*time.Minute), 0.3)
 
-	activity, err := db.GetMotionActivity("cam1", now)
+	activity, err := db.GetMotionActivityInRange("cam1", now.Add(-time.Hour), now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(activity) != 2 {
-		t.Errorf("GetMotionActivity: got %d buckets, want 2", len(activity))
+		t.Errorf("GetMotionActivityInRange: got %d buckets, want 2", len(activity))
 	}
 }
 
@@ -139,19 +141,19 @@ func TestCountEventsToday_GoStringFormat(t *testing.T) {
 	}
 }
 
-func TestQueryEventsForDate_GoStringFormat(t *testing.T) {
+func TestQueryEventsInRange_GoStringFormat(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 
 	insertEventRaw(t, db, "ev1", "cam1", "person", now.Add(-1*time.Hour))
 	insertEventRaw(t, db, "ev2", "cam1", "car", now.Add(-30*time.Minute))
 
-	events, err := db.QueryEventsForDate("cam1", now)
+	events, err := db.QueryEventsInRange("cam1", now.Add(-2*time.Hour), now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 2 {
-		t.Errorf("QueryEventsForDate: got %d events, want 2", len(events))
+		t.Errorf("QueryEventsInRange: got %d events, want 2", len(events))
 	}
 }
 

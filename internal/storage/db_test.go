@@ -349,34 +349,60 @@ func TestGetSegmentByPath_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetSegmentsForDate(t *testing.T) {
+func TestGetSegmentsOverlapping(t *testing.T) {
 	db := newTestDB(t)
-	march20 := time.Date(2026, 3, 20, 14, 0, 0, 0, time.UTC)
-	march21 := time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC)
+	march20 := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	march21 := march20.AddDate(0, 0, 1)
 
-	mustSaveSegment(t, db, makeSegment("cam1", "/seg1.mp4", march20, march20.Add(5*time.Minute), 1000))
-	mustSaveSegment(t, db, makeSegment("cam1", "/seg2.mp4", march20.Add(time.Hour), march20.Add(time.Hour+5*time.Minute), 2000))
-	mustSaveSegment(t, db, makeSegment("cam1", "/seg3.mp4", march21, march21.Add(5*time.Minute), 3000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/seg1.mp4", march20.Add(14*time.Hour), march20.Add(14*time.Hour+5*time.Minute), 1000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/seg2.mp4", march20.Add(15*time.Hour), march20.Add(15*time.Hour+5*time.Minute), 2000))
+	mustSaveSegment(t, db, makeSegment("cam1", "/seg3.mp4", march21.Add(10*time.Hour), march21.Add(10*time.Hour+5*time.Minute), 3000))
 
-	segs, err := db.GetSegmentsForDate("cam1", march20)
+	segs, err := db.GetSegmentsOverlapping("cam1", march20, march21)
 	if err != nil {
-		t.Fatalf("GetSegmentsForDate: %v", err)
+		t.Fatalf("GetSegmentsOverlapping: %v", err)
 	}
 	if len(segs) != 2 {
 		t.Fatalf("got %d segments, want 2", len(segs))
 	}
 }
 
-func TestGetSegmentsForDate_DifferentCamera(t *testing.T) {
+func TestGetSegmentsOverlapping_SpansRangeBoundary(t *testing.T) {
+	db := newTestDB(t)
+	dayStart := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	dayEnd := dayStart.AddDate(0, 0, 1)
+
+	// Starts 5 minutes before the range but runs into it: must be included.
+	mustSaveSegment(t, db, makeSegment("cam1", "/cross-in.mp4", dayStart.Add(-5*time.Minute), dayStart.Add(5*time.Minute), 1000))
+	// Starts inside the range and crosses out of it: must be included.
+	mustSaveSegment(t, db, makeSegment("cam1", "/cross-out.mp4", dayEnd.Add(-5*time.Minute), dayEnd.Add(5*time.Minute), 2000))
+	// Ends exactly at range start (half-open): must be excluded.
+	mustSaveSegment(t, db, makeSegment("cam1", "/before.mp4", dayStart.Add(-10*time.Minute), dayStart, 3000))
+	// Starts exactly at range end (half-open): must be excluded.
+	mustSaveSegment(t, db, makeSegment("cam1", "/after.mp4", dayEnd, dayEnd.Add(10*time.Minute), 4000))
+
+	segs, err := db.GetSegmentsOverlapping("cam1", dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("GetSegmentsOverlapping: %v", err)
+	}
+	if len(segs) != 2 {
+		t.Fatalf("got %d segments, want 2 (cross-in and cross-out)", len(segs))
+	}
+	if segs[0].Path != "/cross-in.mp4" || segs[1].Path != "/cross-out.mp4" {
+		t.Errorf("got paths %q, %q; want /cross-in.mp4, /cross-out.mp4", segs[0].Path, segs[1].Path)
+	}
+}
+
+func TestGetSegmentsOverlapping_DifferentCamera(t *testing.T) {
 	db := newTestDB(t)
 	ts := time.Date(2026, 3, 20, 14, 0, 0, 0, time.UTC)
 
 	mustSaveSegment(t, db, makeSegment("cam1", "/seg1.mp4", ts, ts.Add(5*time.Minute), 1000))
 	mustSaveSegment(t, db, makeSegment("cam2", "/seg2.mp4", ts, ts.Add(5*time.Minute), 2000))
 
-	segs, err := db.GetSegmentsForDate("cam1", ts)
+	segs, err := db.GetSegmentsOverlapping("cam1", ts.Add(-time.Hour), ts.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("GetSegmentsForDate: %v", err)
+		t.Fatalf("GetSegmentsOverlapping: %v", err)
 	}
 	if len(segs) != 1 {
 		t.Fatalf("got %d segments, want 1", len(segs))
@@ -660,7 +686,7 @@ func TestGetRecordingDays(t *testing.T) {
 	mustSaveSegment(t, db, makeSegment("cam1", "/s2.mp4", march10, march10.Add(5*time.Minute), 200))
 	mustSaveSegment(t, db, makeSegment("cam1", "/s3.mp4", march20, march20.Add(5*time.Minute), 300))
 
-	days, err := db.GetRecordingDays("cam1", 2026, 3)
+	days, err := db.GetRecordingDays("cam1", 2026, 3, time.UTC)
 	if err != nil {
 		t.Fatalf("GetRecordingDays: %v", err)
 	}
@@ -683,7 +709,7 @@ func TestGetRecordingDays_CameraFilter(t *testing.T) {
 	mustSaveSegment(t, db, makeSegment("cam1", "/s1.mp4", march5, march5.Add(5*time.Minute), 100))
 	mustSaveSegment(t, db, makeSegment("cam2", "/s2.mp4", march10, march10.Add(5*time.Minute), 200))
 
-	days, err := db.GetRecordingDays("cam1", 2026, 3)
+	days, err := db.GetRecordingDays("cam1", 2026, 3, time.UTC)
 	if err != nil {
 		t.Fatalf("GetRecordingDays: %v", err)
 	}
@@ -703,7 +729,7 @@ func TestGetRecordingDays_EmptyCamera_AllCameras(t *testing.T) {
 	mustSaveSegment(t, db, makeSegment("cam1", "/s1.mp4", march5, march5.Add(5*time.Minute), 100))
 	mustSaveSegment(t, db, makeSegment("cam2", "/s2.mp4", march10, march10.Add(5*time.Minute), 200))
 
-	days, err := db.GetRecordingDays("", 2026, 3)
+	days, err := db.GetRecordingDays("", 2026, 3, time.UTC)
 	if err != nil {
 		t.Fatalf("GetRecordingDays: %v", err)
 	}
@@ -715,7 +741,7 @@ func TestGetRecordingDays_EmptyCamera_AllCameras(t *testing.T) {
 func TestGetRecordingDays_NoData(t *testing.T) {
 	db := newTestDB(t)
 
-	days, err := db.GetRecordingDays("cam1", 2026, 6)
+	days, err := db.GetRecordingDays("cam1", 2026, 6, time.UTC)
 	if err != nil {
 		t.Fatalf("GetRecordingDays: %v", err)
 	}
@@ -724,37 +750,73 @@ func TestGetRecordingDays_NoData(t *testing.T) {
 	}
 }
 
-// --- QueryEventsForDate ---
-
-func TestQueryEventsForDate(t *testing.T) {
+func TestGetRecordingDays_LocalTimezone(t *testing.T) {
 	db := newTestDB(t)
-	march20_morning := time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC)
-	march20_evening := time.Date(2026, 3, 20, 20, 0, 0, 0, time.UTC)
-	march21 := time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC)
-
-	mustSaveEvent(t, db, makeEvent("e1", "cam1", "person", 0.9, march20_morning))
-	mustSaveEvent(t, db, makeEvent("e2", "cam1", "car", 0.8, march20_evening))
-	mustSaveEvent(t, db, makeEvent("e3", "cam1", "person", 0.7, march21))
-
-	events, err := db.QueryEventsForDate("cam1", march20_morning)
+	ams, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
-		t.Fatalf("QueryEventsForDate: %v", err)
+		t.Fatalf("LoadLocation: %v", err)
+	}
+
+	// 23:30 UTC March 20 = 00:30 local March 21 (CET, UTC+1): the recording
+	// belongs to March 21 on the user's calendar, not March 20.
+	lateUTC := time.Date(2026, 3, 20, 23, 30, 0, 0, time.UTC)
+	mustSaveSegment(t, db, makeSegment("cam1", "/late.mp4", lateUTC, lateUTC.Add(5*time.Minute), 100))
+
+	days, err := db.GetRecordingDays("cam1", 2026, 3, ams)
+	if err != nil {
+		t.Fatalf("GetRecordingDays: %v", err)
+	}
+	if len(days) != 1 || days[0] != 21 {
+		t.Errorf("got days %v, want [21] (local calendar day)", days)
+	}
+}
+
+func TestGetRecordingDays_SegmentSpanningMidnight(t *testing.T) {
+	db := newTestDB(t)
+
+	// A segment crossing midnight covers both days.
+	start := time.Date(2026, 3, 20, 23, 55, 0, 0, time.UTC)
+	mustSaveSegment(t, db, makeSegment("cam1", "/span.mp4", start, start.Add(10*time.Minute), 100))
+
+	days, err := db.GetRecordingDays("cam1", 2026, 3, time.UTC)
+	if err != nil {
+		t.Fatalf("GetRecordingDays: %v", err)
+	}
+	if len(days) != 2 || days[0] != 20 || days[1] != 21 {
+		t.Errorf("got days %v, want [20 21]", days)
+	}
+}
+
+// --- QueryEventsInRange ---
+
+func TestQueryEventsInRange(t *testing.T) {
+	db := newTestDB(t)
+	march20 := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	march21 := march20.AddDate(0, 0, 1)
+
+	mustSaveEvent(t, db, makeEvent("e1", "cam1", "person", 0.9, march20.Add(8*time.Hour)))
+	mustSaveEvent(t, db, makeEvent("e2", "cam1", "car", 0.8, march20.Add(20*time.Hour)))
+	mustSaveEvent(t, db, makeEvent("e3", "cam1", "person", 0.7, march21.Add(10*time.Hour)))
+
+	events, err := db.QueryEventsInRange("cam1", march20, march21)
+	if err != nil {
+		t.Fatalf("QueryEventsInRange: %v", err)
 	}
 	if len(events) != 2 {
 		t.Fatalf("got %d events, want 2", len(events))
 	}
 }
 
-func TestQueryEventsForDate_CameraFilter(t *testing.T) {
+func TestQueryEventsInRange_CameraFilter(t *testing.T) {
 	db := newTestDB(t)
 	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 
 	mustSaveEvent(t, db, makeEvent("e1", "cam1", "person", 0.9, ts))
 	mustSaveEvent(t, db, makeEvent("e2", "cam2", "person", 0.8, ts))
 
-	events, err := db.QueryEventsForDate("cam1", ts)
+	events, err := db.QueryEventsInRange("cam1", ts.Add(-time.Hour), ts.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("QueryEventsForDate: %v", err)
+		t.Fatalf("QueryEventsInRange: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -764,13 +826,13 @@ func TestQueryEventsForDate_CameraFilter(t *testing.T) {
 	}
 }
 
-func TestQueryEventsForDate_NoEvents(t *testing.T) {
+func TestQueryEventsInRange_NoEvents(t *testing.T) {
 	db := newTestDB(t)
 	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 
-	events, err := db.QueryEventsForDate("cam1", ts)
+	events, err := db.QueryEventsInRange("cam1", ts.Add(-time.Hour), ts.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("QueryEventsForDate: %v", err)
+		t.Fatalf("QueryEventsInRange: %v", err)
 	}
 	if len(events) != 0 {
 		t.Errorf("expected empty slice, got %v", events)
@@ -984,7 +1046,7 @@ func TestQueryEvents_ReturnsEndTime(t *testing.T) {
 	}
 }
 
-func TestQueryEventsForDate_ReturnsEndTime(t *testing.T) {
+func TestQueryEventsInRange_ReturnsEndTime(t *testing.T) {
 	db := newTestDB(t)
 	ts := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 	endTime := ts.Add(60 * time.Second)
@@ -993,9 +1055,9 @@ func TestQueryEventsForDate_ReturnsEndTime(t *testing.T) {
 	ev.EndTime = endTime
 	mustSaveEvent(t, db, ev)
 
-	events, err := db.QueryEventsForDate("cam1", ts)
+	events, err := db.QueryEventsInRange("cam1", ts.Add(-time.Hour), ts.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("QueryEventsForDate: %v", err)
+		t.Fatalf("QueryEventsInRange: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -1112,7 +1174,8 @@ func TestSaveAndGetMotionActivity(t *testing.T) {
 	if err := db.SaveMotionActivity("cam1", bucket3, 0.50); err != nil {
 		t.Fatal(err)
 	}
-	buckets, err := db.GetMotionActivity("cam1", bucket1)
+	march25 := time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC)
+	buckets, err := db.GetMotionActivityInRange("cam1", march25, march25.AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1136,7 +1199,7 @@ func TestSaveMotionActivity_Upsert(t *testing.T) {
 	if err := db.SaveMotionActivity("cam1", bucket, 0.90); err != nil {
 		t.Fatal(err)
 	}
-	buckets, err := db.GetMotionActivity("cam1", bucket)
+	buckets, err := db.GetMotionActivityInRange("cam1", bucket.Add(-time.Hour), bucket.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1162,14 +1225,14 @@ func TestDeleteMotionActivityBefore(t *testing.T) {
 	if err := db.DeleteMotionActivityBefore(cutoff); err != nil {
 		t.Fatal(err)
 	}
-	buckets, err := db.GetMotionActivity("cam1", old)
+	buckets, err := db.GetMotionActivityInRange("cam1", old.Add(-time.Hour), old.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(buckets) != 0 {
 		t.Errorf("expected 0 buckets after cleanup, got %d", len(buckets))
 	}
-	buckets, err = db.GetMotionActivity("cam1", recent)
+	buckets, err = db.GetMotionActivityInRange("cam1", recent.Add(-time.Hour), recent.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1411,12 +1474,12 @@ func TestEventCategoryRoundTripsAcrossReadPaths(t *testing.T) {
 		t.Fatalf("RecentUnmatchedEventsByLabel: got %d events; category preserved = %v", len(unmatched), len(unmatched) == 1 && unmatched[0].Category == "detection")
 	}
 
-	byDate, err := db.QueryEventsForDate("front_door", ts)
+	byDate, err := db.QueryEventsInRange("front_door", ts.Add(-time.Hour), ts.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("QueryEventsForDate: %v", err)
+		t.Fatalf("QueryEventsInRange: %v", err)
 	}
 	if len(byDate) != 1 || byDate[0].Category != "detection" {
-		t.Errorf("QueryEventsForDate: got %d events, want 1 detection", len(byDate))
+		t.Errorf("QueryEventsInRange: got %d events, want 1 detection", len(byDate))
 	}
 }
 
