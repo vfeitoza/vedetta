@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -65,6 +66,8 @@ type RecordingConsumer struct {
 	segPath         string
 	currentPath     string // path of the segment currently being written; "" when closed
 	segStart        time.Time
+	lastSegBase     string // timestamp base of the last segment filename
+	segDupCount     int    // disambiguates same-second rotations (gap rotation is instant)
 	paused          bool
 	pausedAtomic    atomic.Bool // lock-free read for external status checks
 	pausedSince     time.Time
@@ -235,7 +238,24 @@ func (rc *RecordingConsumer) processVideo(pkt *rtp.Packet) {
 		return
 	}
 
-	if err := rc.writer.WriteVideo(pkt); err != nil {
+	err := rc.writer.WriteVideo(pkt)
+	if errors.Is(err, ErrTimestampGap) {
+		// The stream stalled (or its clock jumped) mid-segment without an
+		// RTSP disconnect. Close the segment at its honest end and start a
+		// fresh file so wall time and media time stay 1:1 within every
+		// segment; the DB then records the coverage gap instead of papering
+		// over it. The packet is re-fed to the fresh writer, which accepts
+		// any starting timestamp (and waits for a keyframe as usual).
+		slog.Warn("video timestamp gap, rotating segment",
+			"camera", rc.camera, "path", rc.segPath)
+		rc.closeCurrentSegment()
+		if err := rc.ensureSegment(); err != nil {
+			rc.handleWriteError(err)
+			return
+		}
+		err = rc.writer.WriteVideo(pkt)
+	}
+	if err != nil {
 		rc.handleWriteError(err)
 		return
 	}
@@ -301,7 +321,20 @@ func (rc *RecordingConsumer) ensureSegment() error {
 
 	now := time.Now()
 	rc.segStart = now
-	rc.segPath = filepath.Join(rc.segDir, fmt.Sprintf("%s.mp4", now.Format("2006-01-02_15-04-05")))
+	// Filenames have second resolution; a gap rotation can open the next
+	// segment within the same second, which would silently truncate the file
+	// just closed. Suffix same-second names with a counter (no Stat: a probe
+	// on a stalled volume would hang the processLoop, see
+	// segmentWriterCreateTimeout).
+	base := now.Format("2006-01-02_15-04-05")
+	if base == rc.lastSegBase {
+		rc.segDupCount++
+		base = fmt.Sprintf("%s_%d", base, rc.segDupCount)
+	} else {
+		rc.lastSegBase = base
+		rc.segDupCount = 0
+	}
+	rc.segPath = filepath.Join(rc.segDir, base+".mp4")
 
 	type writerResult struct {
 		w   *SegmentWriter
@@ -369,14 +402,19 @@ func (rc *RecordingConsumer) closeCurrentSegment() {
 	if err != nil {
 		slog.Error("close segment failed", "camera", rc.camera, "error", err)
 	}
+	// Honest times: the writer's first sample (the keyframe that opened the
+	// file, media tick 0) plus the media duration actually written. The
+	// projected record from ensureSegment used file-creation time and the
+	// nominal segment length; this upsert corrects both.
+	start := rc.writer.StartTime()
 
 	if info, err := os.Stat(rc.segPath); err == nil && info.Size() > 0 {
 		if rc.onSegment != nil {
 			rc.onSegment(SegmentInfo{
 				Camera:    rc.camera,
 				Path:      rc.segPath,
-				StartTime: rc.segStart,
-				EndTime:   rc.segStart.Add(duration),
+				StartTime: start,
+				EndTime:   start.Add(duration),
 				SizeBytes: info.Size(),
 			})
 		}

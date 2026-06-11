@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -17,6 +18,14 @@ import (
 
 	"github.com/rvben/vedetta/internal/rtsp"
 )
+
+// ErrTimestampGap reports a video RTP timestamp discontinuity (forward jump of
+// 2s or more, or a backwards jump) within one segment file. Media time inside
+// a segment must advance 1:1 with wall time so playback can map a wall-clock
+// instant to a media offset by subtraction; substituting a fake sample
+// duration would silently compress the gap and desync that mapping for the
+// rest of the file. Callers should close the segment and start a new one.
+var ErrTimestampGap = errors.New("video RTP timestamp gap")
 
 // SegmentWriter writes RTP packets into an fMP4 file.
 // Video and audio samples are buffered per GOP (group of pictures) and flushed
@@ -40,16 +49,17 @@ type SegmentWriter struct {
 	aacDecoder *rtpmpeg4audio.Decoder
 	aacConfig  *mpeg4audio.AudioSpecificConfig
 
-	initWritten    bool
-	seqNum         uint32
-	videoDTS       uint64
-	audioDTS       uint64
-	startTime      time.Time
-	lastVideoRTP   uint32
-	hasFirstVideo  bool
-	hasAudio       bool
-	videoTimeScale uint32
-	audioTimeScale uint32
+	initWritten     bool
+	seqNum          uint32
+	videoDTS        uint64
+	audioDTS        uint64
+	startTime       time.Time
+	firstSampleTime time.Time // wall time of the keyframe that opened the file
+	lastVideoRTP    uint32
+	hasFirstVideo   bool
+	hasAudio        bool
+	videoTimeScale  uint32
+	audioTimeScale  uint32
 
 	// GOP buffering: accumulate samples until next keyframe
 	pendingVideoSamples []*fmp4.Sample
@@ -176,16 +186,25 @@ func (sw *SegmentWriter) WriteVideo(pkt *rtp.Packet) error {
 		sw.initWritten = true
 		sw.lastVideoRTP = pkt.Timestamp
 		sw.hasFirstVideo = true
+		sw.firstSampleTime = time.Now()
 	}
 
 	// Compute sample duration from RTP timestamp delta
 	var sampleDuration uint32
 	if sw.hasFirstVideo {
 		rtpDelta := pkt.Timestamp - sw.lastVideoRTP
-		if rtpDelta > 0 && rtpDelta < sw.videoTimeScale*2 {
+		switch {
+		case rtpDelta > 0 && rtpDelta < sw.videoTimeScale*2:
 			sampleDuration = rtpDelta
-		} else {
-			sampleDuration = sw.videoTimeScale / 30 // ~33ms fallback
+		case rtpDelta == 0:
+			// Duplicate timestamp: assume one frame interval.
+			sampleDuration = sw.videoTimeScale / 30
+		default:
+			// Forward jump of 2s+ (stream stalled), or a backwards jump
+			// wrapped to a huge uint32 (camera clock reset). uint32
+			// arithmetic already absorbs the legitimate 32-bit RTP
+			// wrap-around, so anything here is a real discontinuity.
+			return ErrTimestampGap
 		}
 	} else {
 		sampleDuration = sw.videoTimeScale / 30
@@ -253,7 +272,21 @@ func (sw *SegmentWriter) WriteAudio(pkt *rtp.Packet) error {
 	return nil
 }
 
-// Close finalizes the segment and returns its duration.
+// StartTime returns the wall-clock time recording actually began: the arrival
+// of the keyframe that opened the file. Falls back to the writer's creation
+// time when no sample has been written yet.
+func (sw *SegmentWriter) StartTime() time.Time {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	if !sw.firstSampleTime.IsZero() {
+		return sw.firstSampleTime
+	}
+	return sw.startTime
+}
+
+// Close finalizes the segment and returns its duration: the media time written
+// to the video track when samples exist (wall-clock age would overstate it
+// whenever the stream stalled), else wall time since creation.
 func (sw *SegmentWriter) Close() (time.Duration, error) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
@@ -264,6 +297,9 @@ func (sw *SegmentWriter) Close() (time.Duration, error) {
 	}
 
 	duration := time.Since(sw.startTime)
+	if sw.videoDTS > 0 && sw.videoTimeScale > 0 {
+		duration = time.Duration(sw.videoDTS * uint64(time.Second) / uint64(sw.videoTimeScale))
+	}
 
 	if err := sw.f.Close(); err != nil {
 		return duration, fmt.Errorf("close segment: %w", err)

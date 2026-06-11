@@ -91,6 +91,60 @@ func TestRecordingConsumer_SegmentCallback(t *testing.T) {
 	// This is valid — no crash, no panic
 }
 
+// A mid-stream RTP timestamp gap (camera stall, Wi-Fi dropout without an RTSP
+// disconnect) must rotate to a new segment file instead of compressing the gap
+// into the current one. Otherwise every wall-time seek that lands after the
+// gap inside the same 10-minute file starts playback minutes off target, and
+// the timeline shows coverage that does not exist.
+func TestRecordingConsumer_TimestampGapRotatesSegment(t *testing.T) {
+	dir := t.TempDir()
+	video := &rtsp.TrackInfo{
+		Codec: "H264", ClockRate: 90000, IsVideo: true,
+		SPS: []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2},
+		PPS: []byte{0x68, 0xce, 0x38, 0x80},
+	}
+
+	var mu sync.Mutex
+	latest := map[string]SegmentInfo{} // upsert-by-path, like the DB
+	rc := NewRecordingConsumer(dir, "test-cam", time.Minute, video, nil, testDisk(t), func(info SegmentInfo) {
+		mu.Lock()
+		latest[info.Path] = info
+		mu.Unlock()
+	})
+
+	// 3 frames at 30fps, then 60 seconds of missing stream, then 3 more
+	// frames resuming on a keyframe (cameras emit one after a stall).
+	feed := func(seq uint16, ts uint32, nal byte) {
+		rc.OnVideoRTP(h264TestPacket(seq, ts, nal))
+	}
+	feed(1, 0, 0x65)
+	feed(2, 3000, 0x41)
+	feed(3, 6000, 0x41)
+	resumeTS := uint32(6000 + 60*90000)
+	feed(4, resumeTS, 0x65)
+	feed(5, resumeTS+3000, 0x41)
+	feed(6, resumeTS+6000, 0x41)
+
+	rc.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(latest) != 2 {
+		paths := make([]string, 0, len(latest))
+		for p := range latest {
+			paths = append(paths, p)
+		}
+		t.Fatalf("got %d segment files %v, want 2 (gap must rotate)", len(latest), paths)
+	}
+	for path, info := range latest {
+		// Each file holds ~100ms of media; a duration anywhere near the 60s
+		// gap means the gap leaked into a file.
+		if d := info.EndTime.Sub(info.StartTime); d > 5*time.Second {
+			t.Errorf("segment %s spans %v, want ~100ms (gap compressed into file)", path, d)
+		}
+	}
+}
+
 func TestRecordingConsumer_Close_NilWriter(t *testing.T) {
 	dir := t.TempDir()
 
