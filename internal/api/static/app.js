@@ -2863,12 +2863,28 @@ function cleanupPlaybackHls() {
   }
 }
 
-function startPlayback(timestamp) {
+// Wall-clock time of the current playback position. Prefers the player's
+// program-date-time mapping (exact across trims, file boundaries, and coverage
+// gaps inside the playlist); falls back to start-time + currentTime.
+function playbackWallTime(video) {
+  if (playbackHls && playbackHls.playingDate) return playbackHls.playingDate;
+  if (video && typeof video.getStartDate === 'function') {
+    var sd = video.getStartDate();
+    if (sd && !isNaN(sd.getTime())) return new Date(sd.getTime() + video.currentTime * 1000);
+  }
+  if (playbackStartTime) return new Date(playbackStartTime.getTime() + video.currentTime * 1000);
+  return null;
+}
+
+// opts.quiet suppresses the toast (used when chaining into the next hour).
+function startPlayback(timestamp, opts) {
   var name = getCameraName();
   if (!name) return;
 
   var isoStr = timestamp.toISOString();
-  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback.m3u8?start=' + encodeURIComponent(isoStr);
+  // duration=3600 is the server max: one click reviews up to an hour before
+  // the chain in onended fetches the next window.
+  var url = '/api/cameras/' + encodeURIComponent(name) + '/playback.m3u8?start=' + encodeURIComponent(isoStr) + '&duration=3600';
 
   if (currentStream) {
     stopStream();
@@ -2894,7 +2910,15 @@ function startPlayback(timestamp) {
   };
 
   video.onended = function() {
-    returnToLive();
+    // Continue into the next playback window instead of yanking the user
+    // back to live mid-review. Stop chaining once we are near the live edge
+    // (or the wall position is unknown).
+    var wall = playbackWallTime(video);
+    if (!wall || Date.now() - wall.getTime() < 15000) {
+      returnToLive();
+      return;
+    }
+    startPlayback(new Date(wall.getTime() + 1000), { quiet: true });
   };
 
   if (typeof Hls !== 'undefined' && Hls.isSupported()) {
@@ -2910,6 +2934,15 @@ function startPlayback(timestamp) {
     hls.attachMedia(video);
     hls.on(Hls.Events.MANIFEST_PARSED, function() {
       video.play().catch(function() {});
+    });
+    hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
+      // The playlist's program-date-time is the true wall start: the server
+      // trims to the GOP containing the request, so it can differ from the
+      // requested timestamp by a couple of seconds.
+      var frags = data.details && data.details.fragments;
+      if (frags && frags.length && frags[0].programDateTime) {
+        playbackStartTime = new Date(frags[0].programDateTime);
+      }
     });
     hls.on(Hls.Events.ERROR, function(event, data) {
       console.error('HLS error:', data.type, data.details, data.fatal, data.response ? data.response.code : '');
@@ -2945,7 +2978,9 @@ function startPlayback(timestamp) {
 
   playbackMode = true;
   updatePlaybackUI();
-  toast('Playing recording from ' + timestamp.toLocaleTimeString());
+  if (!opts || !opts.quiet) {
+    toast('Playing recording from ' + timestamp.toLocaleTimeString());
+  }
 }
 
 // Re-default the timeline window for the current viewport (the 'return-live'
@@ -3006,7 +3041,9 @@ function updatePlayheadForPlayback(currentTime) {
   var playhead = el('timeline-playhead');
   if (!playhead) return;
 
-  var wallTime = new Date(playbackStartTime.getTime() + currentTime * 1000);
+  var video = el('live-video');
+  var wallTime = (video && playbackWallTime(video)) ||
+    new Date(playbackStartTime.getTime() + currentTime * 1000);
   var sec = wallTime.getHours() * 3600 + wallTime.getMinutes() * 60 + wallTime.getSeconds();
   if (TLW.isSecInView(timelineWin, sec)) {
     playhead.style.left = (TLW.secToPctRaw(timelineWin, sec) * 100) + '%';
@@ -3475,7 +3512,7 @@ function _cleanupInlinePlayerHls() {
 function openInlinePlayer(cameraName, startIso, displayLabel) {
   _mountInlinePlayerModal();
 
-  var url = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback.m3u8?start=' + encodeURIComponent(startIso);
+  var url = '/api/cameras/' + encodeURIComponent(cameraName) + '/playback.m3u8?start=' + encodeURIComponent(startIso) + '&duration=3600';
 
   // Update header labels
   var parts = (displayLabel || '').split(' · ');

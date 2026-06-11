@@ -24,7 +24,7 @@ func TestHLSServer(t *testing.T) {
 	f.Close()
 	os.WriteFile("/tmp/init_garage.mp4", initBuf, 0644)
 
-	result, err := GenerateHLSPlaylist([]string{testFile}, []string{"/seg"}, 0)
+	result, err := GenerateHLSPlaylist([]string{testFile}, []string{"/seg"}, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

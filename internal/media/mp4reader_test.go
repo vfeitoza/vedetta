@@ -457,6 +457,7 @@ func TestGenerateHLSPlaylist(t *testing.T) {
 	result, err := GenerateHLSPlaylist(
 		[]string{path},
 		[]string{"/recordings/test.mp4"},
+		nil,
 		0,
 	)
 	if err != nil {
@@ -489,6 +490,69 @@ func TestGenerateHLSPlaylist(t *testing.T) {
 	t.Logf("Generated playlist:\n%s", playlist)
 }
 
+// Multi-file playlists must signal the decode-time reset at every file
+// boundary (EXT-X-DISCONTINUITY) and anchor each file to wall-clock time
+// (EXT-X-PROGRAM-DATE-TIME), with the first file's PDT advanced by the
+// trimmed-away media so players map positions to true wall time.
+func TestGenerateHLSPlaylist_DiscontinuityAndPDT(t *testing.T) {
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "a.mp4")
+	path2 := filepath.Join(dir, "b.mp4")
+
+	// 10 fragments of 1s each per file (every fragment is a keyframe).
+	writeSyntheticFMP4(t, path1, 10, 90000)
+	writeSyntheticFMP4(t, path2, 10, 90000)
+
+	t0 := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	fileStarts := []time.Time{t0, t0.Add(20 * time.Second)}
+
+	// Trim 5s into the first file.
+	result, err := GenerateHLSPlaylist(
+		[]string{path1, path2},
+		[]string{"/a", "/b"},
+		fileStarts,
+		5*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("GenerateHLSPlaylist: %v", err)
+	}
+	playlist := result.Playlist
+
+	if got := strings.Count(playlist, "#EXT-X-DISCONTINUITY\n"); got != 1 {
+		t.Errorf("got %d discontinuity tags, want 1 (one file boundary):\n%s", got, playlist)
+	}
+	// First file's PDT reflects the 5s trim.
+	if !strings.Contains(playlist, "#EXT-X-PROGRAM-DATE-TIME:2026-06-10T12:00:05.000Z") {
+		t.Errorf("missing trimmed first-file PDT:\n%s", playlist)
+	}
+	// Second file's PDT is its own wall start (media restarts at tick 0).
+	if !strings.Contains(playlist, "#EXT-X-PROGRAM-DATE-TIME:2026-06-10T12:00:20.000Z") {
+		t.Errorf("missing second-file PDT:\n%s", playlist)
+	}
+	// The discontinuity must precede the second file's init map.
+	disc := strings.Index(playlist, "#EXT-X-DISCONTINUITY")
+	secondMap := strings.Index(playlist, "#EXT-X-MAP:URI=\"/b/hls/init.mp4\"")
+	if secondMap == -1 || disc == -1 || disc > secondMap {
+		t.Errorf("discontinuity not before second file's map (disc=%d, map=%d):\n%s", disc, secondMap, playlist)
+	}
+}
+
+// Without wall-clock starts the playlist must omit PDT tags entirely rather
+// than emit a bogus epoch.
+func TestGenerateHLSPlaylist_NoPDTWithoutFileStarts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp4")
+	writeSyntheticFMP4(t, path, 5, 90000)
+
+	result, err := GenerateHLSPlaylist([]string{path}, []string{"/a"}, nil, 0)
+	if err != nil {
+		t.Fatalf("GenerateHLSPlaylist: %v", err)
+	}
+	if strings.Contains(result.Playlist, "PROGRAM-DATE-TIME") {
+		t.Errorf("unexpected PDT without fileStarts:\n%s", result.Playlist)
+	}
+}
+
 func TestGenerateHLSPlaylistReal(t *testing.T) {
 	const realPath = "/tmp/test_fmp4.mp4"
 	if _, err := os.Stat(realPath); os.IsNotExist(err) {
@@ -498,6 +562,7 @@ func TestGenerateHLSPlaylistReal(t *testing.T) {
 	result, err := GenerateHLSPlaylist(
 		[]string{realPath},
 		[]string{"/recordings/real.mp4"},
+		nil,
 		0,
 	)
 	if err != nil {
@@ -548,7 +613,7 @@ func TestServeHLSSegment(t *testing.T) {
 	path := filepath.Join(dir, "test.mp4")
 	writeSyntheticFMP4(t, path, 10, 3000)
 
-	result, err := GenerateHLSPlaylist([]string{path}, []string{"/test"}, 0)
+	result, err := GenerateHLSPlaylist([]string{path}, []string{"/test"}, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

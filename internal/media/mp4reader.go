@@ -687,18 +687,30 @@ type HLSSegmentRef struct {
 // indexed segment URLs. The server re-segments each chunk on the fly using
 // ServeHLSSegment. The baseURI is used to construct segment URLs like
 // "{baseURI}/hls/{segNum}.m4s" and init segment URLs like "{baseURI}/hls/init.mp4".
-func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration) (*HLSPlaylistResult, error) {
+//
+// Each file's fragments carry decode times that restart at zero, so an
+// EXT-X-DISCONTINUITY is emitted at every file boundary. fileStarts optionally
+// supplies each file's wall-clock start (the instant of media tick 0); when
+// present, an EXT-X-PROGRAM-DATE-TIME tag anchors the first segment of each
+// file so players can map playback positions back to wall-clock time. Pass nil
+// to omit the tags.
+func GenerateHLSPlaylist(paths []string, baseURIs []string, fileStarts []time.Time, start time.Duration) (*HLSPlaylistResult, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no paths provided")
 	}
 	if len(paths) != len(baseURIs) {
 		return nil, fmt.Errorf("paths and baseURIs length mismatch")
 	}
+	if fileStarts != nil && len(fileStarts) != len(paths) {
+		return nil, fmt.Errorf("paths and fileStarts length mismatch")
+	}
 
 	type hlsSeg struct {
-		fileIdx  int
-		duration float64
-		ref      HLSSegmentRef
+		fileIdx   int
+		duration  float64
+		startTick uint64 // decode time of the segment's first fragment
+		videoTS   uint32 // the file's video timescale, for tick-to-time conversion
+		ref       HLSSegmentRef
 	}
 	var segments []hlsSeg
 
@@ -748,6 +760,7 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 		var curByteStart int64 = -1
 		var curByteEnd int64
 		var curDurTicks uint64
+		var curStartTick uint64
 
 		flush := func() {
 			if curByteStart < 0 {
@@ -755,8 +768,10 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 			}
 			dur := float64(curDurTicks) / float64(videoTS)
 			segments = append(segments, hlsSeg{
-				fileIdx:  fileIdx,
-				duration: dur,
+				fileIdx:   fileIdx,
+				duration:  dur,
+				startTick: curStartTick,
+				videoTS:   videoTS,
 				ref: HLSSegmentRef{
 					FilePath:  path,
 					ByteStart: curByteStart,
@@ -789,6 +804,7 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 
 			if curByteStart < 0 {
 				curByteStart = frag.moofOffset
+				curStartTick = vTraf.decodeTime
 			}
 			if fragEnd > curByteEnd {
 				curByteEnd = fragEnd
@@ -825,9 +841,23 @@ func GenerateHLSPlaylist(paths []string, baseURIs []string, start time.Duration)
 	for i, seg := range segments {
 		init := segInits[i]
 		if init.fileIdx != lastFileIdx {
+			if lastFileIdx != -1 {
+				// Decode times restart at zero in every file; without an
+				// explicit discontinuity players treat the jump backwards as
+				// corrupt input or stall trying to reconcile timestamps.
+				b.WriteString("#EXT-X-DISCONTINUITY\n")
+			}
 			// Init segment served directly (not byte-range) for Safari compatibility
 			fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s/hls/init.mp4\"\n",
 				baseURIs[init.fileIdx])
+			if fileStarts != nil {
+				// Anchor this discontinuity sequence to wall-clock time:
+				// file start (media tick 0) plus the first fragment's offset.
+				pdt := fileStarts[init.fileIdx].Add(
+					time.Duration(seg.startTick * uint64(time.Second) / uint64(seg.videoTS)))
+				fmt.Fprintf(&b, "#EXT-X-PROGRAM-DATE-TIME:%s\n",
+					pdt.UTC().Format("2006-01-02T15:04:05.000Z"))
+			}
 			lastFileIdx = init.fileIdx
 		}
 

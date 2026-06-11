@@ -193,9 +193,11 @@ func (s *Server) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name 
 
 	var paths []string
 	var uris []string
+	var fileStarts []time.Time
 	for _, seg := range segments {
 		paths = append(paths, seg.Path)
 		uris = append(uris, fmt.Sprintf("/api/cameras/%s/segments/%d", name, seg.ID))
+		fileStarts = append(fileStarts, seg.StartTime)
 	}
 
 	offset := start.Sub(segments[0].StartTime)
@@ -203,7 +205,7 @@ func (s *Server) GetCameraPlayback(w http.ResponseWriter, r *http.Request, name 
 		offset = 0
 	}
 
-	result, err := media.GenerateHLSPlaylist(paths, uris, offset)
+	result, err := media.GenerateHLSPlaylist(paths, uris, fileStarts, offset)
 	if err != nil {
 		slog.Error("HLS playlist generation failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "playlist generation failed"})
