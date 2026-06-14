@@ -5314,12 +5314,17 @@ function loadMoreEvents() {
   if (eventsLoading || eventsExhausted) return;
   eventsLoading = true;
 
+  var gallery = el('events-gallery');
   var labelChip = document.querySelector('.chip[data-filter="label"].active');
   var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
   var objectChip = document.querySelector('.chip[data-filter="object"].active');
   var categoryChip = document.querySelector('.chip[data-filter="category"].active');
+  var pinnedKind = gallery && gallery.dataset ? gallery.dataset.kind : '';
 
   var url = '/partials/events-gallery?limit=50&offset=' + eventsOffset;
+  if (pinnedKind) {
+    url += '&kind=' + encodeURIComponent(pinnedKind);
+  }
   if (labelChip && labelChip.dataset.value) {
     url += '&label=' + encodeURIComponent(labelChip.dataset.value);
   }
@@ -5418,8 +5423,12 @@ function reloadEventsWithSearch() {
   var objectChip = document.querySelector('.chip[data-filter="object"].active');
   var categoryChip = document.querySelector('.chip[data-filter="category"].active');
   var searchInput = el('event-search');
+  var pinnedKind = gallery.dataset ? gallery.dataset.kind : '';
 
   var url = '/partials/events-gallery?limit=50';
+  if (pinnedKind) {
+    url += '&kind=' + encodeURIComponent(pinnedKind);
+  }
   if (labelChip && labelChip.dataset.value) {
     url += '&label=' + encodeURIComponent(labelChip.dataset.value);
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Events - Vedetta</title>
+  <title>Doorbell - Vedetta</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/htmx.min.js"></script>
   <meta name="theme-color" content="#0a0e14">
@@ -21,8 +21,8 @@
     </a>
     <div class="topnav-links">
       <a href="/" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
-      <a href="/events.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
-      <a href="/doorbell.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Doorbell</a>
+      <a href="/events.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/doorbell.html" class="topnav-link active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Doorbell</a>
       <a href="/recordings.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
       <a href="/people.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
       <a href="/objects.html" class="topnav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
@@ -40,44 +40,20 @@
   <main class="page">
     <div class="page-header">
       <div>
-        <h1>Events</h1>
-        <p class="events-summary" id="events-summary">Loading…</p>
+        <h1>Doorbell</h1>
+        <p class="events-summary" id="events-summary">Loading...</p>
       </div>
-      <button class="btn btn-sm btn-ghost" data-action-click="toggleEventsLegend()" aria-controls="events-legend" aria-expanded="false" id="events-legend-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        What do these badges mean?
-      </button>
-    </div>
-
-    <div class="events-legend" id="events-legend" hidden aria-label="Badge legend">
-      <span class="events-legend-item"><span class="events-legend-dot label"></span>Label (person, car…)</span>
-      <span class="events-legend-item"><span class="events-legend-dot duration"></span>Duration</span>
-      <span class="events-legend-item"><span class="events-legend-dot score"></span>Confidence %</span>
-      <span class="events-legend-item"><span class="events-legend-dot identity"></span>Identity (name when recognised)</span>
     </div>
 
     <div class="events-toolbar">
       <div class="search-wrap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="event-search" class="search-input" placeholder="Search by camera, label, name…" aria-label="Search events">
+        <input type="text" id="event-search" class="search-input" placeholder="Search by camera, name..." aria-label="Search doorbell rings">
       </div>
       <div class="events-filter-row">
-        <div class="chip-bar" id="filter-chips" role="toolbar" aria-label="Event labels">
-          <button class="chip active" data-filter="label" data-value="" data-action-click="toggleChip(this, 'label')" aria-pressed="true">All</button>
-          <button class="chip" data-filter="label" data-value="person" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot person"></span>Person</button>
-          <button class="chip" data-filter="label" data-value="car" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot car"></span>Car</button>
-          <button class="chip" data-filter="label" data-value="dog" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot dog"></span>Dog</button>
-          <button class="chip" data-filter="label" data-value="cat" data-action-click="toggleChip(this, 'label')" aria-pressed="false"><span class="chip-dot cat"></span>Cat</button>
-        </div>
-        <div class="chip-bar" id="category-chips" role="toolbar" aria-label="Priority">
-          <button class="chip active" data-filter="category" data-value="" data-action-click="toggleChip(this, 'category')" aria-pressed="true">All priorities</button>
-          <button class="chip" data-filter="category" data-value="alert" data-action-click="toggleChip(this, 'category')" aria-pressed="false" title="People, animals, and vehicles that are moving">Alerts</button>
-          <button class="chip" data-filter="category" data-value="detection" data-action-click="toggleChip(this, 'category')" aria-pressed="false" title="Low priority, e.g. a parked vehicle">Detections</button>
-        </div>
         <div class="chip-bar" id="camera-chips" role="toolbar" aria-label="Cameras">
           <button class="chip active" data-filter="camera" data-value="" data-action-click="toggleChip(this, 'camera')" aria-pressed="true">All Cameras</button>
         </div>
-        <div class="chip-bar" id="object-chips" role="toolbar" aria-label="Tracked objects" style="display:none"></div>
         <button class="btn btn-sm btn-ghost events-clear-filters" id="events-clear-filters" data-action-click="clearAllEventFilters()" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           Clear filters
@@ -85,15 +61,16 @@
       </div>
     </div>
 
-    <!-- Event Gallery -->
+    <!-- Doorbell Ring Gallery -->
     <div class="event-gallery"
          id="events-gallery"
-         hx-get="/partials/events-gallery"
+         data-kind="doorbell"
+         hx-get="/partials/events-gallery?kind=doorbell&limit=50"
          hx-trigger="load"
          hx-swap="innerHTML"
          role="list"
-         aria-label="Detection events">
-      <div class="loading-state">Loading events...</div>
+         aria-label="Doorbell rings">
+      <div class="loading-state">Loading doorbell rings...</div>
     </div>
 
   </main>
@@ -101,8 +78,8 @@
   <nav class="bottom-tabs" role="navigation" aria-label="Mobile navigation">
     <div class="bottom-tabs-inner">
       <a href="/" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Cameras</a>
-      <a href="/events.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
-      <a href="/doorbell.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Doorbell</a>
+      <a href="/events.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>Events</a>
+      <a href="/doorbell.html" class="bottom-tab active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Doorbell</a>
       <a href="/recordings.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Recordings</a>
       <a href="/people.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</a>
       <a href="/objects.html" class="bottom-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Objects</a>
@@ -111,7 +88,6 @@
     </div>
   </nav>
 
-  <!-- Keyboard Shortcut Modal -->
   <div class="toast-container" id="toasts"></div>
   <script src="/app.js"></script>
   <script>
@@ -120,27 +96,12 @@
     initInfiniteScroll();
 
     var eventsTotalAll = 0;
-    var eventsTodayCount = 0;
-
-    function toggleEventsLegend() {
-      var el = document.getElementById('events-legend');
-      var btn = document.getElementById('events-legend-btn');
-      var open = el.hasAttribute('hidden');
-      if (open) { el.removeAttribute('hidden'); btn.setAttribute('aria-expanded', 'true'); }
-      else { el.setAttribute('hidden', ''); btn.setAttribute('aria-expanded', 'false'); }
-    }
 
     function eventsHasActiveFilter() {
-      var labelChip = document.querySelector('.chip[data-filter="label"].active');
       var cameraChip = document.querySelector('.chip[data-filter="camera"].active');
-      var objectChip = document.querySelector('.chip[data-filter="object"].active');
-      var categoryChip = document.querySelector('.chip[data-filter="category"].active');
       var search = (document.getElementById('event-search') || {}).value || '';
       return !!(
-        (labelChip && labelChip.dataset.value) ||
         (cameraChip && cameraChip.dataset.value) ||
-        (objectChip && objectChip.dataset.value) ||
-        (categoryChip && categoryChip.dataset.value) ||
         search.trim()
       );
     }
@@ -154,31 +115,14 @@
 
       if (hasFilter) {
         var n = isFinite(visibleTotal) ? visibleTotal : 0;
-        summary.textContent = n.toLocaleString() + ' of ' + eventsTotalAll.toLocaleString() + ' events match';
+        summary.textContent = n.toLocaleString() + ' of ' + eventsTotalAll.toLocaleString() + ' rings match';
       } else {
-        var parts = [eventsTotalAll.toLocaleString() + ' event' + (eventsTotalAll === 1 ? '' : 's') + ' recorded'];
-        if (eventsTodayCount > 0) parts.push(eventsTodayCount.toLocaleString() + ' today');
-        summary.textContent = parts.join(' · ');
+        summary.textContent = eventsTotalAll.toLocaleString() + ' ring' + (eventsTotalAll === 1 ? '' : 's') + ' recorded';
       }
     }
 
     function clearAllEventFilters() {
-      document.querySelectorAll('.chip[data-filter="label"]').forEach(function(c) {
-        var active = !c.dataset.value;
-        c.classList.toggle('active', active);
-        c.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
       document.querySelectorAll('.chip[data-filter="camera"]').forEach(function(c) {
-        var active = !c.dataset.value;
-        c.classList.toggle('active', active);
-        c.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
-      document.querySelectorAll('.chip[data-filter="object"]').forEach(function(c) {
-        var active = !c.dataset.value;
-        c.classList.toggle('active', active);
-        c.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
-      document.querySelectorAll('.chip[data-filter="category"]').forEach(function(c) {
         var active = !c.dataset.value;
         c.classList.toggle('active', active);
         c.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -199,53 +143,22 @@
         e.target.innerHTML = ''
           + '<div class="empty-state" style="grid-column:1/-1">'
           + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-          + '<p>No events match the current filters.</p>'
+          + '<p>No doorbell rings match the current filters.</p>'
           + '<button class="btn btn-sm btn-primary" data-action-click="clearAllEventFilters()">Clear filters</button>'
           + '</div>';
       }
     });
 
-    // Refresh the gallery when a new event arrives via SSE, but only when
-    // the user is at the top of the list and no filters are applied, to avoid
-    // disturbing their scroll position mid-browse.
-    document.addEventListener('vedetta:event', function() {
-      var gallery = document.getElementById('events-gallery');
-      if (!gallery) return;
-      if (window.scrollY > 200) return;
-      var params = new URLSearchParams(window.location.search);
-      if (params.get('q') || params.get('camera') || params.get('label')) return;
-      if (window.htmx && typeof htmx.ajax === 'function') {
-        htmx.ajax('GET', '/partials/events-gallery', { target: gallery, swap: 'innerHTML' });
-      }
-    });
-
-    // Populate camera and object chips, and fetch top-of-page summary counts.
+    // Populate camera chips and fetch total count.
     Promise.all([
       fetch('/api/cameras').then(function(r) { return r.json(); }),
-      fetch('/api/events/counts').then(function(r) { return r.json(); }),
-      fetch('/api/objects').then(function(r) { return r.json(); }).then(function(d) { return d.items || d || []; })
+      fetch('/api/events/counts?kind=doorbell').then(function(r) { return r.json(); })
     ]).then(function(results) {
       var camData = results[0];
       var counts = results[1] || {};
-      var objects = results[2];
-
-      var byLabel = counts.by_label || {};
       var byCamera = counts.by_camera || {};
       eventsTotalAll = counts.total || 0;
-      eventsTodayCount = counts.today || 0;
       updateEventsSummary(eventsTotalAll);
-
-      // Append per-label counts inline so users can see distribution at a glance.
-      document.querySelectorAll('.chip[data-filter="label"]').forEach(function(chip) {
-        var val = chip.dataset.value;
-        if (val && byLabel[val]) {
-          var count = document.createElement('span');
-          count.className = 'count';
-          count.textContent = byLabel[val].toLocaleString();
-          chip.appendChild(document.createTextNode(' '));
-          chip.appendChild(count);
-        }
-      });
 
       // Camera chips
       var bar = document.getElementById('camera-chips');
@@ -266,41 +179,6 @@
         btn.onclick = function() { toggleChip(this, 'camera'); };
         bar.appendChild(btn);
       });
-
-      // Object chips (only render section if any tracked objects exist).
-      // Deduplicate by name (case-insensitive) since the API returns one entry
-      // per (object, camera) and the gallery filter accepts the name string.
-      if (objects && objects.length > 0) {
-        var seenNames = {};
-        var uniqueObjects = [];
-        objects.forEach(function(obj) {
-          var key = obj.name.toLowerCase();
-          if (!seenNames[key]) {
-            seenNames[key] = true;
-            uniqueObjects.push(obj);
-          }
-        });
-        var objBar = document.getElementById('object-chips');
-        objBar.style.display = '';
-        var allObjBtn = document.createElement('button');
-        allObjBtn.className = 'chip active';
-        allObjBtn.dataset.filter = 'object';
-        allObjBtn.dataset.value = '';
-        allObjBtn.setAttribute('aria-pressed', 'true');
-        allObjBtn.textContent = 'Any tracked';
-        allObjBtn.onclick = function() { toggleChip(this, 'object'); };
-        objBar.appendChild(allObjBtn);
-        uniqueObjects.forEach(function(obj) {
-          var btn = document.createElement('button');
-          btn.className = 'chip';
-          btn.dataset.filter = 'object';
-          btn.dataset.value = obj.name;
-          btn.setAttribute('aria-pressed', 'false');
-          btn.textContent = obj.name;
-          btn.onclick = function() { toggleChip(this, 'object'); };
-          objBar.appendChild(btn);
-        });
-      }
     });
   </script>
 </body>
