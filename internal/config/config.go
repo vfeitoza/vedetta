@@ -17,22 +17,23 @@ import (
 )
 
 type Config struct {
-	Cameras       []CameraConfig      `yaml:"cameras"`
-	Detect        DetectConfig        `yaml:"detect"`
-	Recording     RecordingConfig     `yaml:"recording"`
-	Events        EventConfig         `yaml:"events"`
-	Storage       StorageConfig       `yaml:"storage"`
-	MQTT          MQTTConfig          `yaml:"mqtt"`
-	API           APIConfig           `yaml:"api"`
-	RTSPServer    RTSPServerConfig    `yaml:"rtsp_server"`
-	Auth          AuthConfig          `yaml:"auth"`
-	Updates       UpdateConfig        `yaml:"updates"`
-	Codecs        CodecsConfig        `yaml:"codecs"`
-	Notifications NotificationsConfig `yaml:"notifications"`
-	WebRTC        WebRTCConfig        `yaml:"webrtc"`
-	Tracing       TracingConfig       `yaml:"tracing"`
-	Logging       LoggingConfig       `yaml:"logging"`
-	Runtime       RuntimeConfig       `yaml:"runtime"`
+	Cameras       []CameraConfig         `yaml:"cameras"`
+	Detect        DetectConfig           `yaml:"detect"`
+	Recording     RecordingConfig        `yaml:"recording"`
+	Events        EventConfig            `yaml:"events"`
+	Storage       StorageConfig          `yaml:"storage"`
+	MQTT          MQTTConfig             `yaml:"mqtt"`
+	API           APIConfig              `yaml:"api"`
+	RTSPServer    RTSPServerConfig       `yaml:"rtsp_server"`
+	Auth          AuthConfig             `yaml:"auth"`
+	Updates       UpdateConfig           `yaml:"updates"`
+	Codecs        CodecsConfig           `yaml:"codecs"`
+	Notifications NotificationsConfig    `yaml:"notifications"`
+	WebRTC        WebRTCConfig           `yaml:"webrtc"`
+	Doorbell      DoorbellDefaultsConfig `yaml:"doorbell"`
+	Tracing       TracingConfig          `yaml:"tracing"`
+	Logging       LoggingConfig          `yaml:"logging"`
+	Runtime       RuntimeConfig          `yaml:"runtime"`
 }
 
 // RuntimeConfig holds process-level safety limits.
@@ -171,8 +172,16 @@ type CameraConfig struct {
 }
 
 type DoorbellConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	WebhookURL string `yaml:"webhook_url"` // external webhook to call on press (optional)
+	Enabled         bool   `yaml:"enabled"`
+	WebhookURL      string `yaml:"webhook_url"`      // external webhook to call on press (optional)
+	ClipSeconds     *int   `yaml:"clip_seconds"`     // per-camera override of doorbell.clip_seconds
+	DebounceSeconds *int   `yaml:"debounce_seconds"` // per-camera override of doorbell.debounce_seconds
+}
+
+// DoorbellDefaultsConfig holds global doorbell tuning, overridable per camera.
+type DoorbellDefaultsConfig struct {
+	ClipSeconds     int `yaml:"clip_seconds"`     // synthetic-end window after a press
+	DebounceSeconds int `yaml:"debounce_seconds"` // collapse bouncy presses into one ring
 }
 
 func (c CameraConfig) IsEnabled() bool {
@@ -282,6 +291,23 @@ func (c CameraConfig) EffectiveRetainDays(globalRetain int) int {
 		return *c.RetainDays
 	}
 	return globalRetain
+}
+
+// EffectiveDoorbellClipSeconds returns the per-camera clip window if set, else the global.
+func (c CameraConfig) EffectiveDoorbellClipSeconds(global int) int {
+	if c.Doorbell.ClipSeconds != nil {
+		return *c.Doorbell.ClipSeconds
+	}
+	return global
+}
+
+// EffectiveDoorbellDebounceSeconds returns the per-camera debounce if set, else the global.
+// A pointer is used so an explicit 0 (debounce disabled) is distinguishable from unset.
+func (c CameraConfig) EffectiveDoorbellDebounceSeconds(global int) int {
+	if c.Doorbell.DebounceSeconds != nil {
+		return *c.Doorbell.DebounceSeconds
+	}
+	return global
 }
 
 type EventConfig struct {
@@ -478,6 +504,10 @@ func Defaults() *Config {
 			MemoryGuard:   true,
 			MemoryLimitMB: 0, // 0 = auto (60% of system RAM)
 		},
+		Doorbell: DoorbellDefaultsConfig{
+			ClipSeconds:     15,
+			DebounceSeconds: 10,
+		},
 	}
 }
 
@@ -543,6 +573,13 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Recording.TieredStorage.Priority != "largest" && cfg.Recording.TieredStorage.Priority != "oldest" {
 		return nil, fmt.Errorf("recording.tiered_storage.priority: must be \"largest\" or \"oldest\"")
+	}
+
+	if cfg.Doorbell.ClipSeconds <= 0 {
+		cfg.Doorbell.ClipSeconds = 15
+	}
+	if cfg.Doorbell.DebounceSeconds < 0 {
+		cfg.Doorbell.DebounceSeconds = 10
 	}
 
 	// Validate TLS config: both cert and key must be set together

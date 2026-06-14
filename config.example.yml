@@ -8,6 +8,11 @@ cameras:
     # rtsp_transport: tcp
     # Optional per-camera override for retain_days. Unset = use recording.retain_days.
     # retain_days: 3
+    # doorbell:
+    #   enabled: false
+    #   webhook_url: ""     # called on every press (optional)
+    #   clip_seconds: 20    # override global doorbell.clip_seconds for this camera
+    #   debounce_seconds: 5 # override global doorbell.debounce_seconds (0 = no debounce)
     detect:
       enabled: true
       width: 640
@@ -226,6 +231,11 @@ logging:
   max_size_mb: 50
   # Keep this many rotated files (file.1 .. file.N). Default 5.
   max_backups: 5
+
+# Global doorbell tuning (overridable per camera under cameras[].doorbell).
+doorbell:
+  clip_seconds: 15      # length of the recorded clip captured after a press
+  debounce_seconds: 10  # collapse repeated ONVIF presses within this window into one ring
 
 # Process-level safety limits.
 runtime:
