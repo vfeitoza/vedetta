@@ -43,6 +43,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.11](https://github.com/rvben/vedetta/compare/v0.7.10...v0.7.11) - 2026-06-14
+
+### Added
+
+- **api**: warm running cameras' live-HLS consumers on a reconcile loop ([6c25596](https://github.com/rvben/vedetta/commit/6c25596d5a2d5e068454300e6718296acb3a986b))
+- **camera**: add RunningCameraDetectURLs for HLS warming ([5d8a03f](https://github.com/rvben/vedetta/commit/5d8a03f2eeadaa99e87d11a2a7b7dea0c3fedbde))
+- **stream**: add SetWarmURLs to keep live-HLS consumers warm ([38a4234](https://github.com/rvben/vedetta/commit/38a4234c868ed26261a1293c56c42ef6e24eca20))
+- **stream**: add warm-consumer set and manager lifetime to HLSManager ([c21f7a3](https://github.com/rvben/vedetta/commit/c21f7a3e7b5f3cc0da31ee06f8e5bb16aa48b929))
+- **stream**: make HLS consumer creation rebuild on source recreation ([49a07c4](https://github.com/rvben/vedetta/commit/49a07c43e30cb2675417643324f4843e3496b9f4))
+- **watchdog**: graceful self-restart on sustained memory pressure ([069e9ae](https://github.com/rvben/vedetta/commit/069e9aef6a09cdaf65121b5a2e1867a63c6e0051))
+
+### Fixed
+
+- **detect**: stop concurrent inference latching GC off ([4fc9866](https://github.com/rvben/vedetta/commit/4fc9866db823f8633b9200eb74b6dccef5a1152e))
+- **stream**: anchor playback HLS to wall-clock time across file boundaries ([6f0c5c3](https://github.com/rvben/vedetta/commit/6f0c5c38b58778e5bb82f92b33e6c52d59508f8c))
+- **api**: resolve recording day boundaries in the viewer's timezone ([5e139f8](https://github.com/rvben/vedetta/commit/5e139f82f8cd21ff2dfeba3e53ff8db576776780))
+- **recording**: rotate segment on video RTP timestamp gap ([056d156](https://github.com/rvben/vedetta/commit/056d156e941a0fcde85366a71d4d42c703f52307))
+- **ui**: cap timeline seek snap tolerance at 15 seconds ([934ae9b](https://github.com/rvben/vedetta/commit/934ae9b0bde5475ab1d7b4d585853705b49aad38))
+- **camera**: defer event-snapshot copy until a track emits an event ([4ab4a94](https://github.com/rvben/vedetta/commit/4ab4a94ac5ba35129467695dd2e3663257a69e4a))
+- **stream**: clamp over-declared H.264 level so iOS HLS starts fast ([0761d7b](https://github.com/rvben/vedetta/commit/0761d7b577deadb7c7b403c46883420f3bd179c0))
+- **stream**: strip SEI NALs from live HLS so iOS decodes proprietary-SEI cameras ([e0b7ad2](https://github.com/rvben/vedetta/commit/e0b7ad2c32e81461660188b4aa70a7e13fd6391c))
+- **api**: guard nil context in warm HLS reconcile loop ([1597aa9](https://github.com/rvben/vedetta/commit/1597aa9dce2a73224d880f8b284d05ec98ddd01f))
+- **stream**: rebuild warm HLS consumer poisoned before video params ([72f042d](https://github.com/rvben/vedetta/commit/72f042d3fc9f828f87ba89e4a388ad2a666385e5))
+- **recording**: delete orphaned segment rows when the file is missing ([9f5fb68](https://github.com/rvben/vedetta/commit/9f5fb68bf2df42c40fd49bdec12bfc60fef40be0))
+- **recording**: run clip recompression in an isolated subprocess ([526290a](https://github.com/rvben/vedetta/commit/526290ab671818a77185971e2af30a2b10b20ec7))
+
 ## [0.7.10](https://github.com/rvben/vedetta/compare/v0.7.9...v0.7.10) - 2026-06-02
 
 ### Added
