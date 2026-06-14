@@ -251,6 +251,16 @@ func (s *Server) BroadcastDoorbellSSE(camera, eventID, person string) {
 	})
 }
 
+// BroadcastDoorbellPersonSSE updates an open doorbell banner with the recognized
+// person once async face recognition resolves it.
+func (s *Server) BroadcastDoorbellPersonSSE(camera, eventID, person string) {
+	s.broadcastSSE("doorbell_person", map[string]string{
+		"event_id": eventID,
+		"camera":   camera,
+		"person":   person,
+	})
+}
+
 func (s *Server) ListZones(w http.ResponseWriter, r *http.Request, name string) {
 	cam := s.cameras.GetCamera(name)
 	if cam == nil {

@@ -6004,6 +6004,20 @@ function addObjectReference(objectId, objectName, eventId) {
       try { showDoorbellNotification(JSON.parse(e.data)); } catch(err) {}
     });
 
+    evtSource.addEventListener('doorbell_person', function(e) {
+      try {
+        var d = JSON.parse(e.data);
+        if (!d.person) return;
+        var nodes = document.querySelectorAll('.doorbell-notification[data-ring]');
+        for (var i = 0; i < nodes.length; i++) {
+          if (nodes[i].getAttribute('data-ring') === d.event_id) {
+            var title = nodes[i].querySelector('.doorbell-title');
+            if (title) title.textContent = d.person + ' at the door';
+          }
+        }
+      } catch(err) {}
+    });
+
     evtSource.addEventListener('event', function(e) {
       try {
         var data = JSON.parse(e.data);
@@ -6070,6 +6084,7 @@ function addObjectReference(objectId, objectName, eventId) {
     // Create notification banner
     var banner = document.createElement('div');
     banner.className = 'doorbell-notification';
+    banner.setAttribute('data-ring', data.event_id || '');
     var inner = document.createElement('div');
     inner.className = 'doorbell-notification-inner';
     var icon = document.createElement('div');

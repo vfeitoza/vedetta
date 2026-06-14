@@ -37,8 +37,9 @@ type publishedEvent struct {
 }
 
 type fakeEventPublisher struct {
-	events    []publishedEvent
-	snapshots int
+	events        []publishedEvent
+	snapshots     int
+	doorbellCalls int
 }
 
 func (f *fakeEventPublisher) PublishEvent(event camera.Event, matchedObjects []string) error {
@@ -48,6 +49,10 @@ func (f *fakeEventPublisher) PublishEvent(event camera.Event, matchedObjects []s
 
 func (f *fakeEventPublisher) PublishSnapshot(cameraName, label string, jpegData []byte) {
 	f.snapshots++
+}
+
+func (f *fakeEventPublisher) PublishDoorbell(cameraName, person string, jpegData []byte) {
+	f.doorbellCalls++
 }
 
 type fakeEnqueuer struct {

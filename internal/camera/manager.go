@@ -261,6 +261,7 @@ func (m *Manager) SubmitDoorbellPress(cameraName string) (string, bool) {
 				Camera:  cameraName,
 				EventID: eventID,
 				Results: results,
+				Kind:    EventKindDoorbell,
 			}
 			select {
 			case fe <- fev:

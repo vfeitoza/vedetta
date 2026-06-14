@@ -898,10 +898,12 @@ type snapshotSaver interface {
 }
 
 // eventPublisher is the subset of *mqtt.Client that emitEventArtifacts needs
-// for the create-event and snapshot publishes, extracted for unit testing.
+// for the create-event, snapshot, and doorbell-trigger publishes, extracted for
+// unit testing.
 type eventPublisher interface {
 	PublishEvent(event camera.Event, matchedObjects []string) error
 	PublishSnapshot(cameraName, label string, jpegData []byte)
+	PublishDoorbell(cameraName, person string, jpegData []byte)
 }
 
 // eventEnqueuer is the subset of *notify.NotificationDispatcher used to enqueue
@@ -988,6 +990,24 @@ func emitEventArtifacts(ctx context.Context, tracer trace.Tracer,
 				snapSpan.End()
 			}
 		}
+
+		// Publish the doorbell JSON trigger for HA automations. This is the
+		// canonical emit site for the trigger (not the object-count path, which
+		// is excluded for doorbell events). SubLabel carries the recognized
+		// person if async face recognition already resolved it; usually empty
+		// at this point (recognition is async), which is fine - HA automations
+		// fire on the JSON trigger regardless. Person enrichment goes to the
+		// browser only via BroadcastDoorbellPersonSSE after face resolution.
+		if ev.Kind == camera.EventKindDoorbell {
+			var jpeg []byte
+			if mqttImg != nil {
+				jpeg = encodeJPEG(mqttImg, snapshotQuality)
+			}
+			_, dbSpan := tracer.Start(mqttCtx, "mqtt.publish_doorbell")
+			pub.PublishDoorbell(ev.CameraName, ev.SubLabel, jpeg)
+			dbSpan.End()
+		}
+
 		mqttSpan.End()
 	}
 
@@ -1125,15 +1145,19 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					return nil
 				})
 
-				// Decrement object count
-				if counts, ok := objectCounts[ev.CameraName]; ok {
-					counts[ev.Label]--
-					if counts[ev.Label] < 0 {
-						counts[ev.Label] = 0
+				// Decrement object count. Doorbell events are not object-count
+				// gauges: they never increment the count map, so they must not
+				// decrement it or republish a retained 0 to the doorbell topic.
+				if ev.Kind != camera.EventKindDoorbell {
+					if counts, ok := objectCounts[ev.CameraName]; ok {
+						counts[ev.Label]--
+						if counts[ev.Label] < 0 {
+							counts[ev.Label] = 0
+						}
+						spanPublish(endCtx, tracer, "mqtt.publish_object_count", func() error {
+							return mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
+						})
 					}
-					spanPublish(endCtx, tracer, "mqtt.publish_object_count", func() error {
-						return mc.PublishObjectCount(ev.CameraName, ev.Label, counts[ev.Label])
-					})
 				}
 			}
 			endSpan.End()
@@ -1247,8 +1271,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				// the same retained topic from the loop, so keeping the increment here
 				// keeps count ordering correct-by-construction. PublishObjectCount
 				// sends a small retained integer, so running it on the loop is cheap.
+				// Doorbell events are excluded: they are not object-count gauges and
+				// must not clobber the doorbell MQTT trigger topic with a retained int.
 				mc := sub.mqttClient.Load()
-				if mc != nil {
+				if mc != nil && event.Kind != camera.EventKindDoorbell {
 					if objectCounts[event.CameraName] == nil {
 						objectCounts[event.CameraName] = make(map[string]int)
 					}
@@ -1410,6 +1436,16 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 						updatePersonCentroid(db, personID, result.Embedding)
 						if p, err := db.GetPerson(personID); err == nil && p != nil && p.Name != "" {
 							_ = db.UpdateEventSubLabel(fe.EventID, p.Name)
+							// Re-push the recognized person to the browser for doorbell
+							// rings so the banner updates without a page reload. Regular
+							// object events do not have a live banner to update. MQTT is
+							// intentionally NOT published here: the doorbell trigger fires
+							// from emitEventArtifacts (with whatever person is known at
+							// emit time); a second trigger here would double-fire HA
+							// automations for every successful face match.
+							if server != nil && fe.Kind == camera.EventKindDoorbell {
+								server.BroadcastDoorbellPersonSSE(fe.Camera, fe.EventID, p.Name)
+							}
 						}
 						slog.Info("face matched to person", "person_id", personID, "similarity", fmt.Sprintf("%.3f", similarity), "camera", fe.Camera)
 					} else {

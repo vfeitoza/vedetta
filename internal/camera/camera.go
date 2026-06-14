@@ -103,6 +103,9 @@ type FaceEvent struct {
 	Camera  string
 	EventID string
 	Results []detect.FaceResult
+	// Kind is the event kind that triggered face recognition (e.g. EventKindDoorbell).
+	// Zero value means a standard object-detection event.
+	Kind string
 }
 
 // DetectionBox is a single tracked object for the live overlay.
