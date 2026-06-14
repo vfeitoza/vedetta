@@ -451,6 +451,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/cameras/{name}/doorbell/{event_id}/answer:
+    post:
+      operationId: answerDoorbell
+      summary: Acknowledge (answer) a doorbell ring
+      tags: [cameras]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: event_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Ring acknowledged (idempotent; returns the first answerer)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DoorbellAnswerResponse"
+        "404":
+          description: Ring not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/cameras/{name}/stop:
     post:
       operationId: stopCamera
@@ -2880,6 +2907,14 @@ components:
           type: string
         camera:
           type: string
+
+    DoorbellAnswerResponse:
+      type: object
+      required: [event_id, answered_at, answered_by]
+      properties:
+        event_id: { type: string }
+        answered_at: { type: string, format: date-time }
+        answered_by: { type: string }
 
     CameraStatus:
       type: object
