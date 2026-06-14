@@ -248,6 +248,10 @@ func (m *Manager) SubmitDoorbellPress(cameraName string) (string, bool) {
 		return "", false
 	}
 
+	if url := cam.config.Doorbell.WebhookURL; url != "" {
+		go fireDoorbellWebhook(url, cameraName, eventID, "")
+	}
+
 	if m.faceRecognizer != nil {
 		fr := m.faceRecognizer
 		fe := m.faceEvents
