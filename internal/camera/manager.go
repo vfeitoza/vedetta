@@ -10,6 +10,7 @@ import (
 	"github.com/rvben/vedetta/internal/config"
 	"github.com/rvben/vedetta/internal/detect"
 	"github.com/rvben/vedetta/internal/rtsp"
+	"github.com/rvben/vedetta/internal/safepath"
 )
 
 // Manager manages all camera streams.
@@ -198,4 +199,76 @@ func (m *Manager) IsStopped(name string) bool {
 	}
 	_, running := m.cancelFuncs[name]
 	return !running
+}
+
+// SubmitDoorbellPress synthesizes a doorbell event for the named camera and
+// injects it into the event pipeline. It uses the camera's latest decoded
+// frame as the snapshot image. Returns the event ID and true on success, or
+// an empty string and false when the camera is unknown or has no frame yet.
+func (m *Manager) SubmitDoorbellPress(cameraName string) (string, bool) {
+	cam := m.GetCamera(cameraName)
+	if cam == nil {
+		return "", false
+	}
+
+	rgba := cam.LastSnapshot()
+	if rgba == nil {
+		return "", false
+	}
+
+	now := time.Now()
+	eventID := fmt.Sprintf("%s-doorbell-%d", cameraName, now.UnixMilli())
+
+	bounds := rgba.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	snapPath, err := safepath.Join(m.snapshotPath, cameraName, safepath.FileComponent(eventID)+".jpg")
+	if err != nil {
+		slog.Error("invalid doorbell snapshot path", "camera", cameraName, "event", eventID, "error", err)
+		snapPath = ""
+	}
+
+	ev := Event{
+		ID:            eventID,
+		CameraName:    cameraName,
+		Label:         "doorbell",
+		Kind:          EventKindDoorbell,
+		Category:      CategoryAlert,
+		Score:         1.0,
+		Box:           [4]int{0, 0, w, h},
+		Timestamp:     now,
+		SnapshotImage: rgba,
+		SnapshotPath:  snapPath,
+	}
+
+	select {
+	case m.events <- ev:
+	default:
+		slog.Warn("doorbell event dropped: events channel full", "camera", cameraName)
+		return "", false
+	}
+
+	if m.faceRecognizer != nil {
+		fr := m.faceRecognizer
+		fe := m.faceEvents
+		cropDir := m.faceCropDir
+		go func() {
+			results := fr.DetectAndEmbed(rgba, [4]int{0, 0, w, h}, cropDir)
+			if len(results) == 0 {
+				return
+			}
+			fev := FaceEvent{
+				Camera:  cameraName,
+				EventID: eventID,
+				Results: results,
+			}
+			select {
+			case fe <- fev:
+			default:
+				slog.Warn("doorbell face event dropped: faceEvents channel full", "camera", cameraName)
+			}
+		}()
+	}
+
+	return eventID, true
 }
