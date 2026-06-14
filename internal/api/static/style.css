@@ -970,6 +970,30 @@ input, select { font-family: inherit; }
   letter-spacing: 0.02em;
 }
 
+.event-answered-badge {
+  position: absolute;
+  bottom: 0.375rem;
+  right: 0.375rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  background: rgba(0, 230, 118, 0.18);
+  color: var(--green);
+  border: 1px solid rgba(0, 230, 118, 0.4);
+}
+
+.event-missed-badge {
+  position: absolute;
+  bottom: 0.375rem;
+  right: 0.375rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  background: rgba(255, 82, 82, 0.18);
+  color: var(--danger);
+  border: 1px solid rgba(255, 82, 82, 0.4);
+}
+
 .event-card-footer {
   padding: 0.5rem 0.75rem;
   display: flex;

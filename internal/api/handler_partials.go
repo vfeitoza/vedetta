@@ -177,6 +177,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 			`{{with eventDuration .}}<span class="event-duration-badge" title="Event duration: {{.}}">{{.}}</span>{{end}}` +
 			`{{if .SubLabel}}<span class="event-object-badge" title="Identified: {{.SubLabel}}">{{.SubLabel}}</span>{{end}}` +
 			`{{if eq .Category "detection"}}<span class="event-detection-badge" title="Low-priority detection (e.g. a stationary vehicle)">detection</span>{{end}}` +
+			`{{if eq .Kind "doorbell"}}{{if .AnsweredAt.IsZero}}<span class="event-missed-badge">missed</span>{{else}}<span class="event-answered-badge" title="answered by {{.AnsweredBy}}">answered</span>{{end}}{{end}}` +
 			`</div>` +
 			`<div class="event-card-footer">` +
 			`<span class="event-camera-name">{{displayName .CameraName}}</span>` +
