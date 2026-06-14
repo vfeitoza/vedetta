@@ -6018,6 +6018,16 @@ function addObjectReference(objectId, objectName, eventId) {
       } catch(err) {}
     });
 
+    evtSource.addEventListener('doorbell_answered', function(e) {
+      try {
+        var d = JSON.parse(e.data);
+        var nodes = document.querySelectorAll('.doorbell-notification[data-ring]');
+        for (var i = 0; i < nodes.length; i++) {
+          if (nodes[i].getAttribute('data-ring') === d.event_id) nodes[i].remove();
+        }
+      } catch(err) {}
+    });
+
     evtSource.addEventListener('event', function(e) {
       try {
         var data = JSON.parse(e.data);
@@ -6078,6 +6088,10 @@ function addObjectReference(objectId, objectName, eventId) {
   if (navigator.onLine === false) showOfflineBanner();
 
   function showDoorbellNotification(data) {
+    // Dedupe: ignore a second SSE for the same ring
+    var eventId = data.event_id || '';
+    if (eventId && document.querySelector('.doorbell-notification[data-ring="' + eventId.replace(/"/g, '') + '"]')) return;
+
     var person = data.person || 'Someone';
     var camera = (data.camera || '').replace(/_/g, ' ');
 
@@ -6109,8 +6123,31 @@ function addObjectReference(objectId, objectName, eventId) {
       e.stopPropagation();
       banner.remove();
     });
+    var actions = document.createElement('div');
+    actions.className = 'doorbell-actions';
+    var ackBtn = document.createElement('button');
+    ackBtn.className = 'doorbell-btn doorbell-btn-ack';
+    ackBtn.textContent = 'Acknowledge';
+    ackBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      ackBtn.disabled = true;
+      fetch('/api/cameras/' + pathSegment(data.camera || '') + '/doorbell/' + encodeURIComponent(data.event_id || '') + '/answer', { method: 'POST' })
+        .then(function() { banner.remove(); })
+        .catch(function() { ackBtn.disabled = false; });
+    });
+    var liveBtn = document.createElement('button');
+    liveBtn.className = 'doorbell-btn doorbell-btn-live';
+    liveBtn.textContent = 'View live';
+    liveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      window.location.href = '/camera.html?name=' + encodeURIComponent(data.camera || '');
+    });
+    actions.appendChild(ackBtn);
+    actions.appendChild(liveBtn);
+
     content.appendChild(title);
     content.appendChild(meta);
+    content.appendChild(actions);
     inner.appendChild(icon);
     inner.appendChild(content);
     inner.appendChild(snapshot);
@@ -6124,27 +6161,29 @@ function addObjectReference(objectId, objectName, eventId) {
 
     document.body.appendChild(banner);
 
-    // Auto-dismiss after 30 seconds
-    setTimeout(function() {
-      if (banner.parentElement) banner.remove();
-    }, 30000);
-
-    // Play a short notification beep via Web Audio (more reliable than a data-URI WAV)
+    // Play a ding-dong chime via Web Audio
     try {
       var Ctor = window.AudioContext || window.webkitAudioContext;
       if (Ctor) {
         var ctx = new Ctor();
-        var osc = ctx.createOscillator();
-        var gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
-        osc.connect(gain).connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.4);
-        osc.onended = function () { try { ctx.close(); } catch(_) {} };
+        var playTone = function(freq, startTime, duration, onEnd) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.15, startTime + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration - 0.05);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(startTime);
+          osc.stop(startTime + duration);
+          if (onEnd) osc.onended = onEnd;
+        };
+        playTone(880, ctx.currentTime, 0.4, function() {
+          playTone(659, ctx.currentTime, 0.5, function() {
+            try { ctx.close(); } catch(_) {}
+          });
+        });
       }
     } catch(e) {}
   }

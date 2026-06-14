@@ -3604,6 +3604,37 @@ kbd {
   color: #fff;
 }
 
+.doorbell-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.doorbell-btn {
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.doorbell-btn-ack {
+  border-color: rgba(93, 215, 255, 0.5);
+  color: var(--accent);
+}
+
+.doorbell-btn-ack:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.doorbell-btn-live:hover,
+.doorbell-btn-ack:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
 @keyframes doorbell-slide-in {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
