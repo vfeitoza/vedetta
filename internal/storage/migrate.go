@@ -11,7 +11,7 @@ import (
 // currentSchemaVersion is the schema version this build expects. It is stored
 // in SQLite's PRAGMA user_version. A database reporting a lower version is
 // upgraded by migrate; databases created before versioning report 0.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // baselineSchema creates every table and index for a fresh database. It is
 // idempotent (CREATE ... IF NOT EXISTS) and a cheap no-op for existing DBs.
@@ -35,6 +35,9 @@ const baselineSchema = `
 		object_name TEXT,
 		sub_label TEXT,
 		category TEXT NOT NULL DEFAULT 'alert',
+		kind TEXT NOT NULL DEFAULT 'object',
+		answered_at DATETIME,
+		answered_by TEXT,
 		recompressed INTEGER NOT NULL DEFAULT 0,
 		recompressed_at DATETIME,
 		recompress_failures INTEGER NOT NULL DEFAULT 0,
@@ -311,7 +314,21 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	// Future ordered migrations go here, each guarded by `if version < N`.
+	// Version 5: doorbell presses become a first-class event kind with answer state.
+	if version < 5 {
+		for _, c := range []legacyColumn{
+			{"events", "kind", "ALTER TABLE events ADD COLUMN kind TEXT NOT NULL DEFAULT 'object'"},
+			{"events", "answered_at", "ALTER TABLE events ADD COLUMN answered_at DATETIME"},
+			{"events", "answered_by", "ALTER TABLE events ADD COLUMN answered_by TEXT"},
+		} {
+			if err := ensureColumn(db, c.table, c.column, c.ddl); err != nil {
+				return fmt.Errorf("backfill column %s.%s: %w", c.table, c.column, err)
+			}
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind)`); err != nil {
+			return fmt.Errorf("create idx_events_kind: %w", err)
+		}
+	}
 
 	if version < currentSchemaVersion {
 		if err := setUserVersion(db, currentSchemaVersion); err != nil {
