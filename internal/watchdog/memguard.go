@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"context"
+	"math"
 	"runtime/metrics"
 	"time"
 )
@@ -40,6 +41,12 @@ const (
 	// is under genuine memory pressure while leaving ample headroom over the
 	// normal working set.
 	autoMemoryFraction = 0.60
+
+	// softMemoryFloor is the smallest soft GC limit (GOMEMLIMIT) the backstop
+	// will install. Below this the limit would sit too close to the normal
+	// working set and make the collector thrash, so a guard limit whose half
+	// falls under the floor gets no backstop at all (the guard alone applies).
+	softMemoryFloor = 1 << 30 // 1 GiB
 )
 
 // ResolveMemoryLimit computes the guard's footprint ceiling in bytes from
@@ -58,6 +65,27 @@ func ResolveMemoryLimit(enabled bool, limitMB int, systemRAM uint64) uint64 {
 		return 0
 	}
 	return uint64(float64(systemRAM) * autoMemoryFraction)
+}
+
+// ResolveSoftMemoryLimit returns the value for debug.SetMemoryLimit (GOMEMLIMIT)
+// that backstops the memory guard. A soft limit at half the guard's restart
+// ceiling makes the garbage collector reclaim a runaway well before the guard
+// fires, even if a code path leaves percentage-based GC effectively disabled,
+// while staying far enough above the normal working set that steady-state
+// operation never thrashes the collector. It returns math.MaxInt64 - the
+// runtime's "no limit" sentinel, so the call is a no-op - when no backstop
+// should be installed: when the guard is off (guardLimit == 0) or when half the
+// guard limit would fall below softMemoryFloor. The guard remains the final
+// backstop for off-heap (CGO) growth, which GOMEMLIMIT does not bound.
+func ResolveSoftMemoryLimit(guardLimit uint64) int64 {
+	if guardLimit == 0 {
+		return math.MaxInt64
+	}
+	soft := guardLimit / 2
+	if soft < softMemoryFloor || soft > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(soft)
 }
 
 // MemoryGuard watches the process's Go-runtime memory footprint and fires

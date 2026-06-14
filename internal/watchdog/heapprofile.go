@@ -36,3 +36,21 @@ func WriteHeapProfile(dir string, nowUnix int64) (string, error) {
 	}
 	return path, nil
 }
+
+// ResolveHeapProfileDir chooses where trip-time heap profiles are written. It
+// prefers the configured log file's directory, so the profile sits next to the
+// logs. When no log file is configured (a deployment that ships logs to a
+// collector instead of a file), it falls back to the database's directory:
+// persistent operational storage with a stable, discoverable home. It returns
+// "" only when neither path is known, leaving WriteHeapProfile to use the OS
+// temp dir - a last resort, since the OS can clean a temp dir before the profile
+// is analyzed.
+func ResolveHeapProfileDir(logFile, dbPath string) string {
+	if logFile != "" {
+		return filepath.Dir(logFile)
+	}
+	if dbPath != "" {
+		return filepath.Dir(dbPath)
+	}
+	return ""
+}

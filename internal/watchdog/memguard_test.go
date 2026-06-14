@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +42,45 @@ func TestResolveMemoryLimit_AutoFraction(t *testing.T) {
 func TestResolveMemoryLimit_AutoWithoutRAM(t *testing.T) {
 	if got := ResolveMemoryLimit(true, 0, 0); got != 0 {
 		t.Fatalf("auto limit with unknown RAM resolved to %d, want 0", got)
+	}
+}
+
+// TestResolveSoftMemoryLimit_NoGuard proves the soft GC limit is off
+// (math.MaxInt64, the runtime's "no limit" sentinel) when the guard is off, so
+// disabling the guard also disables its backstop.
+func TestResolveSoftMemoryLimit_NoGuard(t *testing.T) {
+	if got := ResolveSoftMemoryLimit(0); got != math.MaxInt64 {
+		t.Fatalf("soft limit with no guard resolved to %d, want math.MaxInt64", got)
+	}
+}
+
+// TestResolveSoftMemoryLimit_HalfOfGuard proves the soft limit sits at half the
+// guard limit: low enough that the GC reclaims a runaway before the guard's
+// restart ceiling, high enough above the working set to avoid thrashing.
+func TestResolveSoftMemoryLimit_HalfOfGuard(t *testing.T) {
+	var guard uint64 = 9830 * 1024 * 1024 // the production auto limit on a 16 GB box
+	want := int64(guard / 2)
+	if got := ResolveSoftMemoryLimit(guard); got != want {
+		t.Fatalf("soft limit resolved to %d, want %d (half of %d)", got, want, guard)
+	}
+}
+
+// TestResolveSoftMemoryLimit_BelowFloorDisables proves that when half the guard
+// limit would fall below softMemoryFloor, the backstop is left off rather than
+// set to a value low enough to thrash the collector against the working set.
+func TestResolveSoftMemoryLimit_BelowFloorDisables(t *testing.T) {
+	// A 1 GiB guard halves to 512 MiB, below the 1 GiB floor.
+	if got := ResolveSoftMemoryLimit(1 << 30); got != math.MaxInt64 {
+		t.Fatalf("soft limit below floor resolved to %d, want math.MaxInt64 (off)", got)
+	}
+}
+
+// TestResolveSoftMemoryLimit_AtFloor proves the floor is inclusive: a guard
+// whose half equals softMemoryFloor installs that floor value.
+func TestResolveSoftMemoryLimit_AtFloor(t *testing.T) {
+	guard := uint64(softMemoryFloor) * 2
+	if got := ResolveSoftMemoryLimit(guard); got != softMemoryFloor {
+		t.Fatalf("soft limit at floor resolved to %d, want %d", got, int64(softMemoryFloor))
 	}
 }
 

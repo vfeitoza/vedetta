@@ -229,12 +229,24 @@ func main() {
 		systemRAM, _ := watchdog.SystemMemoryBytes()
 		memLimit := watchdog.ResolveMemoryLimit(cfg.Runtime.MemoryGuard, cfg.Runtime.MemoryLimitMB, systemRAM)
 		if memLimit > 0 {
-			// Write the trip-time heap profile alongside the log so a recurrence
-			// leaves an analyzable artifact (go tool pprof) next to the evidence.
-			profileDir := ""
-			if cfg.Logging.File != "" {
-				profileDir = filepath.Dir(cfg.Logging.File)
+			// Backstop the guard with a soft GC ceiling (GOMEMLIMIT): the collector
+			// reclaims a runaway well before the guard's restart limit, so a heap
+			// ramp is bounded by GC rather than by a process restart. The guard
+			// stays as the final backstop for off-heap (CGO) growth GC cannot see.
+			// Only lower the limit, never raise it: a negative argument reads the
+			// current limit without changing it, so a stricter operator-set
+			// GOMEMLIMIT (and the "no backstop" sentinel) is preserved.
+			soft := watchdog.ResolveSoftMemoryLimit(memLimit)
+			if current := debug.SetMemoryLimit(-1); soft < current {
+				debug.SetMemoryLimit(soft)
+				slog.Info("soft memory limit set", "gomemlimit_mb", soft/(1024*1024))
 			}
+
+			// Write the trip-time heap profile to a persistent, discoverable
+			// directory (next to the logs, or the database) so a recurrence leaves
+			// an analyzable artifact (go tool pprof) rather than dropping it in an
+			// OS temp dir that may be cleaned before anyone looks.
+			profileDir := watchdog.ResolveHeapProfileDir(cfg.Logging.File, cfg.Storage.DBPath)
 			mg := watchdog.NewMemoryGuard(memLimit, func(footprint, limit uint64) {
 				// Capture a heap profile before restarting: the runaway is still
 				// holding the memory now, so this profile pins the allocation sites

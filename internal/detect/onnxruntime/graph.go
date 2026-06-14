@@ -3,7 +3,6 @@ package onnxruntime
 import (
 	"fmt"
 	"log/slog"
-	"runtime/debug"
 )
 
 // Session holds a loaded ONNX model ready for inference.
@@ -183,8 +182,12 @@ func (s *Session) OutputNames() []string {
 
 // Run executes the model with the given input tensors and returns the output tensors.
 func (s *Session) Run(inputs map[string]*Tensor) (map[string]*Tensor, error) {
-	// Disable GC during inference to eliminate madvise/scanning overhead
-	prev := debug.SetGCPercent(-1)
+	// Inference must not touch the process-global GC setting. Sessions are
+	// per-camera and run concurrently, so a per-call SetGCPercent save/restore
+	// races: one goroutine reads a value another already lowered and then
+	// "restores" it, latching GC off process-wide and letting the heap ramp
+	// until the memory guard restarts the process. GC pacing is governed
+	// globally instead (GOGC plus the GOMEMLIMIT backstop set at startup).
 
 	// Return previous run's output buffers to the free list
 	for _, buf := range s.prevOutputs {
@@ -211,7 +214,6 @@ func (s *Session) Run(inputs map[string]*Tensor) (map[string]*Tensor, error) {
 	for i, name := range s.inputNames {
 		t, ok := inputs[name]
 		if !ok {
-			debug.SetGCPercent(prev)
 			return nil, fmt.Errorf("input %q not provided", name)
 		}
 		values[s.inputIDs[i]] = t
@@ -239,7 +241,6 @@ func (s *Session) Run(inputs map[string]*Tensor) (map[string]*Tensor, error) {
 		// Execute using pre-resolved function pointer
 		outputs, err := s.nodeFuncs[i](nodeInputs, s.cachedAttrs[i])
 		if err != nil {
-			debug.SetGCPercent(prev)
 			return nil, fmt.Errorf("node %d (%s/%s): %w", i, node.Name, node.OpType, err)
 		}
 
@@ -257,7 +258,6 @@ func (s *Session) Run(inputs map[string]*Tensor) (map[string]*Tensor, error) {
 	for i, name := range s.outputNames {
 		t := values[s.outputIDs[i]]
 		if t == nil {
-			debug.SetGCPercent(prev)
 			return nil, fmt.Errorf("output %q not produced by graph", name)
 		}
 		result[name] = t
@@ -275,9 +275,6 @@ func (s *Session) Run(inputs map[string]*Tensor) (map[string]*Tensor, error) {
 			t.pooled = false
 		}
 	}
-
-	// Restore GC
-	debug.SetGCPercent(prev)
 
 	return result, nil
 }

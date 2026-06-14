@@ -42,3 +42,33 @@ func TestWriteHeapProfile_EmptyDirFallsBackToTemp(t *testing.T) {
 		t.Fatalf("expected profile at %s: %v", path, err)
 	}
 }
+
+// TestResolveHeapProfileDir_PrefersLogDir proves the log file's directory wins
+// when a log file is configured, keeping the profile next to the logs.
+func TestResolveHeapProfileDir_PrefersLogDir(t *testing.T) {
+	got := ResolveHeapProfileDir("/var/log/vedetta/vedetta.log", "/data/vedetta.db")
+	if want := "/var/log/vedetta"; got != want {
+		t.Fatalf("ResolveHeapProfileDir = %q, want %q", got, want)
+	}
+}
+
+// TestResolveHeapProfileDir_FallsBackToDBDir proves that when no log file is
+// configured (the deployment ships logs to a collector, not a file), the profile
+// lands in the database's directory: persistent operational storage that always
+// has a stable home, rather than an OS temp dir that can be cleaned before the
+// profile is analyzed.
+func TestResolveHeapProfileDir_FallsBackToDBDir(t *testing.T) {
+	got := ResolveHeapProfileDir("", "/Users/op/vedetta/vedetta.db")
+	if want := "/Users/op/vedetta"; got != want {
+		t.Fatalf("ResolveHeapProfileDir = %q, want %q", got, want)
+	}
+}
+
+// TestResolveHeapProfileDir_EmptyWhenNothingKnown proves that with neither a log
+// file nor a database path, the resolver returns "" so WriteHeapProfile applies
+// its own OS-temp-dir fallback rather than this function inventing a path.
+func TestResolveHeapProfileDir_EmptyWhenNothingKnown(t *testing.T) {
+	if got := ResolveHeapProfileDir("", ""); got != "" {
+		t.Fatalf("ResolveHeapProfileDir = %q, want empty", got)
+	}
+}
