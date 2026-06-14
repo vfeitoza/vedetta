@@ -40,6 +40,9 @@ func (s *Server) AnswerDoorbell(w http.ResponseWriter, r *http.Request, name str
 			"camera":      name,
 			"answered_by": ev.AnsweredBy,
 		})
+		if s.doorbellMetrics != nil {
+			s.doorbellMetrics.recordAnswer(name)
+		}
 		slog.Info("doorbell answered", "camera", name, "event", eventID, "by", ev.AnsweredBy)
 	}
 

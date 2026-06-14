@@ -1279,6 +1279,7 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				dbSpan.End()
 
 				if saveErr == nil && event.Kind == camera.EventKindDoorbell {
+					server.RecordDoorbellPress(event.CameraName)
 					server.BroadcastDoorbellSSE(event.CameraName, event.ID, event.SubLabel)
 				}
 

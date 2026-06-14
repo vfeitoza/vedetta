@@ -298,6 +298,30 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(&b, "vedetta_stream_clients{camera=%q,transport=%q} %d\n", promLabel(r.camera), r.transport, r.n)
 	}
 
+	// Doorbell press counter and unanswered-ring gauge — omit empty series.
+	if s.doorbellMetrics != nil {
+		presses := s.doorbellMetrics.pressCounts()
+		unanswered := s.doorbellMetrics.unansweredCounts()
+		pcams := make([]string, 0, len(presses))
+		for c := range presses {
+			pcams = append(pcams, c)
+		}
+		sort.Strings(pcams)
+		fmt.Fprintf(&b, "# HELP vedetta_doorbell_presses_total Total doorbell presses by camera.\n# TYPE vedetta_doorbell_presses_total counter\n")
+		for _, c := range pcams {
+			fmt.Fprintf(&b, "vedetta_doorbell_presses_total{camera=%q} %d\n", promLabel(c), presses[c])
+		}
+		ucams := make([]string, 0, len(unanswered))
+		for c := range unanswered {
+			ucams = append(ucams, c)
+		}
+		sort.Strings(ucams)
+		fmt.Fprintf(&b, "# HELP vedetta_doorbell_unanswered Currently unanswered doorbell rings by camera.\n# TYPE vedetta_doorbell_unanswered gauge\n")
+		for _, c := range ucams {
+			fmt.Fprintf(&b, "vedetta_doorbell_unanswered{camera=%q} %d\n", promLabel(c), unanswered[c])
+		}
+	}
+
 	// Push notification counters — only emitted when a dispatcher is wired.
 	if s.notifier != nil {
 		s.notifier.Metrics().WriteProm(&b)

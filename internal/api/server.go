@@ -111,6 +111,9 @@ type Server struct {
 	// disconnect events.
 	hlsViewers *hlsViewers
 
+	// Per-camera doorbell press counter and unanswered-ring gauge for /metrics.
+	doorbellMetrics *doorbellMetrics
+
 	objectRematchMu      sync.Mutex
 	objectRematchRunning map[int64]bool
 	objectRematchPending map[int64]bool
@@ -144,6 +147,7 @@ func New(cfg config.APIConfig, authChecker *auth.Checker, db *storage.DB) *Serve
 		detectionHub:         newDetectionHub(),
 		mjpegViewers:         newMJPEGViewers(),
 		hlsViewers:           newHLSViewers(),
+		doorbellMetrics:      newDoorbellMetrics(),
 		objectRematchRunning: make(map[int64]bool),
 		objectRematchPending: make(map[int64]bool),
 	}
@@ -420,6 +424,13 @@ func (s *Server) buildHTTPServer(addr string, handler http.Handler) *http.Server
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+}
+
+// RecordDoorbellPress increments the doorbell press metric for a camera.
+func (s *Server) RecordDoorbellPress(camera string) {
+	if s.doorbellMetrics != nil {
+		s.doorbellMetrics.recordPress(camera)
 	}
 }
 
