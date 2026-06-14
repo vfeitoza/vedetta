@@ -432,8 +432,8 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: Doorbell event created
+        "202":
+          description: Doorbell ring accepted (processed asynchronously)
           content:
             application/json:
               schema:
@@ -2874,13 +2874,11 @@ components:
 
     DoorbellResponse:
       type: object
-      required: [event_id, camera, person]
+      required: [event_id, camera]
       properties:
         event_id:
           type: string
         camera:
-          type: string
-        person:
           type: string
 
     CameraStatus:

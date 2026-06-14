@@ -68,6 +68,17 @@ func (c *Camera) SetTestLastFrameTime(ts time.Time) {
 	c.lastFrameTime = ts
 }
 
+// NewManagerForTest returns a Manager with buffered channels suitable for
+// handler tests. No RTSP hub, detector, or recording path is wired; only
+// camera lookup and doorbell submission work correctly.
+func NewManagerForTest() *Manager {
+	return &Manager{
+		events:     make(chan Event, 8),
+		faceEvents: make(chan FaceEvent, 8),
+		cameras:    make(map[string]*Camera),
+	}
+}
+
 // RegisterForTest installs a pre-built Camera into the manager without
 // starting its RTSP/detect goroutines. Intended for handler tests.
 func (m *Manager) RegisterForTest(cam *Camera) {

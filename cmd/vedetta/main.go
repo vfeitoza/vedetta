@@ -1238,6 +1238,10 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				}
 				dbSpan.End()
 
+				if saveErr == nil && event.Kind == camera.EventKindDoorbell {
+					server.BroadcastDoorbellSSE(event.CameraName, event.ID, event.SubLabel)
+				}
+
 				// Object-count gauge stays on the loop: the per-camera count map is
 				// not goroutine-safe, and finalizeEvent decrements and republishes on
 				// the same retained topic from the loop, so keeping the increment here
