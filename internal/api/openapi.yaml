@@ -740,6 +740,11 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: kind
+          in: query
+          description: Filter by event kind ("object" or "doorbell")
+          schema:
+            type: string
       responses:
         "200":
           description: Event list

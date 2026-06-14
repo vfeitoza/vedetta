@@ -49,11 +49,17 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params ListE
 		sinceTime = *params.Since
 	}
 
+	var kindFilter string
+	if params.Kind != nil {
+		kindFilter = *params.Kind
+	}
+
 	filters := storage.EventFilters{
 		Camera: cameraFilter,
 		Label:  labelFilter,
 		Zone:   zoneFilter,
 		Object: objectFilter,
+		Kind:   kindFilter,
 	}
 	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
 	if err != nil {

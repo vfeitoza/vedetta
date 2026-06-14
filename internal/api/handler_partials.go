@@ -125,6 +125,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 	labelFilter := r.URL.Query().Get("label")
 	objectFilter := r.URL.Query().Get("object")
 	categoryFilter := r.URL.Query().Get("category")
+	kindFilter := r.URL.Query().Get("kind")
 	searchTerm := r.URL.Query().Get("q")
 	embed := r.URL.Query().Get("embed") == "1"
 	limit := 50
@@ -145,6 +146,7 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		Label:    labelFilter,
 		Object:   objectFilter,
 		Category: categoryFilter,
+		Kind:     kindFilter,
 		Search:   searchTerm,
 	}
 	events, err := s.db.QueryEventsFiltered(filters, limit, offset)
@@ -206,6 +208,9 @@ func (s *Server) handleEventsGalleryPartial(w http.ResponseWriter, r *http.Reque
 		}
 		if categoryFilter != "" {
 			params.Set("category", categoryFilter)
+		}
+		if kindFilter != "" {
+			params.Set("kind", kindFilter)
 		}
 		if searchTerm != "" {
 			params.Set("q", searchTerm)
