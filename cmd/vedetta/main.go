@@ -1202,13 +1202,15 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 				return
 
 			case event := <-events:
-				if until, ok := cooldowns[cooldownKey(event)]; ok && time.Since(until) < time.Duration(cfg.Events.CooldownSeconds)*time.Second {
-					slog.Info("event suppressed by cooldown",
-						"camera", event.CameraName,
-						"label", event.Label,
-						"zone", event.ZoneName,
-					)
-					continue
+				if event.Kind != camera.EventKindDoorbell {
+					if until, ok := cooldowns[cooldownKey(event)]; ok && time.Since(until) < time.Duration(cfg.Events.CooldownSeconds)*time.Second {
+						slog.Info("event suppressed by cooldown",
+							"camera", event.CameraName,
+							"label", event.Label,
+							"zone", event.ZoneName,
+						)
+						continue
+					}
 				}
 				slog.Info("event detected",
 					"camera", event.CameraName,
@@ -1318,6 +1320,21 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 					tempCancel:  tempCancel,
 					rootSpanCtx: rootSpanCtx,
 					emitDone:    emitDone,
+				}
+
+				// A doorbell press is a point event: the tracker never emits an
+				// EventEnd for it, so clip extraction (driven by finalizeEvent)
+				// would never run. Schedule a synthetic end after the per-camera
+				// clip window so the clip spans approach -> press -> aftermath
+				// (pre-capture already covers the lead-up).
+				if event.Kind == camera.EventKindDoorbell {
+					endTime := event.Timestamp.Add(doorbellClipWindow(cfg, event.CameraName))
+					time.AfterFunc(time.Until(endTime), func() {
+						select {
+						case sub.eventEnds <- camera.EventEnd{EventID: evID, CameraName: event.CameraName, EndTime: endTime}:
+						default:
+						}
+					})
 				}
 
 			case end := <-eventEnds:
@@ -1618,6 +1635,22 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 
 func cooldownKey(event camera.Event) string {
 	return event.CameraName + "|" + event.Label + "|" + event.ZoneName
+}
+
+// doorbellClipWindow returns how long after a doorbell press to schedule the
+// synthetic event end that triggers clip extraction, resolved per camera.
+func doorbellClipWindow(cfg *config.Config, cameraName string) time.Duration {
+	secs := cfg.Doorbell.ClipSeconds
+	for i := range cfg.Cameras {
+		if cfg.Cameras[i].Name == cameraName {
+			secs = cfg.Cameras[i].EffectiveDoorbellClipSeconds(cfg.Doorbell.ClipSeconds)
+			break
+		}
+	}
+	if secs <= 0 {
+		secs = 15
+	}
+	return time.Duration(secs) * time.Second
 }
 
 func encodeJPEG(img *image.RGBA, quality int) []byte {
