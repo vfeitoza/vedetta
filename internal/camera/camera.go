@@ -38,9 +38,12 @@ type Event struct {
 	ZoneName          string      `json:"zone_name,omitempty"`
 	ObjectName        string      `json:"object_name,omitempty"`
 	SubLabel          string      `json:"sub_label,omitempty"`
-	Category          string      `json:"category,omitempty"` // "alert" (notify) or "detection" (low priority)
-	SnapshotImage     *image.RGBA `json:"-"`                  // clean frame for disk/embeddings
-	AnnotatedImage    *image.RGBA `json:"-"`                  // annotated frame for MQTT display
+	Kind              string      `json:"kind"`                  // "object" (default) or "doorbell"
+	AnsweredAt        time.Time   `json:"answered_at,omitempty"` // doorbell rings: when acknowledged (zero = unanswered)
+	AnsweredBy        string      `json:"answered_by,omitempty"` // doorbell rings: who acknowledged
+	Category          string      `json:"category,omitempty"`    // "alert" (notify) or "detection" (low priority)
+	SnapshotImage     *image.RGBA `json:"-"`                     // clean frame for disk/embeddings
+	AnnotatedImage    *image.RGBA `json:"-"`                     // annotated frame for MQTT display
 }
 
 // Event categories set review/notification priority: alerts are noteworthy
@@ -51,6 +54,14 @@ type Event struct {
 const (
 	CategoryAlert     = "alert"
 	CategoryDetection = "detection"
+)
+
+// Event kinds distinguish ordinary detection events from doorbell rings. A ring
+// is injected directly into the event pipeline rather than produced by the
+// detector, and is exempt from the per-(camera,label,zone) cooldown.
+const (
+	EventKindObject   = "object"
+	EventKindDoorbell = "doorbell"
 )
 
 // stationaryTierLabels are the labels whose events drop to the detection tier
