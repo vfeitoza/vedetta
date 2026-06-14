@@ -634,6 +634,22 @@ func initSubsystems(ctx context.Context, cancel context.CancelFunc, cfg *config.
 			}
 			mc.PublishObjectDiscovery(objInfos)
 		}
+
+		// Publish doorbell discovery for enabled-doorbell cameras; clear it for others
+		// so Home Assistant drops the entity when doorbell is turned off.
+		var doorbellCams, nonDoorbellCams []string
+		for _, cam := range cfg.Cameras {
+			if !cam.IsEnabled() {
+				continue
+			}
+			if cam.Doorbell.Enabled {
+				doorbellCams = append(doorbellCams, cam.Name)
+			} else {
+				nonDoorbellCams = append(nonDoorbellCams, cam.Name)
+			}
+		}
+		mc.PublishDoorbellDiscovery(doorbellCams)
+		mc.ClearDoorbellDiscovery(nonDoorbellCams)
 	}
 
 	sub.events = make(chan camera.Event, 100)

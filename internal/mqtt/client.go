@@ -40,6 +40,8 @@ type Publisher interface {
 	PublishObjectCount(cameraName, label string, count int) error
 	PublishDiskStatus(freeBytes, totalBytes uint64, recordingPaused bool)
 	PublishDiskDiscovery()
+	PublishDoorbellDiscovery(cameraNames []string)
+	ClearDoorbellDiscovery(cameraNames []string)
 	Close()
 }
 
@@ -421,6 +423,52 @@ func (c *Client) publishCameraDiscovery(cameraName string) {
 	}
 
 	slog.Info("published HA discovery", "camera", cameraName)
+}
+
+// buildDoorbellDiscovery returns the HA MQTT discovery topic and JSON payload for
+// a camera's doorbell as a device-automation trigger. The Device identifier
+// matches publishCameraDiscovery so the doorbell trigger groups under the
+// existing camera device in Home Assistant rather than creating a duplicate.
+func buildDoorbellDiscovery(topicPrefix, cameraName string) (string, []byte) {
+	sanitized := sanitizeName(cameraName)
+	cfg := haDeviceTriggerConfig{
+		AutomationType: "trigger",
+		Type:           "button_short_press",
+		Subtype:        "press",
+		Topic:          fmt.Sprintf("%s/%s/doorbell", topicPrefix, cameraName),
+		Device: haDevice{
+			Identifiers:  []string{"vedetta_" + sanitized},
+			Name:         "Vedetta " + cameraName,
+			Manufacturer: "Vedetta",
+			Model:        "NVR",
+		},
+	}
+	payload, _ := json.Marshal(cfg)
+	topic := fmt.Sprintf("homeassistant/device_automation/vedetta_%s_doorbell/config", sanitized)
+	return topic, payload
+}
+
+// PublishDoorbellDiscovery publishes retained HA MQTT discovery for each doorbell-enabled camera.
+func (c *Client) PublishDoorbellDiscovery(cameraNames []string) {
+	for _, name := range cameraNames {
+		topic, payload := buildDoorbellDiscovery(c.topic, name)
+		token := c.client.Publish(topic, 1, true, payload)
+		if err := c.waitPublish(token); err != nil {
+			slog.Error("failed to publish doorbell discovery", "camera", name, "error", err)
+		}
+	}
+}
+
+// ClearDoorbellDiscovery removes the retained doorbell discovery for each camera by
+// publishing an empty retained payload, causing Home Assistant to drop the entity.
+func (c *Client) ClearDoorbellDiscovery(cameraNames []string) {
+	for _, name := range cameraNames {
+		topic, _ := buildDoorbellDiscovery(c.topic, name)
+		token := c.client.Publish(topic, 1, true, []byte{})
+		if err := c.waitPublish(token); err != nil {
+			slog.Error("failed to clear doorbell discovery", "camera", name, "error", err)
+		}
+	}
 }
 
 // BuildDiskStatusPayload constructs the JSON body published to vedetta/status/disk.
