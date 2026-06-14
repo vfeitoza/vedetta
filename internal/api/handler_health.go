@@ -210,7 +210,7 @@ func (s *Server) GetMetrics(w http.ResponseWriter, _ *http.Request) {
 	if s.recorder != nil {
 		storageStats = s.recorder.StorageStats()
 	}
-	eventCount, _ := s.db.CountEvents()
+	eventCount, _ := s.db.CountEvents("")
 	segmentCount, _ := s.db.CountSegments()
 
 	var b strings.Builder

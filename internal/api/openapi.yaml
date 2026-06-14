@@ -758,6 +758,13 @@ paths:
       operationId: getEventCounts
       summary: Get event counts by label and camera
       tags: [events]
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by event kind ("object" or "doorbell"). Omit to count all kinds.
       responses:
         "200":
           description: Event counts

@@ -67,3 +67,22 @@ func TestAnswerDoorbell_NotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAnswerDoorbell_RejectsNonDoorbell(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := db.SaveEvent(camera.Event{
+		ID:         "obj1",
+		CameraName: "c",
+		Label:      "person",
+		Kind:       camera.EventKindObject,
+		Timestamp:  time.Now(),
+	}); err != nil {
+		t.Fatalf("save event: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras/c/doorbell/obj1/answer", nil)
+	s.AnswerDoorbell(rec, req, "c", "obj1")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for non-doorbell event; body: %s", rec.Code, rec.Body.String())
+	}
+}

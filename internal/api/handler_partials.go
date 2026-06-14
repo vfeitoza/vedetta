@@ -91,7 +91,7 @@ func (s *Server) handleDashboardStatsPartial(w http.ResponseWriter, _ *http.Requ
 		}
 	}
 
-	eventsToday, _ := s.db.CountEventsToday()
+	eventsToday, _ := s.db.CountEventsToday("")
 	stats := s.recorder.StorageStats()
 
 	type dashData struct {

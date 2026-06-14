@@ -224,11 +224,15 @@ func (s *Server) ReextractClip(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "event": id})
 }
 
-func (s *Server) GetEventCounts(w http.ResponseWriter, _ *http.Request) {
-	total, _ := s.db.CountEvents()
-	today, _ := s.db.CountEventsToday()
-	byLabel, _ := s.db.CountEventsByLabel()
-	byCamera, _ := s.db.CountEventsByCamera()
+func (s *Server) GetEventCounts(w http.ResponseWriter, _ *http.Request, params GetEventCountsParams) {
+	kind := ""
+	if params.Kind != nil {
+		kind = *params.Kind
+	}
+	total, _ := s.db.CountEvents(kind)
+	today, _ := s.db.CountEventsToday(kind)
+	byLabel, _ := s.db.CountEventsByLabel(kind)
+	byCamera, _ := s.db.CountEventsByCamera(kind)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total":     total,

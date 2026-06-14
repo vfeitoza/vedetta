@@ -291,7 +291,7 @@ func TestCountEventsToday(t *testing.T) {
 	mustSaveEvent(t, db, makeEvent("today2", "cam1", "car", 0.8, today.Add(time.Hour)))
 	mustSaveEvent(t, db, makeEvent("yesterday1", "cam1", "person", 0.7, yesterday))
 
-	count, err := db.CountEventsToday()
+	count, err := db.CountEventsToday("")
 	if err != nil {
 		t.Fatalf("CountEventsToday: %v", err)
 	}
@@ -850,7 +850,7 @@ func TestCountEventsByLabel(t *testing.T) {
 	mustSaveEvent(t, db, makeEvent("e3", "cam1", "car", 0.7, ts.Add(2*time.Second)))
 	mustSaveEvent(t, db, makeEvent("e4", "cam2", "dog", 0.6, ts.Add(3*time.Second)))
 
-	result, err := db.CountEventsByLabel()
+	result, err := db.CountEventsByLabel("")
 	if err != nil {
 		t.Fatalf("CountEventsByLabel: %v", err)
 	}
@@ -868,7 +868,7 @@ func TestCountEventsByLabel(t *testing.T) {
 func TestCountEventsByLabel_Empty(t *testing.T) {
 	db := newTestDB(t)
 
-	result, err := db.CountEventsByLabel()
+	result, err := db.CountEventsByLabel("")
 	if err != nil {
 		t.Fatalf("CountEventsByLabel: %v", err)
 	}
@@ -887,7 +887,7 @@ func TestCountEventsByCamera(t *testing.T) {
 	mustSaveEvent(t, db, makeEvent("e2", "cam1", "car", 0.8, ts.Add(time.Second)))
 	mustSaveEvent(t, db, makeEvent("e3", "cam2", "person", 0.7, ts.Add(2*time.Second)))
 
-	result, err := db.CountEventsByCamera()
+	result, err := db.CountEventsByCamera("")
 	if err != nil {
 		t.Fatalf("CountEventsByCamera: %v", err)
 	}
@@ -909,7 +909,7 @@ func TestCountEvents(t *testing.T) {
 	mustSaveEvent(t, db, makeEvent("e2", "cam1", "car", 0.8, ts.Add(time.Second)))
 	mustSaveEvent(t, db, makeEvent("e3", "cam2", "dog", 0.7, ts.Add(2*time.Second)))
 
-	count, err := db.CountEvents()
+	count, err := db.CountEvents("")
 	if err != nil {
 		t.Fatalf("CountEvents: %v", err)
 	}
@@ -921,7 +921,7 @@ func TestCountEvents(t *testing.T) {
 func TestCountEvents_EmptyDB(t *testing.T) {
 	db := newTestDB(t)
 
-	count, err := db.CountEvents()
+	count, err := db.CountEvents("")
 	if err != nil {
 		t.Fatalf("CountEvents: %v", err)
 	}

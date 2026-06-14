@@ -171,7 +171,7 @@ func TestRunCleanup_EventMetadataRetainZeroKeepsEvents(t *testing.T) {
 
 	rec.runCleanupLocked()
 
-	count, err := db.CountEvents()
+	count, err := db.CountEvents("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestRunCleanup_EventMetadataRetainPositiveDeletesOldEvents(t *testing.T) {
 
 	rec.runCleanupLocked()
 
-	count, err := db.CountEvents()
+	count, err := db.CountEvents("")
 	if err != nil {
 		t.Fatal(err)
 	}

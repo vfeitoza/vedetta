@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/rvben/vedetta/internal/camera"
 )
 
 // AnswerDoorbell acknowledges a doorbell ring. Idempotent: UpdateEventAnswered
@@ -12,6 +14,10 @@ import (
 func (s *Server) AnswerDoorbell(w http.ResponseWriter, r *http.Request, name string, eventID string) {
 	ev, err := s.db.GetEventByID(eventID)
 	if err != nil || ev == nil || ev.ID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "ring not found"})
+		return
+	}
+	if ev.Kind != camera.EventKindDoorbell {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "ring not found"})
 		return
 	}

@@ -132,7 +132,7 @@ func TestCountEventsToday_GoStringFormat(t *testing.T) {
 	insertEventRaw(t, db, "ev1", "cam1", "person", now.Add(-1*time.Hour))
 	insertEventRaw(t, db, "ev2", "cam1", "car", now.Add(-30*time.Minute))
 
-	count, err := db.CountEventsToday()
+	count, err := db.CountEventsToday("")
 	if err != nil {
 		t.Fatal(err)
 	}

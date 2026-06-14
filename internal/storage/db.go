@@ -257,8 +257,16 @@ func eventFilterClause(f EventFilters) (string, []any) {
 }
 
 // CountEventsByLabel returns the count of events grouped by label.
-func (d *DB) CountEventsByLabel() (map[string]int, error) {
-	rows, err := d.db.Query("SELECT label, COUNT(*) FROM events GROUP BY label")
+// When kind is non-empty, only events of that kind are counted.
+func (d *DB) CountEventsByLabel(kind string) (map[string]int, error) {
+	q := "SELECT label, COUNT(*) FROM events"
+	var args []any
+	if kind != "" {
+		q += " WHERE kind = ?"
+		args = append(args, kind)
+	}
+	q += " GROUP BY label"
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -277,8 +285,16 @@ func (d *DB) CountEventsByLabel() (map[string]int, error) {
 }
 
 // CountEventsByCamera returns the count of events grouped by camera name.
-func (d *DB) CountEventsByCamera() (map[string]int, error) {
-	rows, err := d.db.Query("SELECT camera, COUNT(*) FROM events GROUP BY camera")
+// When kind is non-empty, only events of that kind are counted.
+func (d *DB) CountEventsByCamera(kind string) (map[string]int, error) {
+	q := "SELECT camera, COUNT(*) FROM events"
+	var args []any
+	if kind != "" {
+		q += " WHERE kind = ?"
+		args = append(args, kind)
+	}
+	q += " GROUP BY camera"
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -297,9 +313,16 @@ func (d *DB) CountEventsByCamera() (map[string]int, error) {
 }
 
 // CountEvents returns the total number of events.
-func (d *DB) CountEvents() (int, error) {
+// When kind is non-empty, only events of that kind are counted.
+func (d *DB) CountEvents(kind string) (int, error) {
+	q := "SELECT COUNT(*) FROM events"
+	var args []any
+	if kind != "" {
+		q += " WHERE kind = ?"
+		args = append(args, kind)
+	}
 	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	err := d.db.QueryRow(q, args...).Scan(&count)
 	return count, err
 }
 
@@ -465,10 +488,17 @@ func (d *DB) GetSegmentByID(id int64) (*SegmentRecord, error) {
 }
 
 // CountEventsToday returns the number of events with timestamp >= today midnight UTC.
-func (d *DB) CountEventsToday() (int, error) {
+// When kind is non-empty, only events of that kind are counted.
+func (d *DB) CountEventsToday(kind string) (int, error) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
+	q := "SELECT COUNT(*) FROM events WHERE timestamp >= ?"
+	args := []any{utc(today)}
+	if kind != "" {
+		q += " AND kind = ?"
+		args = append(args, kind)
+	}
 	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM events WHERE timestamp >= ?", utc(today)).Scan(&count)
+	err := d.db.QueryRow(q, args...).Scan(&count)
 	return count, err
 }
 
