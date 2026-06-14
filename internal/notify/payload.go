@@ -34,6 +34,14 @@ func BuildPayload(ev camera.Event, signer *SnapshotSigner) []byte {
 		Tag:   fmt.Sprintf("%s:%s", ev.CameraName, ev.Label),
 		TS:    ev.Timestamp.UTC().Unix(),
 	}
+	if ev.Kind == camera.EventKindDoorbell || ev.Label == "doorbell" {
+		p.Title = "Someone's at the door"
+		p.Body = friendlyCameraName(ev.CameraName) + " · " + ev.Timestamp.UTC().Format("15:04") + " UTC"
+		if ev.SubLabel != "" {
+			p.Title = ev.SubLabel + " is at the door"
+		}
+		p.Tag = ev.CameraName + ":doorbell"
+	}
 	if ev.SnapshotAvailable && signer != nil {
 		p.Image = signer.Sign(ev.ID)
 	}
