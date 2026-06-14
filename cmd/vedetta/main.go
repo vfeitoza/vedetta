@@ -339,7 +339,7 @@ func main() {
 		go recording.ReconcileEventMediaAvailability(db)
 
 		runEventLoop(ctx, cfg, db, sub, server, tp.Tracer())
-		startOnvifSubscribers(ctx, cfg, server)
+		startOnvifSubscribers(ctx, cfg, sub.manager)
 
 		// Transition the running server to full mode
 		server.SetTracingEnabled(cfg.Tracing.Enabled)
@@ -455,7 +455,7 @@ func main() {
 	}
 
 	runEventLoop(ctx, cfg, db, sub, server, tp.Tracer())
-	startOnvifSubscribers(ctx, cfg, server)
+	startOnvifSubscribers(ctx, cfg, sub.manager)
 
 	// Start RTSP re-publishing server if enabled
 	if cfg.RTSPServer.Enabled {
@@ -1417,9 +1417,35 @@ func runEventLoop(ctx context.Context, cfg *config.Config, db *storage.DB, sub *
 	}()
 }
 
+// doorbellDebouncer collapses rapid repeated presses from a noisy ONVIF digital
+// input into a single ring per camera, per window. It is intentionally only used
+// for the ONVIF source; deliberate API presses are never debounced.
+type doorbellDebouncer struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+func newDoorbellDebouncer() *doorbellDebouncer {
+	return &doorbellDebouncer{last: make(map[string]time.Time)}
+}
+
+// allow reports whether a press at t should be accepted given the debounce window.
+func (d *doorbellDebouncer) allow(camera string, t time.Time, window time.Duration) bool {
+	if window <= 0 {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if prev, ok := d.last[camera]; ok && t.Sub(prev) < window {
+		return false
+	}
+	d.last[camera] = t
+	return true
+}
+
 // startOnvifSubscribers starts ONVIF event subscribers for doorbell cameras
 // and a goroutine that processes their events.
-func startOnvifSubscribers(ctx context.Context, cfg *config.Config, server *api.Server) {
+func startOnvifSubscribers(ctx context.Context, cfg *config.Config, mgr *camera.Manager) {
 	onvifEvents := make(chan camera.OnvifEvent, 50)
 	for _, cam := range cfg.Cameras {
 		if !cam.IsEnabled() || !cam.Doorbell.Enabled {
@@ -1434,16 +1460,25 @@ func startOnvifSubscribers(ctx context.Context, cfg *config.Config, server *api.
 		slog.Info("ONVIF event subscriber started", "camera", cam.Name)
 	}
 
-	// Process ONVIF events (doorbell presses)
+	// Process ONVIF events (doorbell presses), debouncing bouncy digital inputs.
+	debouncer := newDoorbellDebouncer()
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case ev := <-onvifEvents:
-				if ev.Type == camera.OnvifEventDoorbell && ev.Value {
-					slog.Info("ONVIF doorbell press detected", "camera", ev.Camera, "topic", ev.Topic)
-					server.TriggerDoorbell(ev.Camera)
+				if ev.Type != camera.OnvifEventDoorbell || !ev.Value {
+					continue
+				}
+				window := time.Duration(debounceSecondsFor(cfg, ev.Camera)) * time.Second
+				if !debouncer.allow(ev.Camera, time.Now(), window) {
+					slog.Debug("doorbell press debounced", "camera", ev.Camera)
+					continue
+				}
+				slog.Info("ONVIF doorbell press detected", "camera", ev.Camera, "topic", ev.Topic)
+				if _, ok := mgr.SubmitDoorbellPress(ev.Camera); !ok {
+					slog.Warn("doorbell press not submitted (no snapshot or channel full)", "camera", ev.Camera)
 				}
 			}
 		}
@@ -1635,6 +1670,17 @@ func matchEventToKnownObjects(db *storage.DB, oe *detect.ObjectEmbedder, event c
 
 func cooldownKey(event camera.Event) string {
 	return event.CameraName + "|" + event.Label + "|" + event.ZoneName
+}
+
+// debounceSecondsFor returns the effective doorbell debounce window in seconds
+// for the named camera, falling back to the global default.
+func debounceSecondsFor(cfg *config.Config, cameraName string) int {
+	for i := range cfg.Cameras {
+		if cfg.Cameras[i].Name == cameraName {
+			return cfg.Cameras[i].EffectiveDoorbellDebounceSeconds(cfg.Doorbell.DebounceSeconds)
+		}
+	}
+	return cfg.Doorbell.DebounceSeconds
 }
 
 // doorbellClipWindow returns how long after a doorbell press to schedule the
