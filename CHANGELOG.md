@@ -44,6 +44,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.12](https://github.com/rvben/vedetta/compare/v0.7.11...v0.7.12) - 2026-06-15
+
+### Added
+
+- **onvif**: renew PullPoint subscription before expiry to avoid event gaps ([80967a2](https://github.com/rvben/vedetta/commit/80967a28c993c39027ce21721db0168fb3baf2de))
+- **metrics**: export doorbell press and unanswered metrics ([9f8cebe](https://github.com/rvben/vedetta/commit/9f8cebe8855071d3e930bc4e7cad358e0e0af14c))
+- **mqtt**: publish Home Assistant doorbell discovery with lifecycle cleanup ([c7ae275](https://github.com/rvben/vedetta/commit/c7ae275ef0e179e9cb7dcc24c208c16cf317c5f6))
+- **camera**: fire the configured doorbell webhook on each press ([9d3af02](https://github.com/rvben/vedetta/commit/9d3af028c2ee83d2ea57b346280774699c52e3d4))
+- **notify**: distinct push copy for doorbell rings ([3c4fde0](https://github.com/rvben/vedetta/commit/3c4fde0c62e33fa963354756d134ca4a8fe0448e))
+- **ui**: add doorbell ring history page ([9be7051](https://github.com/rvben/vedetta/commit/9be70516e5d0f9ecdf56563793727d5e8ed6d1c0))
+- **ui**: persistent doorbell banner with acknowledge/view actions and chime ([29a9cff](https://github.com/rvben/vedetta/commit/29a9cff23104742cde6d5bf621ca71a8cfdaf233))
+- **ui**: show answered/missed badge for doorbell rings in the gallery ([ce70ad5](https://github.com/rvben/vedetta/commit/ce70ad5c3546c8bc5b42d0a8a1bbfbf36952bd21))
+- **api**: add kind filter to events list and gallery partial ([393522d](https://github.com/rvben/vedetta/commit/393522d95cbe16b7934c02a75db3ef755d5610d4))
+- **api**: add idempotent doorbell answer endpoint with SSE broadcast ([bc8d74e](https://github.com/rvben/vedetta/commit/bc8d74ed172761f176d806fd2fcd927dda5156cc))
+- **onvif**: debounce doorbell presses and inject them into the event loop ([a6e593a](https://github.com/rvben/vedetta/commit/a6e593a2136ca914f40ba4d9064fec0f2c2a7da9))
+- **events**: route doorbell rings through the loop with synthetic-end clips ([0e5da5a](https://github.com/rvben/vedetta/commit/0e5da5afbf2575684e0618b53f7535c0c25476d5))
+- **camera**: add SubmitDoorbellPress event injection primitive ([00b258f](https://github.com/rvben/vedetta/commit/00b258fa687ce1cdcfc8c5481c7cacc1d396d7e6))
+- **config**: add global doorbell defaults with per-camera overrides ([fad4136](https://github.com/rvben/vedetta/commit/fad41368d059b11d17c64ec5b0f71d5947c66dd2))
+- **storage**: add doorbell kind + answer columns and queries ([07f7a2a](https://github.com/rvben/vedetta/commit/07f7a2a021cd4d92f214c22fee49da4bd487c131))
+- **camera**: add Kind and answer fields to Event ([4eebbac](https://github.com/rvben/vedetta/commit/4eebbac164153b5d9b127044af3158ee85dc6e40))
+
+### Fixed
+
+- **onvif**: parse PullMessages NotificationMessage at the correct nesting ([cc051b1](https://github.com/rvben/vedetta/commit/cc051b1afd9e77c3def337ee7d012a30dfcf2898))
+- **onvif**: discover event service port, use WS-Security and WS-Addressing for subscriptions ([0cc675f](https://github.com/rvben/vedetta/commit/0cc675f9ce01af0d14aadaa1059f064e36ba8b9d))
+- **ui**: stop doorbell answered/missed badge overlapping the score badge ([6a23054](https://github.com/rvben/vedetta/commit/6a23054e2220a474b9938850608ec8bed5609658))
+- **doorbell**: kind-filter event counts and guard answer to doorbell rings ([76cbaec](https://github.com/rvben/vedetta/commit/76cbaeca5331f5d0e38c6a85f22f298ca6e954a2))
+- **doorbell**: publish trigger from emit path, skip object-count, enrich banner with recognized person ([2eec91f](https://github.com/rvben/vedetta/commit/2eec91fe5007465006f465075945b4e6fafc9463))
+
 ## [0.7.11](https://github.com/rvben/vedetta/compare/v0.7.10...v0.7.11) - 2026-06-14
 
 ### Added
