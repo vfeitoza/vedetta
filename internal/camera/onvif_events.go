@@ -3,11 +3,14 @@ package camera
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
+	mathrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,14 +39,19 @@ type OnvifEvent struct {
 
 // OnvifEventSubscriber subscribes to a camera's ONVIF events via PullPoint.
 type OnvifEventSubscriber struct {
-	cameraName   string
-	serviceURL   string
-	username     string
-	password     string
-	events       chan<- OnvifEvent
-	httpClient   *http.Client
-	pullPointURL string
+	cameraName       string
+	host             string
+	username         string
+	password         string
+	events           chan<- OnvifEvent
+	httpClient       *http.Client
+	pullPointURL     string
+	discoveredSvcURL string
 }
+
+// candidatePorts lists the ONVIF device-service ports to probe, in order.
+// Reolink uses 8000; many others use 80 or 2020; 8080 is a fallback.
+var candidatePorts = []string{"8000", "2020", "80", "8080"}
 
 func NewOnvifEventSubscriber(cameraName, rtspURL string, events chan<- OnvifEvent) (*OnvifEventSubscriber, error) {
 	u, err := url.Parse(rtspURL)
@@ -52,10 +60,6 @@ func NewOnvifEventSubscriber(cameraName, rtspURL string, events chan<- OnvifEven
 	}
 
 	host := u.Hostname()
-	port := u.Port()
-	if port == "" || port == "554" {
-		port = "80"
-	}
 
 	var username, password string
 	if u.User != nil {
@@ -63,11 +67,9 @@ func NewOnvifEventSubscriber(cameraName, rtspURL string, events chan<- OnvifEven
 		password, _ = u.User.Password()
 	}
 
-	serviceURL := fmt.Sprintf("http://%s:%s/onvif/event_service", host, port)
-
 	return &OnvifEventSubscriber{
 		cameraName: cameraName,
-		serviceURL: serviceURL,
+		host:       host,
 		username:   username,
 		password:   password,
 		events:     events,
@@ -86,26 +88,101 @@ func (s *OnvifEventSubscriber) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff.Jitter(10*time.Second, rand.Float64())):
+		case <-time.After(backoff.Jitter(10*time.Second, mathrand.Float64())):
 		}
 	}
 }
 
-func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
-	// Create PullPoint subscription
-	createReq := `<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:tev="http://www.onvif.org/ver10/events/wsdl"
-            xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2">
-  <s:Body>
-    <tev:CreatePullPointSubscription>
-      <tev:InitialTerminationTime>PT600S</tev:InitialTerminationTime>
-    </tev:CreatePullPointSubscription>
-  </s:Body>
-</s:Envelope>`
+// discoverEventService probes candidate ONVIF device-service ports and returns
+// the event-service XAddr reported by the camera. Falls back to port 80 if no
+// candidate responds with a valid event XAddr.
+func (s *OnvifEventSubscriber) discoverEventService(ctx context.Context) string {
+	probe := http.Client{Timeout: 5 * time.Second}
 
-	resp, err := s.soapRequest(ctx, s.serviceURL, createReq,
-		"http://www.onvif.org/ver10/events/wsdl/EventPortType/CreatePullPointSubscriptionRequest")
+	getServicesBody := `<tds:GetServices xmlns:tds="http://www.onvif.org/ver10/device/wsdl">` +
+		`<tds:IncludeCapability>false</tds:IncludeCapability>` +
+		`</tds:GetServices>`
+
+	for _, port := range candidatePorts {
+		deviceURL := fmt.Sprintf("http://%s:%s/onvif/device_service", s.host, port)
+
+		envelope := s.buildEnvelope(getServicesBody, "")
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceURL,
+			bytes.NewBufferString(envelope))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type",
+			`application/soap+xml; charset=utf-8; action="http://www.onvif.org/ver10/device/wsdl/GetServices"`)
+
+		resp, err := probe.Do(req)
+		if err != nil {
+			slog.Debug("ONVIF GetServices probe failed", "camera", s.cameraName,
+				"url", deviceURL, "error", err)
+			continue
+		}
+		data, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			slog.Debug("ONVIF GetServices bad response", "camera", s.cameraName,
+				"url", deviceURL, "status", resp.StatusCode)
+			continue
+		}
+
+		xaddr := parseEventXAddr(data)
+		if xaddr != "" {
+			slog.Info("ONVIF event service discovered", "camera", s.cameraName, "xaddr", xaddr)
+			return xaddr
+		}
+	}
+
+	// Fall back: derive from host on port 80 (preserves old behavior for cameras
+	// that answer on a standard HTTP port but don't respond to our probes).
+	fallback := fmt.Sprintf("http://%s:80/onvif/event_service", s.host)
+	slog.Debug("ONVIF discovery exhausted candidates, using fallback", "camera", s.cameraName, "fallback", fallback)
+	return fallback
+}
+
+// parseEventXAddr extracts the XAddr for the ONVIF Events namespace from a
+// GetServices response.
+func parseEventXAddr(data []byte) string {
+	type service struct {
+		Namespace string `xml:"Namespace"`
+		XAddr     string `xml:"XAddr"`
+	}
+	type servicesResponse struct {
+		XMLName  xml.Name  `xml:"Envelope"`
+		Services []service `xml:"Body>GetServicesResponse>Service"`
+	}
+
+	var env servicesResponse
+	if err := xml.Unmarshal(data, &env); err != nil {
+		return ""
+	}
+	for _, svc := range env.Services {
+		if strings.TrimSpace(svc.Namespace) == "http://www.onvif.org/ver10/events/wsdl" {
+			return strings.TrimSpace(svc.XAddr)
+		}
+	}
+	return ""
+}
+
+func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
+	// Discover (or re-discover) the event-service URL each time we reconnect.
+	svcURL := s.discoverEventService(ctx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	s.discoveredSvcURL = svcURL
+
+	createBody := `<tev:CreatePullPointSubscription xmlns:tev="http://www.onvif.org/ver10/events/wsdl"` +
+		` xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2">` +
+		`<tev:InitialTerminationTime>PT600S</tev:InitialTerminationTime>` +
+		`</tev:CreatePullPointSubscription>`
+
+	resp, err := s.soapRequest(ctx, svcURL, createBody,
+		"http://www.onvif.org/ver10/events/wsdl/EventPortType/CreatePullPointSubscriptionRequest",
+		"")
 	if err != nil {
 		return fmt.Errorf("create subscription: %w", err)
 	}
@@ -142,19 +219,17 @@ func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
 }
 
 func (s *OnvifEventSubscriber) pullMessages(ctx context.Context) ([]OnvifEvent, error) {
-	pullReq := `<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:tev="http://www.onvif.org/ver10/events/wsdl">
-  <s:Body>
-    <tev:PullMessages>
-      <tev:Timeout>PT60S</tev:Timeout>
-      <tev:MessageLimit>10</tev:MessageLimit>
-    </tev:PullMessages>
-  </s:Body>
-</s:Envelope>`
+	pullBody := `<tev:PullMessages xmlns:tev="http://www.onvif.org/ver10/events/wsdl">` +
+		`<tev:Timeout>PT60S</tev:Timeout>` +
+		`<tev:MessageLimit>10</tev:MessageLimit>` +
+		`</tev:PullMessages>`
 
-	resp, err := s.soapRequest(ctx, s.pullPointURL, pullReq,
-		"http://www.onvif.org/ver10/events/wsdl/PullPointSubscription/PullMessagesRequest")
+	wsaHeaders := wsAddressingHeaders(s.pullPointURL,
+		"http://www.onvif.org/ver10/events/wsdl/PullPointSubscription/PullMessages")
+
+	resp, err := s.soapRequest(ctx, s.pullPointURL, pullBody,
+		"http://www.onvif.org/ver10/events/wsdl/PullPointSubscription/PullMessagesRequest",
+		wsaHeaders)
 	if err != nil {
 		return nil, err
 	}
@@ -162,16 +237,17 @@ func (s *OnvifEventSubscriber) pullMessages(ctx context.Context) ([]OnvifEvent, 
 	return parseOnvifEvents(resp), nil
 }
 
-func (s *OnvifEventSubscriber) soapRequest(ctx context.Context, endpoint, body, action string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBufferString(body))
+// soapRequest sends a SOAP 1.2 request. body is the operation element (no
+// Envelope wrapper). extraHeader is optional raw XML injected after the
+// WS-Security block (used for WS-Addressing on PullMessages).
+func (s *OnvifEventSubscriber) soapRequest(ctx context.Context, endpoint, body, action, extraHeader string) ([]byte, error) {
+	envelope := s.buildEnvelope(body, extraHeader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBufferString(envelope))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/soap+xml; charset=utf-8")
-	req.Header.Set("SOAPAction", action)
-	if s.username != "" {
-		req.SetBasicAuth(s.username, s.password)
-	}
+	req.Header.Set("Content-Type",
+		fmt.Sprintf(`application/soap+xml; charset=utf-8; action="%s"`, action))
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -189,6 +265,87 @@ func (s *OnvifEventSubscriber) soapRequest(ctx context.Context, endpoint, body, 
 	}
 
 	return data, nil
+}
+
+// buildEnvelope wraps body in a SOAP 1.2 envelope, prepending a WS-Security
+// header and any optional extra header XML.
+func (s *OnvifEventSubscriber) buildEnvelope(body, extraHeader string) string {
+	header := wssecHeader(s.username, s.password)
+	if extraHeader != "" {
+		header += extraHeader
+	}
+	return `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"` +
+		` xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"` +
+		` xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"` +
+		` xmlns:wsa="http://www.w3.org/2005/08/addressing">` +
+		`<s:Header>` + header + `</s:Header>` +
+		`<s:Body>` + body + `</s:Body>` +
+		`</s:Envelope>`
+}
+
+// wsseDigest computes the ONVIF WS-Security PasswordDigest:
+// Base64( SHA-1( nonceRaw || []byte(created) || []byte(password) ) )
+func wsseDigest(nonceRaw []byte, created, password string) string {
+	h := sha1.New()
+	h.Write(nonceRaw)
+	h.Write([]byte(created))
+	h.Write([]byte(password))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// wssecHeader returns a <wsse:Security> header XML block with a fresh
+// nonce/created/digest for the given credentials. Returns an empty string
+// when username is empty (unauthenticated probes).
+func wssecHeader(username, password string) string {
+	if username == "" {
+		return ""
+	}
+
+	nonceRaw := make([]byte, 16)
+	_, _ = rand.Read(nonceRaw)
+	created := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	nonce := base64.StdEncoding.EncodeToString(nonceRaw)
+	digest := wsseDigest(nonceRaw, created, password)
+
+	return `<wsse:Security s:mustUnderstand="1">` +
+		`<wsse:UsernameToken>` +
+		`<wsse:Username>` + xmlEscape(username) + `</wsse:Username>` +
+		`<wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">` +
+		digest + `</wsse:Password>` +
+		`<wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">` +
+		nonce + `</wsse:Nonce>` +
+		`<wsu:Created>` + created + `</wsu:Created>` +
+		`</wsse:UsernameToken>` +
+		`</wsse:Security>`
+}
+
+// wsAddressingHeaders returns the WS-Addressing header block required by
+// PullMessages. The block is fresh per call (unique MessageID).
+func wsAddressingHeaders(to, action string) string {
+	msgID := randomURN()
+	return `<wsa:To s:mustUnderstand="1">` + xmlEscape(to) + `</wsa:To>` +
+		`<wsa:Action s:mustUnderstand="1">` + action + `</wsa:Action>` +
+		`<wsa:MessageID>` + msgID + `</wsa:MessageID>` +
+		`<wsa:ReplyTo><wsa:Address>http://www.w3.org/2005/08/addressing/anonymous</wsa:Address></wsa:ReplyTo>`
+}
+
+// randomURN produces a unique urn:uuid string using crypto/rand.
+func randomURN() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("urn:uuid:%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// xmlEscape escapes the five XML special characters in a string.
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
 }
 
 func extractPullPointURL(data []byte) string {
@@ -210,6 +367,9 @@ func extractPullPointURL(data []byte) string {
 }
 
 func parseOnvifEvents(data []byte) []OnvifEvent {
+	// The ONVIF PullMessages response uses a two-level Message wrapping:
+	// <wsnt:Message> contains <tt:Message> which contains <tt:Data>.
+	// Using "Message>Data" as the path navigates through the inner element.
 	type notificationMessage struct {
 		Topic   string `xml:"Topic"`
 		Message struct {
@@ -218,7 +378,7 @@ func parseOnvifEvents(data []byte) []OnvifEvent {
 					Name  string `xml:"Name,attr"`
 					Value string `xml:"Value,attr"`
 				} `xml:"SimpleItem"`
-			} `xml:"Data"`
+			} `xml:"Message>Data"`
 		} `xml:"Message"`
 	}
 	type pullEnvelope struct {
@@ -262,7 +422,7 @@ func parseOnvifEvents(data []byte) []OnvifEvent {
 func classifyOnvifTopic(topic string) OnvifEventType {
 	t := strings.ToLower(topic)
 	switch {
-	case strings.Contains(t, "digitalnput") || strings.Contains(t, "doorbell") ||
+	case strings.Contains(t, "digitalinput") || strings.Contains(t, "doorbell") ||
 		strings.Contains(t, "visitor") || strings.Contains(t, "button"):
 		return OnvifEventDoorbell
 	case strings.Contains(t, "motiondetector") || strings.Contains(t, "motion") ||
