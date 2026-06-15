@@ -28,6 +28,14 @@ const (
 	OnvifEventUnknown  OnvifEventType = "unknown"
 )
 
+// subscriptionTTL is the requested PullPoint subscription lifetime. Cameras
+// may grant a shorter time, but the Reolink Video Doorbell honours PT600S.
+const subscriptionTTL = 600 * time.Second
+
+// renewInterval is how often we renew before the subscription expires.
+// At half the TTL we have a full TTL/2 safety margin against slow renewals.
+const renewInterval = subscriptionTTL / 2
+
 // OnvifEvent represents a parsed ONVIF notification.
 type OnvifEvent struct {
 	Type      OnvifEventType
@@ -39,14 +47,13 @@ type OnvifEvent struct {
 
 // OnvifEventSubscriber subscribes to a camera's ONVIF events via PullPoint.
 type OnvifEventSubscriber struct {
-	cameraName       string
-	host             string
-	username         string
-	password         string
-	events           chan<- OnvifEvent
-	httpClient       *http.Client
-	pullPointURL     string
-	discoveredSvcURL string
+	cameraName   string
+	host         string
+	username     string
+	password     string
+	events       chan<- OnvifEvent
+	httpClient   *http.Client
+	pullPointURL string
 }
 
 // candidatePorts lists the ONVIF device-service ports to probe, in order.
@@ -173,7 +180,6 @@ func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	s.discoveredSvcURL = svcURL
 
 	createBody := `<tev:CreatePullPointSubscription xmlns:tev="http://www.onvif.org/ver10/events/wsdl"` +
 		` xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2">` +
@@ -194,7 +200,10 @@ func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
 	s.pullPointURL = pullPointURL
 	slog.Info("ONVIF event subscription created", "camera", s.cameraName, "pullpoint", pullPointURL)
 
-	// Poll loop
+	lastRenew := time.Now()
+
+	// Poll loop: each iteration blocks in PullMessages for up to PT60S. After
+	// each pull we check whether it is time to renew the subscription.
 	for {
 		select {
 		case <-ctx.Done():
@@ -214,6 +223,16 @@ func (s *OnvifEventSubscriber) subscribe(ctx context.Context) error {
 			default:
 				slog.Warn("ONVIF event channel full", "camera", s.cameraName)
 			}
+		}
+
+		// Renew the subscription if the renewal window has elapsed. This runs
+		// between pulls so it never delays event delivery. On failure we return
+		// the error so Run's outer loop re-subscribes from scratch.
+		if time.Since(lastRenew) >= renewInterval {
+			if err := s.renew(ctx); err != nil {
+				return fmt.Errorf("renew subscription: %w", err)
+			}
+			lastRenew = time.Now()
 		}
 	}
 }
@@ -235,6 +254,33 @@ func (s *OnvifEventSubscriber) pullMessages(ctx context.Context) ([]OnvifEvent, 
 	}
 
 	return parseOnvifEvents(resp), nil
+}
+
+// renew sends a WS-Notification Renew to extend the PullPoint subscription
+// lifetime by another subscriptionTTL. It reuses soapRequest with WS-Addressing
+// headers targeting the subscription (pullPointURL) as both the SOAP endpoint
+// and the wsa:To address, matching the verified Reolink Renew request shape.
+func (s *OnvifEventSubscriber) renew(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	renewBody := `<wsnt:Renew xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2">` +
+		`<wsnt:TerminationTime>PT600S</wsnt:TerminationTime>` +
+		`</wsnt:Renew>`
+
+	wsaHeaders := wsAddressingHeaders(s.pullPointURL,
+		"http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/Renew")
+
+	_, err := s.soapRequest(ctx, s.pullPointURL, renewBody,
+		"http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/RenewRequest",
+		wsaHeaders)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("ONVIF subscription renewed", "camera", s.cameraName)
+	return nil
 }
 
 // soapRequest sends a SOAP 1.2 request. body is the operation element (no

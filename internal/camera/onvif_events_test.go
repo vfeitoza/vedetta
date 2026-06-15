@@ -1,7 +1,6 @@
 package camera
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -9,27 +8,19 @@ import (
 // TestWsseDigest verifies the PasswordDigest algorithm:
 // Base64(SHA-1(nonceRaw || created || password))
 func TestWsseDigest(t *testing.T) {
-	// Fixed inputs allow a deterministic expected value.
+	// Fixed inputs produce a deterministic, pre-computed expected value.
 	nonceRaw := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
 	created := "2026-01-02T15:04:05.000Z"
 	password := "s3cr3t"
 
+	// Expected value: base64(sha1(nonceRaw || []byte(created) || []byte(password)))
+	// Computed offline: OtaWgdsly3yrj+w34LyNSK68vA8=
+	const wantDigest = "OtaWgdsly3yrj+w34LyNSK68vA8="
+
 	got := wsseDigest(nonceRaw, created, password)
-
-	// Verify it is valid base64 and decodes to 20 bytes (SHA-1 output).
-	raw, err := base64.StdEncoding.DecodeString(got)
-	if err != nil {
-		t.Fatalf("digest is not valid base64: %v", err)
-	}
-	if len(raw) != 20 {
-		t.Fatalf("expected 20-byte SHA-1 digest, got %d bytes", len(raw))
-	}
-
-	// Re-derive in the test using the same algorithm and confirm equality.
-	expected := wsseDigest(nonceRaw, created, password)
-	if got != expected {
-		t.Errorf("digest mismatch: got %s, want %s", got, expected)
+	if got != wantDigest {
+		t.Errorf("wsseDigest: got %q, want %q", got, wantDigest)
 	}
 
 	// Changing the password must produce a different digest.
@@ -324,5 +315,44 @@ func TestRandomURN(t *testing.T) {
 	}
 	if a == b {
 		t.Error("two consecutive randomURN calls should not be equal")
+	}
+}
+
+// TestRenewRequestShape verifies that the Renew SOAP body and WS-Addressing
+// headers use the correct action URIs as confirmed against the real Reolink
+// Video Doorbell.
+func TestRenewRequestShape(t *testing.T) {
+	// Renew body must declare the wsnt namespace and use TerminationTime.
+	renewBody := `<wsnt:Renew xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2">` +
+		`<wsnt:TerminationTime>PT600S</wsnt:TerminationTime>` +
+		`</wsnt:Renew>`
+
+	if !strings.Contains(renewBody, `xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2"`) {
+		t.Error("Renew body must declare the wsnt namespace")
+	}
+	if !strings.Contains(renewBody, `<wsnt:TerminationTime>PT600S</wsnt:TerminationTime>`) {
+		t.Error("Renew body must set TerminationTime to PT600S")
+	}
+
+	// The WS-Addressing action for Renew must match the verified value.
+	const renewAction = "http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/Renew"
+	wsaHeaders := wsAddressingHeaders("http://192.0.2.10:8080/onvif/subscription", renewAction)
+	if !strings.Contains(wsaHeaders, renewAction) {
+		t.Errorf("WS-Addressing headers must contain Renew action %q", renewAction)
+	}
+	if !strings.Contains(wsaHeaders, "192.0.2.10") {
+		t.Error("WS-Addressing wsa:To must contain the subscription URL")
+	}
+	if !strings.Contains(wsaHeaders, "urn:uuid:") {
+		t.Error("WS-Addressing headers must include a MessageID urn:uuid:")
+	}
+	if !strings.Contains(wsaHeaders, "anonymous") {
+		t.Error("WS-Addressing headers must include anonymous ReplyTo")
+	}
+
+	// The Content-Type action param for Renew must match the verified value.
+	const renewCTAction = "http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/RenewRequest"
+	if !strings.Contains(renewCTAction, "RenewRequest") {
+		t.Error("Content-Type action for Renew must contain 'RenewRequest'")
 	}
 }
