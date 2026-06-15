@@ -149,18 +149,17 @@ func TestParseOnvifEventsVisitor(t *testing.T) {
       <tev:CurrentTime>2026-06-14T10:00:00Z</tev:CurrentTime>
       <tev:TerminationTime>2026-06-14T10:10:00Z</tev:TerminationTime>
       <wsnt:NotificationMessage>
-        <wsnt:NotificationMessage>
-          <wsnt:Topic Dialect="http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet">
-            tns1:RuleEngine/MyRuleDetector/Visitor
-          </wsnt:Topic>
-          <wsnt:Message>
-            <tt:Message UtcTime="2026-06-14T10:00:00Z" PropertyOperation="Changed">
-              <tt:Data>
-                <tt:SimpleItem Name="State" Value="true"/>
-              </tt:Data>
-            </tt:Message>
-          </wsnt:Message>
-        </wsnt:NotificationMessage>
+        <wsnt:Topic Dialect="http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet">tns1:RuleEngine/MyRuleDetector/Visitor</wsnt:Topic>
+        <wsnt:Message>
+          <tt:Message UtcTime="2026-06-14T10:00:00Z" PropertyOperation="Changed">
+            <tt:Source>
+              <tt:SimpleItem Name="Source" Value="000"/>
+            </tt:Source>
+            <tt:Data>
+              <tt:SimpleItem Name="State" Value="true"/>
+            </tt:Data>
+          </tt:Message>
+        </wsnt:Message>
       </wsnt:NotificationMessage>
     </tev:PullMessagesResponse>
   </s:Body>
@@ -193,18 +192,17 @@ func TestParseOnvifEventsVisitorRelease(t *testing.T) {
   <s:Body>
     <tev:PullMessagesResponse>
       <wsnt:NotificationMessage>
-        <wsnt:NotificationMessage>
-          <wsnt:Topic Dialect="http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet">
-            tns1:RuleEngine/MyRuleDetector/Visitor
-          </wsnt:Topic>
-          <wsnt:Message>
-            <tt:Message UtcTime="2026-06-14T10:00:01Z" PropertyOperation="Changed">
-              <tt:Data>
-                <tt:SimpleItem Name="State" Value="false"/>
-              </tt:Data>
-            </tt:Message>
-          </wsnt:Message>
-        </wsnt:NotificationMessage>
+        <wsnt:Topic Dialect="http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet">tns1:RuleEngine/MyRuleDetector/Visitor</wsnt:Topic>
+        <wsnt:Message>
+          <tt:Message UtcTime="2026-06-14T10:00:01Z" PropertyOperation="Changed">
+            <tt:Source>
+              <tt:SimpleItem Name="Source" Value="000"/>
+            </tt:Source>
+            <tt:Data>
+              <tt:SimpleItem Name="State" Value="false"/>
+            </tt:Data>
+          </tt:Message>
+        </wsnt:Message>
       </wsnt:NotificationMessage>
     </tev:PullMessagesResponse>
   </s:Body>
@@ -233,16 +231,18 @@ func TestParseOnvifEventsMotion(t *testing.T) {
   <s:Body>
     <tev:PullMessagesResponse>
       <wsnt:NotificationMessage>
-        <wsnt:NotificationMessage>
-          <wsnt:Topic>tns1:VideoAnalytics/tnsaxis:MotionDetection</wsnt:Topic>
-          <wsnt:Message>
-            <tt:Message>
-              <tt:Data>
-                <tt:SimpleItem Name="IsMotion" Value="true"/>
-              </tt:Data>
-            </tt:Message>
-          </wsnt:Message>
-        </wsnt:NotificationMessage>
+        <wsnt:Topic Dialect="http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet">tns1:RuleEngine/CellMotionDetector/Motion</wsnt:Topic>
+        <wsnt:Message>
+          <tt:Message UtcTime="2026-06-15T20:02:14Z" PropertyOperation="Initialized">
+            <tt:Source>
+              <tt:SimpleItem Name="VideoSourceConfigurationToken" Value="000"/>
+              <tt:SimpleItem Name="Rule" Value="000"/>
+            </tt:Source>
+            <tt:Data>
+              <tt:SimpleItem Name="IsMotion" Value="true"/>
+            </tt:Data>
+          </tt:Message>
+        </wsnt:Message>
       </wsnt:NotificationMessage>
     </tev:PullMessagesResponse>
   </s:Body>

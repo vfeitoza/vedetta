@@ -385,9 +385,7 @@ func parseOnvifEvents(data []byte) []OnvifEvent {
 		XMLName xml.Name `xml:"Envelope"`
 		Body    struct {
 			Response struct {
-				Messages []struct {
-					Notification notificationMessage `xml:"NotificationMessage"`
-				} `xml:"NotificationMessage"`
+				Messages []notificationMessage `xml:"NotificationMessage"`
 			} `xml:"PullMessagesResponse"`
 		} `xml:"Body"`
 	}
@@ -399,14 +397,14 @@ func parseOnvifEvents(data []byte) []OnvifEvent {
 
 	var events []OnvifEvent
 	for _, msg := range env.Body.Response.Messages {
-		topic := msg.Notification.Topic
+		topic := msg.Topic
 		ev := OnvifEvent{
 			Type:      classifyOnvifTopic(topic),
 			Timestamp: time.Now(),
 			Topic:     topic,
 		}
 
-		for _, item := range msg.Notification.Message.Data.Items {
+		for _, item := range msg.Message.Data.Items {
 			if strings.EqualFold(item.Name, "State") || strings.EqualFold(item.Name, "IsMotion") {
 				ev.Value = strings.EqualFold(item.Value, "true") || item.Value == "1"
 			}
