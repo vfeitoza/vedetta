@@ -4,8 +4,12 @@ package media
 
 /*
 #cgo pkg-config: libavcodec libavutil
-#cgo LDFLAGS: -lcuda
 
+// This code references only libavutil symbols (av_hwdevice_ctx_create with
+// AV_HWDEVICE_TYPE_CUDA, the AV_PIX_FMT_CUDA enum, av_frame_*). libavutil loads
+// the CUDA driver (libcuda) dynamically at runtime, so the build needs no CUDA
+// toolkit and must NOT link -lcuda. The NVIDIA driver only has to be present at
+// runtime on the host that actually decodes.
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_cuda.h>

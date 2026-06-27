@@ -28,11 +28,12 @@ deploy: build-deploy
 build-capi:
 	go build -tags cgo_onnxruntime $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/vedetta
 
-# Opt-in Linux hardware decode (VA-API, Intel/AMD). Requires libavcodec/libva
-# development libraries (see contrib/setup-hwaccel-ubuntu.sh). NVIDIA NVDEC users
-# add the nvdec tag and CUDA: go build -tags vaapi,nvdec.
+# Opt-in Linux hardware decode (VA-API for Intel/AMD, NVDEC for NVIDIA). Both
+# backends build against libavcodec/libavutil/libva development libraries only
+# (see contrib/setup-hwaccel-ubuntu.sh); NVDEC loads the NVIDIA driver at runtime
+# and needs no CUDA toolkit to compile.
 build-hwaccel:
-	CGO_ENABLED=1 go build -tags vaapi $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-hwaccel ./cmd/vedetta
+	CGO_ENABLED=1 go build -tags vaapi,nvdec $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-hwaccel ./cmd/vedetta
 
 run: build
 	$(BUILD_DIR)/$(BINARY) -config config.example.yml

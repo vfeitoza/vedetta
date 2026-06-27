@@ -1,11 +1,14 @@
-# Hardware-accelerated image variant: VA-API (Intel/AMD) H.264 decode.
+# Hardware-accelerated image variant: VA-API (Intel/AMD) and NVDEC (NVIDIA).
 #
 # Unlike the default image (a single static binary, no external codec deps),
-# this one links libavcodec/libva and must be built with cgo and -tags vaapi.
-# Run it on an Intel/AMD host that passes through the render node, e.g.
-#   docker run --device /dev/dri ghcr.io/rvben/vedetta:hwaccel
-# NVIDIA NVDEC is not included here (it requires the CUDA toolkit); build it
-# yourself with `go build -tags vaapi,nvdec` on a CUDA host.
+# this one links libavcodec/libavutil/libva and is built with cgo and
+# -tags vaapi,nvdec. Both backends build against the ffmpeg dev libraries only;
+# NVDEC loads the NVIDIA driver dynamically at runtime, so no CUDA toolkit is
+# needed to build the image.
+#
+#   Intel/AMD:  docker run --device /dev/dri ghcr.io/rvben/vedetta:hwaccel
+#   NVIDIA:     docker run --gpus all       ghcr.io/rvben/vedetta:hwaccel
+#               (requires the NVIDIA Container Toolkit on the host)
 
 # Build stage
 FROM golang:1.26-bookworm AS builder
@@ -20,13 +23,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 go build -tags vaapi -o /vedetta ./cmd/vedetta
+RUN CGO_ENABLED=1 go build -tags vaapi,nvdec -o /vedetta ./cmd/vedetta
 
 # Runtime stage
 FROM debian:bookworm-slim
 
 LABEL org.opencontainers.image.source=https://github.com/rvben/vedetta
-LABEL org.opencontainers.image.description="Vedetta NVR - hardware-accelerated (VA-API) variant"
+LABEL org.opencontainers.image.description="Vedetta NVR - hardware-accelerated (VA-API + NVDEC) variant"
 LABEL org.opencontainers.image.licenses=MIT
 
 # Runtime shared libraries plus the VA-API drivers (Intel + Mesa/AMD).
