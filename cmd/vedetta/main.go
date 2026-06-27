@@ -440,7 +440,13 @@ func main() {
 		}
 	}()
 
-	ensureOpenH264(ctx, cfg)
+	pref := applyHWAccelPreference(cfg)
+	// Auto-install the software decoder unless the operator has explicitly opted
+	// into hardware-only decode. Under "auto" OpenH264 remains the fallback when
+	// no hardware decoder initializes, so it is still installed.
+	if pref != media.HWAccelVT {
+		ensureOpenH264(ctx, cfg)
+	}
 
 	sub := initSubsystems(ctx, cancel, cfg, db)
 	defer closeSubsystems(sub)
@@ -824,6 +830,22 @@ func ensureOpenH264(ctx context.Context, cfg *config.Config) {
 	slog.Info("OpenH264 auto-installed",
 		"version", installed.Version,
 		"path", installed.Path)
+}
+
+// applyHWAccelPreference resolves codecs.hwaccel and records it as the
+// process-wide decode preference, before any camera starts, returning the
+// resolved value. Config validation already rejects invalid values; the ok
+// check is defensive.
+func applyHWAccelPreference(cfg *config.Config) media.HWAccel {
+	pref, ok := media.ParseHWAccel(cfg.Codecs.HWAccel)
+	if !ok {
+		slog.Warn("unknown codecs.hwaccel value; using auto", "value", cfg.Codecs.HWAccel)
+	}
+	media.SetHWAccelPreference(pref)
+	slog.Info("decode preference set",
+		"hwaccel", string(pref),
+		"hardware_available", media.ProbeHardwareDecoders())
+	return pref
 }
 
 // setupNotifier constructs the push NotificationDispatcher and loads (or

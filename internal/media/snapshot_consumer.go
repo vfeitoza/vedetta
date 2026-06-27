@@ -21,6 +21,7 @@ type SnapshotConsumer struct {
 	camera string
 
 	h264Decoder *rtph264.Decoder
+	frameDec    FrameDecoder
 	sps         []byte
 	pps         []byte
 
@@ -34,16 +35,20 @@ type SnapshotConsumer struct {
 }
 
 // NewSnapshotConsumer creates a consumer that caches the latest full-resolution
-// decoded frame from the main stream. Returns nil if the track is not H264
-// or OpenH264 is unavailable.
+// decoded frame from the main stream. Returns nil if the track is not H264 or
+// no H264 decoder is available.
 func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer {
 	if track == nil || track.Codec != "H264" {
 		return nil
 	}
 
-	// Verify OpenH264 is available before allocating
-	if !ensureOpenH264() {
-		slog.Warn("snapshot consumer: OpenH264 unavailable", "camera", camera)
+	// Build the frame decoder up front so the consumer is only created when
+	// decode is actually possible. Honors the configured hwaccel preference and
+	// falls back to software; on hardware-only systems this succeeds even when
+	// OpenH264 is absent. Owned and closed by decodeLoop.
+	frameDec := NewDefaultFrameDecoder(track.SPS, track.PPS)
+	if frameDec == nil {
+		slog.Warn("snapshot consumer: no H264 decoder available", "camera", camera)
 		return nil
 	}
 
@@ -55,6 +60,7 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 	}
 	dec, err := h264Format.CreateDecoder()
 	if err != nil {
+		frameDec.Close()
 		slog.Warn("snapshot consumer: failed to create H264 RTP decoder", "camera", camera, "error", err)
 		return nil
 	}
@@ -62,6 +68,7 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 	sc := &SnapshotConsumer{
 		camera:      camera,
 		h264Decoder: dec,
+		frameDec:    frameDec,
 		sps:         track.SPS,
 		pps:         track.PPS,
 		decodeCh:    make(chan []byte, 1),
@@ -75,13 +82,10 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 }
 
 // decodeLoop runs in a dedicated goroutine, decoding NAL streams without
-// blocking the RTP fan-out callback.
+// blocking the RTP fan-out callback. It owns sc.frameDec for its lifetime,
+// confining all decoder use (and the final Close) to this single goroutine.
 func (sc *SnapshotConsumer) decodeLoop() {
-	h264Dec := NewH264Decoder()
-	if h264Dec == nil {
-		return
-	}
-	defer h264Dec.Close()
+	defer sc.frameDec.Close()
 
 	for {
 		select {
@@ -89,7 +93,7 @@ func (sc *SnapshotConsumer) decodeLoop() {
 			if !ok {
 				return
 			}
-			ycbcr := h264Dec.Decode(nalStream)
+			ycbcr := sc.frameDec.Decode(nalStream)
 			if ycbcr == nil {
 				continue
 			}

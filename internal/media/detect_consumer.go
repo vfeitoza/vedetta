@@ -29,12 +29,13 @@ type DetectConsumer struct {
 
 	// decMu guards the lifecycle and use of the decoders against Close.
 	// OnVideoRTP runs on the RTSP fan-out goroutine while Close runs on the
-	// camera's readFrames goroutine. Without this, Close frees the OpenH264 C
+	// camera's readFrames goroutine. Without this, Close frees the underlying C
 	// decoder (h264Dec) while OnVideoRTP is still using it - a use-after-free
-	// inside the C library that corrupts the Go heap.
+	// inside the C library that corrupts the Go heap. Holds whether h264Dec is a
+	// software (OpenH264) or hardware (VideoToolbox) backend.
 	decMu       sync.Mutex
 	h264Decoder *rtph264.Decoder
-	h264Dec     *H264Decoder
+	h264Dec     FrameDecoder
 	sps         []byte
 	pps         []byte
 
@@ -90,14 +91,14 @@ func NewDetectConsumer(camera string, width, height, fps int, track *rtsp.TrackI
 	}
 	dc.h264Decoder = dec
 
-	dc.h264Dec = NewH264Decoder()
+	dc.h264Dec = NewDefaultFrameDecoder(dc.sps, dc.pps)
 	if dc.h264Dec == nil {
-		slog.Warn("detection disabled: OpenH264 unavailable")
+		slog.Warn("detection disabled: no H264 decoder available", "camera", camera)
 		return dc
 	}
 
 	dc.available = true
-	slog.Info("detection enabled with OpenH264 decode")
+	slog.Info("detection enabled", "camera", camera)
 	return dc
 }
 

@@ -43,6 +43,15 @@ detect:
     background_alpha: 0.05
     min_region_score: 0.02
 
+codecs:
+  # H.264 decode backend for detection and snapshots.
+  #   auto         - hardware decode when available, else software (default)
+  #   software     - always use the bundled OpenH264 software decoder
+  #   videotoolbox - force macOS VideoToolbox hardware decode
+  # The shipped binary needs no external libraries; "auto" simply uses the
+  # platform's built-in hardware decoder (VideoToolbox on macOS) when present.
+  hwaccel: auto
+
 recording:
   path: ./recordings
   continuous: true          # record continuously, not just events

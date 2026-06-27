@@ -1174,3 +1174,42 @@ func TestOpenH264ConfigYAMLParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadHWAccel(t *testing.T) {
+	const base = `
+cameras:
+  - name: front
+    url: rtsp://192.0.2.10/stream
+`
+	t.Run("absent defaults to empty (auto)", func(t *testing.T) {
+		cfg, err := Load(writeConfig(t, base))
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Codecs.HWAccel != "" {
+			t.Fatalf("HWAccel = %q, want empty", cfg.Codecs.HWAccel)
+		}
+	})
+
+	for _, v := range []string{"auto", "software", "videotoolbox"} {
+		t.Run("valid_"+v, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, base+"codecs:\n  hwaccel: "+v+"\n"))
+			if err != nil {
+				t.Fatalf("Load(%q) error: %v", v, err)
+			}
+			if cfg.Codecs.HWAccel != v {
+				t.Fatalf("HWAccel = %q, want %q", cfg.Codecs.HWAccel, v)
+			}
+		})
+	}
+
+	// Dropped backends (vaapi/nvdec) and typos are rejected at load time rather
+	// than silently ignored, matching the project's strict-config posture.
+	for _, v := range []string{"vaapi", "nvdec", "bogus"} {
+		t.Run("invalid_"+v, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base+"codecs:\n  hwaccel: "+v+"\n")); err == nil {
+				t.Fatalf("Load(%q) expected error, got nil", v)
+			}
+		})
+	}
+}

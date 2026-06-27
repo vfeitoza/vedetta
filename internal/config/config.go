@@ -82,6 +82,32 @@ const DefaultVAPIDSubscriber = "admin@example.com"
 // CodecsConfig controls optional external codec behavior.
 type CodecsConfig struct {
 	OpenH264 OpenH264Config `yaml:"openh264"`
+
+	// HWAccel selects the H.264 decode backend for detection and snapshots.
+	// "auto" (default, or empty) uses hardware decode when available and falls
+	// back to the bundled software decoder; "software" forces software decode;
+	// "videotoolbox" forces macOS VideoToolbox. Unknown values are rejected at
+	// load time.
+	HWAccel string `yaml:"hwaccel"`
+}
+
+// Valid hwaccel values. Kept in sync with media.HWAccel; validated here so the
+// config layer never depends on the media package.
+const (
+	HWAccelAuto         = "auto"
+	HWAccelSoftware     = "software"
+	HWAccelVideoToolbox = "videotoolbox"
+)
+
+// validHWAccel reports whether s is an accepted codecs.hwaccel value. An empty
+// string is accepted and treated as "auto" downstream.
+func validHWAccel(s string) bool {
+	switch s {
+	case "", HWAccelAuto, HWAccelSoftware, HWAccelVideoToolbox:
+		return true
+	default:
+		return false
+	}
 }
 
 // WebRTCConfig controls the ICE servers offered to WebRTC viewers.
@@ -543,6 +569,10 @@ func Load(path string) (*Config, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	if !validHWAccel(cfg.Codecs.HWAccel) {
+		return nil, fmt.Errorf("codecs.hwaccel: invalid value %q (want auto, software, or videotoolbox)", cfg.Codecs.HWAccel)
 	}
 
 	if cfg.Recording.MaxStorage != "" {
