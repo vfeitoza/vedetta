@@ -168,7 +168,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"image"
-	"log/slog"
 	"unsafe"
 )
 
@@ -177,12 +176,8 @@ type vtDecoder struct {
 	session    C.VTDecompressionSessionRef
 	formatDesc C.CMVideoFormatDescriptionRef
 	hasSession bool
-	// sessionFailed is set when session creation failed despite having SPS+PPS,
-	// distinguishing a hard init failure from a transient "waiting for an IDR"
-	// nil. vtLazyDecoder uses it to fall back to software.
-	sessionFailed bool
-	sps           []byte
-	pps           []byte
+	sps        []byte
+	pps        []byte
 }
 
 func (d *vtDecoder) Decode(nalData []byte) *image.YCbCr {
@@ -228,7 +223,6 @@ func (d *vtDecoder) Decode(nalData []byte) *image.YCbCr {
 			return nil
 		}
 		if !d.createSession() {
-			d.sessionFailed = true
 			return nil
 		}
 	}
@@ -369,50 +363,3 @@ func nalusToAVCC(nalus [][]byte) []byte {
 	return buf
 }
 
-// vtLazyDecoder wraps a VideoToolbox decoder whose session could not be
-// validated at construction (the RTSP track carried no SPS/PPS). Under the
-// "auto" preference it transparently falls back to the software decoder if
-// VideoToolbox fails to initialize once in-band SPS/PPS arrive, so the auto
-// path never silently disables decode when software could handle the stream.
-//
-// All methods run on the single goroutine that owns the decoder (the detect
-// consumer holds decMu across Decode and Close; the snapshot consumer confines
-// the decoder to its decode loop), so the one-time swap needs no locking.
-type vtLazyDecoder struct {
-	vt   *vtDecoder
-	soft FrameDecoder
-}
-
-func (d *vtLazyDecoder) Decode(nalData []byte) *image.YCbCr {
-	if d.soft != nil {
-		return d.soft.Decode(nalData)
-	}
-	if img := d.vt.Decode(nalData); img != nil {
-		return img
-	}
-	if d.vt.sessionFailed {
-		slog.Warn("videotoolbox could not initialize for stream; falling back to software decode")
-		d.vt.Close()
-		d.soft = newSoftwareDecoder()
-		if d.soft == nil {
-			return nil
-		}
-		return d.soft.Decode(nalData)
-	}
-	return nil
-}
-
-func (d *vtLazyDecoder) Flush() *image.YCbCr {
-	if d.soft != nil {
-		return d.soft.Flush()
-	}
-	return d.vt.Flush()
-}
-
-func (d *vtLazyDecoder) Close() {
-	if d.soft != nil {
-		d.soft.Close()
-		return
-	}
-	d.vt.Close()
-}

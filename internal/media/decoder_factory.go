@@ -37,23 +37,20 @@ func NewDefaultFrameDecoder(sps, pps []byte) FrameDecoder {
 
 // NewFrameDecoder creates a FrameDecoder using the requested preference:
 //
-//   - software: the bundled OpenH264 software decoder.
-//   - auto: a hardware decoder when one initializes for the stream, otherwise
-//     software.
-//   - an explicit hardware backend (e.g. videotoolbox): that backend only, with
-//     no software fallback. If it cannot initialize, decode is disabled. This is
-//     honored exactly so an operator can guarantee hardware decode.
+//   - auto (default) and software: the bundled OpenH264 software decoder.
+//     Hardware decode measured no benefit for vedetta's small detection
+//     sub-streams (decode is not a CPU bottleneck there and the GPU readback
+//     costs more than it saves), so it is not used by default.
+//   - an explicit hardware backend (videotoolbox/vaapi/nvdec): that backend
+//     only, with no software fallback. If it cannot initialize, decode is
+//     disabled. Honored exactly so an operator can opt in for workloads where it
+//     helps (many cameras, or full-resolution decode).
 //
 // sps/pps may be nil, in which case a hardware backend defers session creation
 // to the first frame.
 func NewFrameDecoder(pref HWAccel, sps, pps []byte) FrameDecoder {
 	switch pref {
-	case HWAccelSoftware:
-		return newSoftwareDecoder()
-	case HWAccelAuto:
-		if dec := probeAndCreate(pref, sps, pps); dec != nil {
-			return dec
-		}
+	case HWAccelAuto, HWAccelSoftware:
 		return newSoftwareDecoder()
 	default:
 		// Explicit hardware backend: no software fallback. probeAndCreate
@@ -73,27 +70,15 @@ func newSoftwareDecoder() FrameDecoder {
 	return dec
 }
 
-// probeAndCreate attempts to create a hardware-accelerated decoder, validating
-// it against the stream's SPS/PPS when provided.
+// probeAndCreate creates the requested explicit hardware decoder, or nil when
+// that backend is not available on this system or cannot initialize.
 func probeAndCreate(pref HWAccel, sps, pps []byte) FrameDecoder {
-	available := platformProbeHW()
-	if len(available) == 0 {
-		return nil
-	}
-	if pref == HWAccelAuto {
-		// Try first available
-		for _, hw := range available {
-			if dec := platformCreateHW(hw, sps, pps); dec != nil {
-				slog.Info("using hardware decoder", "backend", string(hw))
+	for _, hw := range platformProbeHW() {
+		if hw == pref {
+			if dec := platformCreateHW(pref, sps, pps); dec != nil {
+				slog.Info("using hardware decoder", "backend", string(pref))
 				return dec
 			}
-		}
-		return nil
-	}
-	// Try specific preference
-	for _, hw := range available {
-		if hw == pref {
-			return platformCreateHW(pref, sps, pps)
 		}
 	}
 	return nil

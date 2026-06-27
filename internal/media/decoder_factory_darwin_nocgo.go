@@ -14,6 +14,6 @@ func probeVideoToolbox() bool {
 	return false
 }
 
-func newVideoToolboxDecoder(_ HWAccel, _, _ []byte) FrameDecoder {
+func newVideoToolboxDecoder(_, _ []byte) FrameDecoder {
 	return nil
 }

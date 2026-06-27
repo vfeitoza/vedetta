@@ -45,16 +45,17 @@ detect:
 
 codecs:
   # H.264 decode backend for detection and snapshots.
-  #   auto         - hardware decode when available, else software (default)
-  #   software     - always use the bundled OpenH264 software decoder
+  #   auto         - bundled software decoder (default)
+  #   software     - bundled OpenH264 software decoder (same as auto)
   #   videotoolbox - force macOS VideoToolbox hardware decode
   #   vaapi        - Linux Intel/AMD (hardware build only)
   #   nvdec        - Linux NVIDIA   (hardware build only)
-  # The default shipped binary needs no external libraries; "auto" uses the
-  # platform's built-in hardware decoder (VideoToolbox on macOS) when present and
-  # otherwise software. The Linux vaapi/nvdec backends require a hardware build
-  # that links libavcodec/libva: see Dockerfile.hwaccel / make build-hwaccel
-  # (NVDEC additionally needs the NVIDIA driver at runtime).
+  # Detection runs on a small sub-stream at low fps, where decode is not a CPU
+  # bottleneck; hardware decode measured slightly slower there, so "auto" uses
+  # the software decoder by default. Force a hardware backend only for atypical
+  # workloads (many cameras, or full-resolution decode). The Linux vaapi/nvdec
+  # backends require a hardware build that links libavcodec/libva: see
+  # Dockerfile.hwaccel / make build-hwaccel (NVDEC also needs the driver at runtime).
   hwaccel: auto
 
 recording:

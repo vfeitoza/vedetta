@@ -842,9 +842,14 @@ func applyHWAccelPreference(cfg *config.Config) media.HWAccel {
 		slog.Warn("unknown codecs.hwaccel value; using auto", "value", cfg.Codecs.HWAccel)
 	}
 	media.SetHWAccelPreference(pref)
-	slog.Info("decode preference set",
-		"hwaccel", string(pref),
-		"hardware_available", media.ProbeHardwareDecoders())
+	avail := media.ProbeHardwareDecoders()
+	slog.Info("decode preference set", "hwaccel", string(pref), "hardware_available", avail)
+	// Under the default, a present hardware decoder is intentionally not used:
+	// it measured no benefit for detection. Surface it so the option is findable.
+	if pref == media.HWAccelAuto && len(avail) > 0 {
+		slog.Info("hardware decoder available but unused under 'auto' (software is faster for detection); set codecs.hwaccel to force it",
+			"available", avail)
+	}
 	return pref
 }
 

@@ -20,10 +20,10 @@ type FrameDecoder interface {
 type HWAccel string
 
 const (
-	HWAccelAuto     HWAccel = "auto"         // hardware when available, else software
-	HWAccelVT       HWAccel = "videotoolbox" // macOS VideoToolbox
-	HWAccelVAAPI    HWAccel = "vaapi"        // Linux Intel/AMD (opt-in -tags hwaccel)
-	HWAccelNVDEC    HWAccel = "nvdec"        // Linux NVIDIA (opt-in -tags hwaccel)
+	HWAccelAuto     HWAccel = "auto"         // default: bundled software (HW measured no benefit for detection)
+	HWAccelVT       HWAccel = "videotoolbox" // macOS VideoToolbox (opt-in)
+	HWAccelVAAPI    HWAccel = "vaapi"        // Linux Intel/AMD (opt-in, -tags hwaccel)
+	HWAccelNVDEC    HWAccel = "nvdec"        // Linux NVIDIA (opt-in, -tags hwaccel)
 	HWAccelSoftware HWAccel = "software"     // bundled OpenH264 software decode
 )
 
