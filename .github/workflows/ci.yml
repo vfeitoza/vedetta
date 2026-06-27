@@ -34,7 +34,7 @@ jobs:
 
   # Compile-check the opt-in VA-API and NVDEC hardware-decode paths so they
   # cannot silently break. The Docker build installs libavcodec/libva and builds
-  # with -tags vaapi,nvdec inside the image (NVDEC links no CUDA at build time),
+  # with -tags hwaccel inside the image (NVDEC links no CUDA at build time),
   # so this is self-contained with no runner-specific apt or GPU steps.
   build-hwaccel:
     runs-on: ubuntu-latest

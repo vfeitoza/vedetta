@@ -1,4 +1,4 @@
-//go:build linux && cgo && nvdec
+//go:build linux && cgo && hwaccel
 
 package media
 
@@ -178,10 +178,3 @@ func (d *nvdecDecoder) Close() {
 		C.av_buffer_unref(&d.hwDeviceCtx)
 	}
 }
-
-// nvdecAvailable and newNVDECBackend are the hooks the Linux factory dispatches
-// through. They exist only in this -tags nvdec build; decoder_nvdec_stub.go
-// provides no-op versions otherwise.
-func nvdecAvailable() bool { return probeNVDEC() }
-
-func newNVDECBackend() (FrameDecoder, error) { return newNVDECDecoder() }

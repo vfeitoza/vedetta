@@ -1,4 +1,4 @@
-//go:build linux && cgo && vaapi
+//go:build linux && cgo && hwaccel
 
 package media
 
@@ -193,10 +193,3 @@ func (d *vaapiDecoder) Close() {
 		C.av_buffer_unref(&d.hwDeviceCtx)
 	}
 }
-
-// vaapiAvailable and newVAAPIBackend are the hooks the Linux factory dispatches
-// through. They exist only in this -tags vaapi build; decoder_vaapi_stub.go
-// provides no-op versions otherwise.
-func vaapiAvailable() bool { return probeVAAPI() }
-
-func newVAAPIBackend() (FrameDecoder, error) { return newVAAPIDecoder() }

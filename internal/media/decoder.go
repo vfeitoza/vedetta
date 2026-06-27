@@ -22,8 +22,8 @@ type HWAccel string
 const (
 	HWAccelAuto     HWAccel = "auto"         // hardware when available, else software
 	HWAccelVT       HWAccel = "videotoolbox" // macOS VideoToolbox
-	HWAccelVAAPI    HWAccel = "vaapi"        // Linux Intel/AMD (opt-in -tags vaapi)
-	HWAccelNVDEC    HWAccel = "nvdec"        // Linux NVIDIA (opt-in -tags nvdec)
+	HWAccelVAAPI    HWAccel = "vaapi"        // Linux Intel/AMD (opt-in -tags hwaccel)
+	HWAccelNVDEC    HWAccel = "nvdec"        // Linux NVIDIA (opt-in -tags hwaccel)
 	HWAccelSoftware HWAccel = "software"     // bundled OpenH264 software decode
 )
 

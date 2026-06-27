@@ -1,12 +1,17 @@
-//go:build linux && cgo && (vaapi || nvdec)
-
 package media
 
 import "image"
 
-// nv12PlanesToYCbCr converts NV12 plane data (Y plane plus interleaved UV) to
-// *image.YCbCr. Shared by the VA-API and NVDEC backends, which both download
-// frames from the GPU as NV12.
+// nv12PlanesToYCbCr converts NV12 plane data (a full Y plane plus an interleaved
+// Cb/Cr plane) into an *image.YCbCr with separate chroma planes. The Linux
+// VA-API and NVDEC backends download GPU frames as NV12 and use this to hand the
+// rest of the pipeline the same *image.YCbCr the software decoder produces.
+//
+// yStride/uvStride are the source row strides (may exceed the visible width due
+// to GPU alignment); the Y plane keeps its stride while the chroma planes are
+// repacked tightly to CStride = w/2. It is pure Go (no build tag) so it is unit
+// tested in the default suite even though its only non-test callers are the
+// build-tag-gated hardware backends.
 func nv12PlanesToYCbCr(w, h, yStride, uvStride int, yData, uvData []byte) *image.YCbCr {
 	chromaW := w / 2
 	chromaH := h / 2

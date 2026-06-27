@@ -33,7 +33,7 @@ build-capi:
 # (see contrib/setup-hwaccel-ubuntu.sh); NVDEC loads the NVIDIA driver at runtime
 # and needs no CUDA toolkit to compile.
 build-hwaccel:
-	CGO_ENABLED=1 go build -tags vaapi,nvdec $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-hwaccel ./cmd/vedetta
+	CGO_ENABLED=1 go build -tags hwaccel $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-hwaccel ./cmd/vedetta
 
 run: build
 	$(BUILD_DIR)/$(BINARY) -config config.example.yml
@@ -79,10 +79,10 @@ docker-push:
 	docker push $(DOCKER_IMAGE):$(VERSION)
 	docker push $(DOCKER_IMAGE):latest
 
-# Hardware-accelerated image variant (VA-API, linux/amd64). Includes libavcodec
-# and libva, so it is larger than the default static image; pull it only on
-# Intel/AMD hosts that pass through /dev/dri. Doubles as the CI compile-check for
-# the -tags vaapi build path.
+# Hardware-accelerated image variant (VA-API + NVDEC, linux/amd64). Includes
+# libavcodec and libva, so it is larger than the default static image; pull it
+# only on hosts that pass through a GPU (--device /dev/dri or --gpus all).
+# Doubles as the CI compile-check for the -tags hwaccel build path.
 docker-build-hwaccel:
 	docker build -f Dockerfile.hwaccel -t $(DOCKER_IMAGE):$(VERSION)-hwaccel -t $(DOCKER_IMAGE):hwaccel .
 

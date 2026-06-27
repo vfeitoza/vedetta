@@ -2,7 +2,7 @@
 #
 # Unlike the default image (a single static binary, no external codec deps),
 # this one links libavcodec/libavutil/libva and is built with cgo and
-# -tags vaapi,nvdec. Both backends build against the ffmpeg dev libraries only;
+# -tags hwaccel. Both backends build against the ffmpeg dev libraries only;
 # NVDEC loads the NVIDIA driver dynamically at runtime, so no CUDA toolkit is
 # needed to build the image.
 #
@@ -23,7 +23,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 go build -tags vaapi,nvdec -o /vedetta ./cmd/vedetta
+RUN CGO_ENABLED=1 go build -tags hwaccel -o /vedetta ./cmd/vedetta
 
 # Runtime stage
 FROM debian:bookworm-slim

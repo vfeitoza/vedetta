@@ -80,11 +80,10 @@ if $HAS_NVIDIA; then
     info "Installing NVIDIA hardware decoding packages..."
     # Determine driver version available
     NVIDIA_VER=$(apt-cache search '^nvidia-driver-[0-9]+$' 2>/dev/null | sort -t- -k3 -n | tail -1 | grep -oP '\d+$' || echo "550")
+    # NVDEC builds against the ffmpeg dev libraries alone (libavutil loads the
+    # NVIDIA driver dynamically at runtime), so no CUDA toolkit is required. Only
+    # the driver and libnvidia-decode need to be present at runtime.
     apt_install "nvidia-driver-${NVIDIA_VER}" "libnvidia-decode-${NVIDIA_VER}" ffmpeg libavcodec-dev libavutil-dev
-    # cuda-toolkit is large; install only if not already present
-    if ! dpkg -l cuda-toolkit-12-* &>/dev/null; then
-        apt_install cuda-toolkit-12-6 2>/dev/null || warn "cuda-toolkit-12-6 not available, skipping"
-    fi
     INSTALLED+=("nvidia-driver-${NVIDIA_VER}" "libnvidia-decode-${NVIDIA_VER}")
 
     # Verify

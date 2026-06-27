@@ -1,27 +1,21 @@
-//go:build linux
+//go:build linux && cgo && hwaccel
 
 package media
 
 import "log/slog"
 
-// Linux hardware decode is opt-in at build time. The VA-API (Intel/AMD) and
-// NVDEC (NVIDIA) backends pull in libavcodec/libva/CUDA, which the default
-// single-static-binary build deliberately avoids. They are compiled in only
-// with -tags vaapi and/or -tags nvdec; otherwise the hooks below resolve to
-// stubs and decode falls back to the bundled OpenH264 software decoder.
-//
-// Each backend provides two hooks, with a real implementation under its build
-// tag and a stub otherwise:
-//   - <name>Available() bool
-//   - new<NAME>Backend() (FrameDecoder, error)
+// Linux hardware decode (VA-API for Intel/AMD, NVDEC for NVIDIA) is opt-in at
+// build time via -tags hwaccel, because the backends link libavcodec/libva. The
+// default build excludes this file (see decoder_factory_linux_stub.go) and falls
+// back to the bundled OpenH264 software decoder.
 
 func platformProbeHW() []HWAccel {
 	var avail []HWAccel
-	if vaapiAvailable() {
+	if probeVAAPI() {
 		slog.Info("hardware decoder available", "backend", "vaapi")
 		avail = append(avail, HWAccelVAAPI)
 	}
-	if nvdecAvailable() {
+	if probeNVDEC() {
 		slog.Info("hardware decoder available", "backend", "nvdec")
 		avail = append(avail, HWAccelNVDEC)
 	}
@@ -37,9 +31,9 @@ func platformCreateHW(pref HWAccel, _, _ []byte) FrameDecoder {
 	)
 	switch pref {
 	case HWAccelVAAPI:
-		dec, err = newVAAPIBackend()
+		dec, err = newVAAPIDecoder()
 	case HWAccelNVDEC:
-		dec, err = newNVDECBackend()
+		dec, err = newNVDECDecoder()
 	default:
 		return nil
 	}
