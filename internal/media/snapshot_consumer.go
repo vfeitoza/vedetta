@@ -77,7 +77,7 @@ func NewSnapshotConsumer(camera string, track *rtsp.TrackInfo) *SnapshotConsumer
 // decodeLoop runs in a dedicated goroutine, decoding NAL streams without
 // blocking the RTP fan-out callback.
 func (sc *SnapshotConsumer) decodeLoop() {
-	h264Dec := NewH264Decoder()
+	h264Dec := NewFrameDecoder(HWAccelAuto)
 	if h264Dec == nil {
 		return
 	}

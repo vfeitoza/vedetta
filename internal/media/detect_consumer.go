@@ -34,7 +34,7 @@ type DetectConsumer struct {
 	// inside the C library that corrupts the Go heap.
 	decMu       sync.Mutex
 	h264Decoder *rtph264.Decoder
-	h264Dec     *H264Decoder
+	h264Dec     FrameDecoder
 	sps         []byte
 	pps         []byte
 
@@ -90,7 +90,7 @@ func NewDetectConsumer(camera string, width, height, fps int, track *rtsp.TrackI
 	}
 	dc.h264Decoder = dec
 
-	dc.h264Dec = NewH264Decoder()
+	dc.h264Dec = NewFrameDecoder(HWAccelAuto)
 	if dc.h264Dec == nil {
 		slog.Warn("detection disabled: OpenH264 unavailable")
 		return dc

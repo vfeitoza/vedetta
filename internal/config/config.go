@@ -82,6 +82,7 @@ const DefaultVAPIDSubscriber = "admin@example.com"
 // CodecsConfig controls optional external codec behavior.
 type CodecsConfig struct {
 	OpenH264 OpenH264Config `yaml:"openh264"`
+	HWAccel  string         `yaml:"hwaccel"`
 }
 
 // WebRTCConfig controls the ICE servers offered to WebRTC viewers.
