@@ -45,6 +45,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.7.13](https://github.com/rvben/vedetta/compare/v0.7.12...v0.7.13) - 2026-06-27
+
+### Added
+
+- **media**: default decode to software; hardware decode is opt-in ([da10bf3](https://github.com/rvben/vedetta/commit/da10bf3573a108fbb91a188f530ee9e073f10fc8))
+- **media**: build NVDEC without CUDA toolkit and verify it in CI ([896901e](https://github.com/rvben/vedetta/commit/896901ec77d6a1d7692df45ba0d66ca3271e70da))
+- **media**: add opt-in Linux VA-API/NVDEC hardware decode ([cf088a0](https://github.com/rvben/vedetta/commit/cf088a080cf35c6bcfb21537abd745c90d2d927c))
+- **media**: add VideoToolbox hardware H.264 decode with software fallback ([254624c](https://github.com/rvben/vedetta/commit/254624c80fe3a7279c13616a94b371395610c4e2))
+
+### Fixed
+
+- **media**: build NVDEC without the CUDA toolkit headers ([c5824d2](https://github.com/rvben/vedetta/commit/c5824d28e0fc8b83beed88db65eed30a55a7840d))
+
 ## [0.7.12](https://github.com/rvben/vedetta/compare/v0.7.11...v0.7.12) - 2026-06-15
 
 ### Added
