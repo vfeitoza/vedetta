@@ -109,8 +109,8 @@ func TestParseHWAccel(t *testing.T) {
 		{"AUTO", HWAccelAuto, true},
 		{"  software  ", HWAccelSoftware, true},
 		{"videotoolbox", HWAccelVT, true},
-		{"vaapi", HWAccelAuto, false}, // dropped backend: not ok, degrades to auto
-		{"nvdec", HWAccelAuto, false}, // dropped backend
+		{"vaapi", HWAccelVAAPI, true}, // valid value; backend present only in -tags vaapi builds
+		{"nvdec", HWAccelNVDEC, true}, // valid value; backend present only in -tags nvdec builds
 		{"bogus", HWAccelAuto, false},
 	}
 	for _, c := range cases {

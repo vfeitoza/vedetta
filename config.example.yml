@@ -48,8 +48,12 @@ codecs:
   #   auto         - hardware decode when available, else software (default)
   #   software     - always use the bundled OpenH264 software decoder
   #   videotoolbox - force macOS VideoToolbox hardware decode
-  # The shipped binary needs no external libraries; "auto" simply uses the
-  # platform's built-in hardware decoder (VideoToolbox on macOS) when present.
+  #   vaapi        - Linux Intel/AMD (only in a binary built with -tags vaapi)
+  #   nvdec        - Linux NVIDIA  (only in a binary built with -tags nvdec)
+  # The default shipped binary needs no external libraries; "auto" uses the
+  # platform's built-in hardware decoder (VideoToolbox on macOS) when present and
+  # otherwise software. The Linux vaapi/nvdec backends require libavcodec/libva
+  # (or CUDA) and a hardware build: see Dockerfile.hwaccel / make build-hwaccel.
   hwaccel: auto
 
 recording:

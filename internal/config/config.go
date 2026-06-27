@@ -92,18 +92,22 @@ type CodecsConfig struct {
 }
 
 // Valid hwaccel values. Kept in sync with media.HWAccel; validated here so the
-// config layer never depends on the media package.
+// config layer never depends on the media package. vaapi/nvdec are accepted on
+// every build but only function in binaries compiled with the matching build
+// tag (see Dockerfile.hwaccel / make build-hwaccel).
 const (
 	HWAccelAuto         = "auto"
 	HWAccelSoftware     = "software"
 	HWAccelVideoToolbox = "videotoolbox"
+	HWAccelVAAPI        = "vaapi"
+	HWAccelNVDEC        = "nvdec"
 )
 
 // validHWAccel reports whether s is an accepted codecs.hwaccel value. An empty
 // string is accepted and treated as "auto" downstream.
 func validHWAccel(s string) bool {
 	switch s {
-	case "", HWAccelAuto, HWAccelSoftware, HWAccelVideoToolbox:
+	case "", HWAccelAuto, HWAccelSoftware, HWAccelVideoToolbox, HWAccelVAAPI, HWAccelNVDEC:
 		return true
 	default:
 		return false
@@ -572,7 +576,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	if !validHWAccel(cfg.Codecs.HWAccel) {
-		return nil, fmt.Errorf("codecs.hwaccel: invalid value %q (want auto, software, or videotoolbox)", cfg.Codecs.HWAccel)
+		return nil, fmt.Errorf("codecs.hwaccel: invalid value %q (want auto, software, videotoolbox, vaapi, or nvdec)", cfg.Codecs.HWAccel)
 	}
 
 	if cfg.Recording.MaxStorage != "" {

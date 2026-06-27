@@ -1191,7 +1191,7 @@ cameras:
 		}
 	})
 
-	for _, v := range []string{"auto", "software", "videotoolbox"} {
+	for _, v := range []string{"auto", "software", "videotoolbox", "vaapi", "nvdec"} {
 		t.Run("valid_"+v, func(t *testing.T) {
 			cfg, err := Load(writeConfig(t, base+"codecs:\n  hwaccel: "+v+"\n"))
 			if err != nil {
@@ -1203,9 +1203,9 @@ cameras:
 		})
 	}
 
-	// Dropped backends (vaapi/nvdec) and typos are rejected at load time rather
-	// than silently ignored, matching the project's strict-config posture.
-	for _, v := range []string{"vaapi", "nvdec", "bogus"} {
+	// Typos are rejected at load time rather than silently ignored, matching the
+	// project's strict-config posture.
+	for _, v := range []string{"vtoolbox", "cuda", "bogus"} {
 		t.Run("invalid_"+v, func(t *testing.T) {
 			if _, err := Load(writeConfig(t, base+"codecs:\n  hwaccel: "+v+"\n")); err == nil {
 				t.Fatalf("Load(%q) expected error, got nil", v)

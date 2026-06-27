@@ -32,9 +32,19 @@ jobs:
 
       - run: make build
 
+  # Compile-check the opt-in VA-API hardware-decode path so it cannot silently
+  # break. The Docker build installs libavcodec/libva and builds with -tags vaapi
+  # inside the image, so this is self-contained (no runner-specific apt steps).
+  build-hwaccel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: make docker-build-hwaccel
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, build]
+    needs: [check, build, build-hwaccel]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,6 +71,17 @@ jobs:
           tags: |
             ghcr.io/rvben/vedetta:${{ github.ref_name }}
             ghcr.io/rvben/vedetta:latest
+
+      # Hardware-accelerated VA-API variant (Intel/AMD, linux/amd64 only - VA-API
+      # is x86 iGPU territory and the image links libavcodec/libva).
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          file: Dockerfile.hwaccel
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/rvben/vedetta:${{ github.ref_name }}-hwaccel
+            ghcr.io/rvben/vedetta:hwaccel
 
       - name: Build release binaries
         run: |

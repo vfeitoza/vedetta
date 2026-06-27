@@ -22,6 +22,8 @@ type HWAccel string
 const (
 	HWAccelAuto     HWAccel = "auto"         // hardware when available, else software
 	HWAccelVT       HWAccel = "videotoolbox" // macOS VideoToolbox
+	HWAccelVAAPI    HWAccel = "vaapi"        // Linux Intel/AMD (opt-in -tags vaapi)
+	HWAccelNVDEC    HWAccel = "nvdec"        // Linux NVIDIA (opt-in -tags nvdec)
 	HWAccelSoftware HWAccel = "software"     // bundled OpenH264 software decode
 )
 
@@ -29,12 +31,21 @@ const (
 // string maps to HWAccelAuto. Unknown values also map to HWAccelAuto but report
 // ok=false, so callers can warn while still degrading gracefully; config
 // validation rejects unknown values before this is reached in production.
+//
+// vaapi and nvdec are accepted on every build, but their backends are only
+// compiled into binaries built with the matching build tag. On a binary without
+// that backend the factory finds no hardware decoder and the choice resolves to
+// no decoder (explicit backend, no software fallback).
 func ParseHWAccel(s string) (pref HWAccel, ok bool) {
 	switch HWAccel(strings.ToLower(strings.TrimSpace(s))) {
 	case "", HWAccelAuto:
 		return HWAccelAuto, true
 	case HWAccelVT:
 		return HWAccelVT, true
+	case HWAccelVAAPI:
+		return HWAccelVAAPI, true
+	case HWAccelNVDEC:
+		return HWAccelNVDEC, true
 	case HWAccelSoftware:
 		return HWAccelSoftware, true
 	default:

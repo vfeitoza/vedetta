@@ -1,0 +1,55 @@
+# Hardware-accelerated image variant: VA-API (Intel/AMD) H.264 decode.
+#
+# Unlike the default image (a single static binary, no external codec deps),
+# this one links libavcodec/libva and must be built with cgo and -tags vaapi.
+# Run it on an Intel/AMD host that passes through the render node, e.g.
+#   docker run --device /dev/dri ghcr.io/rvben/vedetta:hwaccel
+# NVIDIA NVDEC is not included here (it requires the CUDA toolkit); build it
+# yourself with `go build -tags vaapi,nvdec` on a CUDA host.
+
+# Build stage
+FROM golang:1.26-bookworm AS builder
+
+# libavcodec/libavutil headers (cgo pkg-config) and libva for VA-API.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pkg-config libavcodec-dev libavutil-dev libva-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -tags vaapi -o /vedetta ./cmd/vedetta
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+LABEL org.opencontainers.image.source=https://github.com/rvben/vedetta
+LABEL org.opencontainers.image.description="Vedetta NVR - hardware-accelerated (VA-API) variant"
+LABEL org.opencontainers.image.licenses=MIT
+
+# Runtime shared libraries plus the VA-API drivers (Intel + Mesa/AMD).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libavcodec59 libavutil57 libva2 libva-drm2 \
+        va-driver-all && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r vedetta && useradd -r -g vedetta -d /data -s /sbin/nologin vedetta
+
+RUN mkdir -p /data/recordings /data/snapshots /config && \
+    chown -R vedetta:vedetta /data /config
+
+COPY --from=builder /vedetta /usr/local/bin/vedetta
+
+USER vedetta
+WORKDIR /data
+
+EXPOSE 5050
+
+VOLUME ["/data", "/config"]
+
+ENTRYPOINT ["vedetta"]
+CMD ["-config", "/config/config.yml"]

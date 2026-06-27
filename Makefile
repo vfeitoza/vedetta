@@ -1,4 +1,4 @@
-.PHONY: build build-capi build-deploy run test test-js test-race bench lint clean fmt check generate docker-build docker-push deploy release-patch release-minor release-major
+.PHONY: build build-capi build-hwaccel build-deploy run test test-js test-race bench lint clean fmt check generate docker-build docker-push docker-build-hwaccel docker-push-hwaccel deploy release-patch release-minor release-major
 
 BINARY := vedetta
 BUILD_DIR := ./build
@@ -27,6 +27,12 @@ deploy: build-deploy
 
 build-capi:
 	go build -tags cgo_onnxruntime $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/vedetta
+
+# Opt-in Linux hardware decode (VA-API, Intel/AMD). Requires libavcodec/libva
+# development libraries (see contrib/setup-hwaccel-ubuntu.sh). NVIDIA NVDEC users
+# add the nvdec tag and CUDA: go build -tags vaapi,nvdec.
+build-hwaccel:
+	CGO_ENABLED=1 go build -tags vaapi $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-hwaccel ./cmd/vedetta
 
 run: build
 	$(BUILD_DIR)/$(BINARY) -config config.example.yml
@@ -71,6 +77,17 @@ docker-build:
 docker-push:
 	docker push $(DOCKER_IMAGE):$(VERSION)
 	docker push $(DOCKER_IMAGE):latest
+
+# Hardware-accelerated image variant (VA-API, linux/amd64). Includes libavcodec
+# and libva, so it is larger than the default static image; pull it only on
+# Intel/AMD hosts that pass through /dev/dri. Doubles as the CI compile-check for
+# the -tags vaapi build path.
+docker-build-hwaccel:
+	docker build -f Dockerfile.hwaccel -t $(DOCKER_IMAGE):$(VERSION)-hwaccel -t $(DOCKER_IMAGE):hwaccel .
+
+docker-push-hwaccel:
+	docker push $(DOCKER_IMAGE):$(VERSION)-hwaccel
+	docker push $(DOCKER_IMAGE):hwaccel
 
 release-patch:
 	vership bump patch
